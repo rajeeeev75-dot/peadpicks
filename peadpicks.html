@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PEAD Picks</title>
+<style>
+:root{--bg:#f3f0ff;--card:#fff;--ink:#1e1b3a;--mute:#5f5b7a;--line:#e0dcf5;--good:#16a34a;--warn:#d97706;--bad:#dc2626;--a:#4f46e5;--b:#c026d3;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#14112b;--card:#1e1a3d;--ink:#eeebff;--mute:#a9a4cc;--line:#332e5e;--good:#4ade80;--warn:#fbbf24;--bad:#f87171}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{background:linear-gradient(120deg,#2563eb,#c026d3 55%,#f97316);color:#fff;padding:24px 16px}
+header div,main{max-width:1000px;margin:0 auto}header h1{margin:0 0 4px;font-size:1.5rem}header p{margin:0;opacity:.92}
+main{padding:14px 16px 40px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:.86rem;color:var(--mute);margin-bottom:12px}
+.bar label{display:flex;gap:6px;align-items:center}
+input,select,button{font:inherit;font-size:.86rem;padding:5px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+button{cursor:pointer;font-weight:600}
+.top{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:14px}
+.pick{border-radius:12px;padding:12px 14px;color:#fff;cursor:pointer}.pick small{opacity:.9;display:block}.pick b{font-size:1.5rem}
+.wrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table{width:100%;border-collapse:collapse;background:var(--card);font-size:.9rem}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{background:linear-gradient(120deg,var(--a),var(--b));color:#fff;cursor:pointer;user-select:none}
+.num{text-align:right}tr.row{cursor:pointer}tr.row:hover td{background:color-mix(in srgb,var(--a) 8%,var(--card))}
+.tag{border-radius:999px;padding:2px 10px;font-size:.78rem;font-weight:700;color:#fff}
+.det td{white-space:normal;background:color-mix(in srgb,var(--a) 5%,var(--card))}
+.det dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px 14px;margin:0}.det dt{font-size:.76rem;color:var(--mute)}.det dd{margin:0;font-weight:600}
+.pos{color:var(--good)}.neg{color:var(--bad)}.note{color:var(--mute);font-size:.84rem;margin:10px 0}
+</style>
+</head>
+<body>
+<header><div><h1>PEAD Picks</h1><p>Stocks that just announced quarterly results, ranked by your PEAD score. Screening aid, not advice.</p></div></header>
+<main>
+<div class="bar">
+<span id="status">Loading...</span>
+<label>Min score <input id="fMin" type="number" value="65" min="0" max="100" style="width:64px"></label>
+<label>Results within <select id="fDays"><option value="15">15 days</option><option value="30" selected>30 days</option><option value="60">60 days</option><option value="999">any</option></select></label>
+<label>Min mcap (Rs cr) <input id="fCap" type="number" value="500" style="width:80px"></label>
+<label>Fwd P/E method <select id="fMode"><option value="auto">Auto</option><option value="runrate">Run rate x4</option><option value="pead">Original PEAD</option></select></label>
+<button id="reload" type="button">Reload</button>
+</div>
+<div class="top" id="top"></div>
+<div class="wrap"><table id="t"><thead></thead><tbody></tbody></table></div>
+<p class="note" id="foot"></p>
+</main>
+<script>
+const CSV_URL = "pead.csv";   // written daily by fetch_results.py (GitHub Actions); keep it next to this file
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const num = v => { const x = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isFinite(x) ? x : NaN; };
+const nz = v => (isFinite(v) ? v : 0);
+const pf = (v, d = 1) => (isFinite(v) ? v.toLocaleString("en-IN", {minimumFractionDigits: d, maximumFractionDigits: d}) : "N/A");
+const pgrow = (cur, base) => (nz(base) !== 0 ? (nz(cur) - nz(base)) / Math.abs(nz(base)) * 100 : 0);
+const clampN = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+/* scoring tiers copied from your PEAD dashboard */
+const pYoy = g => (g >= 40 ? 6 : g >= 15 ? 6 * (g - 15) / 25 : g >= 0 ? 2 * g / 15 : 0);
+const pQoq = g => (g >= 20 ? 4 : g >= 5 ? 4 * (g - 5) / 15 : g >= 0 ? 1.5 * g / 5 : 0);
+const pEdY = g => (g >= 1 ? 6 : g >= 0.3 ? 6 * (g - 0.3) / 0.7 : g >= 0 ? 2 * g / 0.3 : 0);
+const pEdQ = g => (g >= 0.5 ? 4 : g >= 0.2 ? 4 * (g - 0.2) / 0.3 : g >= 0 ? 1.5 * g / 0.2 : 0);
+const pCf = (r, neg) => (neg || !isFinite(r) ? 0 : r >= 1.2 ? 10 : r >= 1 ? 8 : r >= 0.8 ? 6 : r >= 0.5 ? 3 : 0);
+const pGpe = r => (!isFinite(r) ? 0 : r >= 2.5 ? 10 : r >= 1.8 ? 8 : r >= 1.2 ? 6 : r >= 0.75 ? 5 : r >= 0.5 ? 3 : r >= 0.25 ? 1 : r >= 0 ? 0 : -3);
+const pSur = a => (a >= 50 ? 10 : a >= 20 ? 10 * (a - 20) / 30 : a >= 0 ? 3 * a / 20 : 0);
+const pVol = r => (!isFinite(r) ? 0 : r >= 2 ? 5 : r >= 1.5 ? 3 : r >= 1 ? 0 : -5);
+
+function score(s, mode) {
+  const g = k => num(s[k]);
+  const rev = [g("rev_cur"), g("rev_prev"), g("rev_yoy")], np = [g("np_cur"), g("np_prev"), g("np_yoy")];
+  const ebd = [g("ebitda_cur"), g("ebitda_prev"), g("ebitda_yoy")], eps0 = g("eps_cur");
+  if (!isFinite(rev[0]) || !isFinite(np[0])) return null;
+  const mar = i => (nz(rev[i]) !== 0 ? nz(ebd[i]) / nz(rev[i]) * 100 : 0);
+  const P = {};
+  P.revQ = pgrow(rev[0], rev[1]); P.revY = pgrow(rev[0], rev[2]); P.npQ = pgrow(np[0], np[1]); P.npY = pgrow(np[0], np[2]);
+  P.ebQ = mar(0) - mar(1); P.ebY = mar(0) - mar(2);
+  P.avgYoy = (P.revY + P.npY + P.ebY) / 3; P.capped = clampN(P.avgYoy, 0, 60);
+  const p = g("price"); let epsTtm = g("eps_ttm"); if (!isFinite(epsTtm) || epsTtm === 0) epsTtm = (isFinite(p) && g("pe") > 0) ? p / g("pe") : 0;
+  const runrate = nz(eps0) > 0 ? eps0 * 4 : 0, peadE = epsTtm > 0 ? epsTtm * (1 + P.capped / 100) : 0;
+  P.fwd = mode === "runrate" ? runrate : mode === "pead" ? peadE : Math.max(runrate, peadE);
+  P.fwdPe = P.fwd > 0 && isFinite(p) ? p / P.fwd : 0;
+  P.pe = g("pe") > 0 ? g("pe") : (epsTtm > 0 && isFinite(p) ? p / epsTtm : NaN);
+  const eq = g("equity"), debt = g("debt"), npT = g("np_ttm");
+  P.roe = eq > 0 && isFinite(npT) ? npT / eq * 100 : NaN; P.de = eq > 0 && isFinite(debt) ? debt / eq : NaN;
+  P.dist52 = g("high52") > 0 && isFinite(p) ? (p / g("high52") - 1) * 100 : NaN;
+  P.sSales = pYoy(P.revY) * (13 / 6) + pQoq(P.revQ) * (7 / 4);
+  P.sNp = pYoy(P.npY) * (10 / 6) + pQoq(P.npQ) * (5 / 4);
+  P.sEb = pEdY(P.ebY) * (7 / 6) + pEdQ(P.ebQ) * (3 / 4);
+  P.sCf = 0;   // 3-yr cash-flow quality is not in the auto feed; see note below the table
+  P.gpe = P.fwdPe > 0 ? P.capped / P.fwdPe : NaN; P.sGpe = pGpe(P.gpe) * 2;
+  const avgQ = (P.revQ + P.npQ + P.ebQ) / 3; P.accel = P.avgYoy - Math.abs(avgQ) * 4; P.sSur = pSur(P.accel) * 2.5;
+  P.pos = [P.revY, P.revQ, P.npY, P.npQ, P.ebY, P.ebQ].filter(x => x > 0).length; P.bonus = P.pos / 6 >= 0.75 ? 10 : 0;
+  const er = g("earn_ratio"), vr = g("vol_ratio");
+  P.volAdj = isFinite(er) && isFinite(vr) ? pVol(Math.min(er, vr)) : 0;
+  P.total = clampN(P.sSales + P.sNp + P.sEb + P.sGpe + P.sSur + P.bonus + P.volAdj, 0, 100);
+  const surge = vr > 2, up = g("above_ema200") === 1, t = P.total;
+  P.rec = t >= 80 && surge && up ? ["GOLDEN", "#4BC076"] : t >= 80 ? ["STRONG BUY", "#4BC076"] : t >= 65 ? ["BUY", "#3fae6e"] : t >= 45 ? ["WATCH", "#c9a227"] : t >= 30 ? ["SELL", "#ED885C"] : ["STRONG SELL", "#EE3D4C"];
+  return P;
+}
+function parseCSV(t) {
+  const rows = []; let r = [], f = "", q = false;
+  for (let i = 0; i < t.length; i++) { const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true; else if (c === ",") { r.push(f); f = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && t[i + 1] === "\n") i++; r.push(f); f = ""; if (r.length > 1 || r[0]) rows.push(r); r = []; }
+    else f += c; }
+  if (f || r.length) { r.push(f); rows.push(r); }
+  const h = rows.shift().map(x => x.trim());
+  return rows.map(a => Object.fromEntries(h.map((k, i) => [k, a[i]])));
+}
+function daysSince(d) { const m = String(d || "").match(/(\d+)\/(\d+)\/(\d+)/); if (!m) return NaN; return Math.floor((Date.now() - Date.UTC(+m[3], m[2] - 1, +m[1])) / 864e5); }
+let DATA = [], sortKey = "total", sortDir = -1, openTk = null;
+const cls = v => (v > 0 ? "pos" : v < 0 ? "neg" : "");
+function view() {
+  const mode = $("#fMode").value, min = num($("#fMin").value) || 0, dmax = +$("#fDays").value, cap = num($("#fCap").value) || 0;
+  let rows = DATA.map(s => ({s, P: score(s, mode), d: daysSince(s.result_date)})).filter(x => x.P);
+  rows.forEach(x => { if (!isFinite(x.d)) { const m = String(x.s.quarter_end || "").split("-"); x.d = m.length === 3 ? Math.floor((Date.now() - Date.UTC(+m[0], m[1] - 1, +m[2])) / 864e5) - 45 : NaN; } });
+  rows = rows.filter(x => x.P.total >= min && (!isFinite(x.d) || x.d <= dmax) && (!(num(x.s.mcap) >= 0) || num(x.s.mcap) >= cap));
+  const key = {total: x => x.P.total, fwdPe: x => x.P.fwdPe || 1e9, revY: x => x.P.revY, npY: x => x.P.npY, d: x => x.d, ticker: x => x.s.ticker};
+  rows.sort((a, b) => { const A = key[sortKey](a), B = key[sortKey](b); return (A > B ? 1 : A < B ? -1 : 0) * sortDir; });
+  $("#top").innerHTML = rows.slice(0, 4).map(x => '<div class="pick" style="background:linear-gradient(135deg,var(--a),var(--b))" data-tk="' + esc(x.s.ticker) + '"><small>' + esc(x.s.ticker) + '</small><b>' + pf(x.P.total, 0) + '</b> <small>' + x.P.rec[0] + " | Fwd P/E " + pf(x.P.fwdPe) + "x</small></div>").join("");
+  const th = [["ticker", "Stock"], ["total", "Score"], ["", "Call"], ["revY", "Sales YoY"], ["npY", "Profit YoY"], ["fwdPe", "Fwd P/E"], ["", "From 52w high"], ["d", "Days since result"]];
+  $("#t thead").innerHTML = "<tr>" + th.map(h => '<th data-k="' + h[0] + '">' + h[1] + (h[0] === sortKey ? (sortDir < 0 ? " ▼" : " ▲") : "") + "</th>").join("") + "</tr>";
+  $("#t tbody").innerHTML = rows.length ? rows.map(x => {
+    const P = x.P, s = x.s, o = openTk === s.ticker;
+    let h = '<tr class="row" data-tk="' + esc(s.ticker) + '"><td><b>' + esc(s.ticker.replace("NSE:", "")) + '</b> <span class="note">' + esc(s.name) + '</span></td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td><td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + "</td></tr>";
+    if (o) h += '<tr class="det"><td colspan="8"><dl>' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Quarter ended", esc(s.quarter_end)]].map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + "</dl></td></tr>";
+    return h;
+  }).join("") : '<tr><td colspan="8" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
+  $("#foot").textContent = "Cash-flow quality (10 pts in your Pine indicator) needs 3-year operating cash flow, which the free data feed does not carry, so scores here can be up to 10 points lower than the dashboard. Check the filing before buying.";
+}
+async function load() {
+  $("#status").textContent = "Loading...";
+  try {
+    const r = await fetch(CSV_URL + "?t=" + Date.now(), {cache: "no-store"}); if (!r.ok) throw new Error("HTTP " + r.status);
+    DATA = parseCSV(await r.text()); $("#status").textContent = DATA.length + " stocks loaded " + new Date().toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"});
+  } catch (e) { DATA = []; $("#status").textContent = "Could not read pead.csv (" + e.message + "). Run the GitHub Action once."; }
+  view();
+}
+document.addEventListener("click", e => {
+  const th = e.target.closest("th[data-k]"); if (th && th.dataset.k) { sortDir = sortKey === th.dataset.k ? -sortDir : (th.dataset.k === "fwdPe" || th.dataset.k === "d" || th.dataset.k === "ticker" ? 1 : -1); sortKey = th.dataset.k; view(); return; }
+  const row = e.target.closest("[data-tk]"); if (row) { openTk = openTk === row.dataset.tk ? null : row.dataset.tk; view(); }
+});
+["fMin", "fDays", "fCap", "fMode"].forEach(id => $("#" + id).addEventListener("input", view));
+$("#reload").addEventListener("click", load);
+load(); setInterval(load, 15 * 60 * 1000);
+</script>
+</body>
+</html>

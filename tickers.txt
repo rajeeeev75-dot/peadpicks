@@ -1,0 +1,4 @@
+# Optional: one NSE symbol per line (e.g. your Nifty 500 list). Leave empty to scan every stock NSE lists as having just filed results.
+STLTECH
+BIRLACABLE
+LOTUSDEV
