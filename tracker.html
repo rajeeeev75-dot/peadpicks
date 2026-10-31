@@ -95,6 +95,7 @@ li{margin:6px 0;max-width:70ch}
 .pead .note{padding:0 16px}.pead-line{margin:8px 0}.pead-warn{color:var(--warn);font-weight:600}
 .pmode{display:block;padding:4px 16px;font-size:.86rem;color:var(--mute)}.pmode select{font:inherit;margin-left:6px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 .pead>.note:last-child{padding-bottom:14px}
+.znm td{vertical-align:top}.znm .zc{margin:0 0 4px;padding:3px 6px;border-radius:8px;border:1px solid var(--line);font-size:.8rem;white-space:nowrap;cursor:pointer}.znm .zc.g{border-left:4px solid var(--good)}.znm .zc.r{border-left:4px solid var(--bad)}.znm .zc small{color:var(--mute)}.znm tr[data-zrow]{cursor:pointer}
 .dvm{margin-top:12px}.dtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0 8px}
 .dtile{border:1px solid var(--line);border-radius:12px;padding:10px 12px}.dtile small{display:block;color:var(--mute);font-weight:600}
 .dtile b{font-size:1.5rem;display:block}.dtile b i{font-size:.8rem;font-style:normal;color:var(--mute);font-weight:400}.dtile>span{display:block;font-size:.78rem;color:var(--mute);margin-top:4px}
@@ -2246,7 +2247,8 @@ const ZN_FILTERS = [
   ["mcap",   "Market cap",           "Only stocks with market cap (from your sheet) above Min market cap"],
   ["buf",    "ATR buffer",           "Adds a buffer of x% of the daily ATR to the proximal line and the stop"]
 ];
-const ZN_DEF = {tf: "D", atrLen: 14, maxBase: 6, maxLeg: 3, prox: "Wick", tick: 0.05, maxGap: 15, minP: 100, maxP: 4000, minMc: 500, rr: 5, bufPct: 10, near: 0,
+const ZN_TFS = [["5","5m"],["15","15m"],["60","1H"],["240","4H"],["D","Daily"],["W","Weekly"]];
+const ZN_DEF = {view: "list", tfs: {"5": 1, "15": 1, "60": 1, "240": 1, "D": 1, "W": 0}, atrLen: 14, maxBase: 6, maxLeg: 3, prox: "Wick", tick: 0.05, maxGap: 15, minP: 100, maxP: 4000, minMc: 500, rr: 5, bufPct: 10, near: 0,
   show: {D: 1, S: 1, fresh: 1, resp: 1, mit: 0},
   f: {ratio: 1, white: 1, behind: 1, gap: 1, lgap: 1, cover: 1, ema: 1, price: 0, mcap: 0, buf: 0}};
 
@@ -2360,7 +2362,7 @@ function znScan(bars, o, mcapCr, dAtrMap) {
   return zones;
 }
 
-/* ----- ZONE tab screen ----- */
+/* ----- ZONE tab screen: every stock the Trade ideas screener scans (plus your sheet stocks), on the indicator's timeframes ----- */
 function znMerge(d, s) {
   const o = JSON.parse(JSON.stringify(d)); if (!s || typeof s !== "object") return o;
   Object.keys(d).forEach(k => {
@@ -2371,56 +2373,121 @@ function znMerge(d, s) {
 }
 let ZO = null; try { ZO = JSON.parse(localStorage.getItem("znOpt") || "null"); } catch (e) {}
 ZO = znMerge(ZN_DEF, ZO);
-let ZSEL = null, ZCH = null, ZRANGE = "1Y", ZCACHE = {key: "", data: null};
+let ZSEL = null, ZTFSEL = "D", ZCH = null, ZRANGE = "1Y", ZRANGEI = "150", ZCACHE = {key: "", data: null}, ZVER = 0, ZB = {}, ZSTAT = {}, ZBUSY = false, ZAGAIN = false, ZPT = null, ZSHOWN = 150;
 function znSave() { try { localStorage.setItem("znOpt", JSON.stringify(ZO)); } catch (e) {} }
 const znDate = s => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "-" + p[1] + "-" + p[0] : "—"; };
-function znData() {
-  const rows = (typeof lastRows !== "undefined" && lastRows) || [];
-  const key = histVer + "|" + JSON.stringify(ZO) + "|" + rows.map(r => r.s.ticker + ":" + r.c.mc).join(",");
-  if (ZCACHE.key === key && ZCACHE.data) return ZCACHE.data;
-  const out = [];
-  rows.forEach(r => {
-    const tk = String(r.s.ticker).toUpperCase(), bars = HIST && HIST[tk];
-    if (!bars || bars.length < ZO.atrLen + 10) return;
-    const agg = znAgg(bars, ZO.tf), dm = ZO.f.buf ? znDailyAtrMap(bars) : null;
-    let zones = []; try { zones = znScan(agg, ZO, r.c.mc, dm); } catch (e) {}
-    out.push({r, tk, bars, zones});
+const znTfName = tf => (ZN_TFS.find(x => x[0] === tf) || [0, tf])[1];
+const znIntra = tf => tf !== "D" && tf !== "W";
+const znP2 = n => String(n).padStart(2, "0");
+function znFmtT(t) { if (typeof t === "number") { const d = new Date(t * 1000); return znP2(d.getUTCDate()) + "-" + znP2(d.getUTCMonth() + 1) + " " + znP2(d.getUTCHours()) + ":" + znP2(d.getUTCMinutes()); } return znDate(t); }
+const ZN_TTL = {"5": 120e3, "15": 300e3, "60": 600e3, "240": 900e3, "D": 1800e3, "W": 3600e3};
+
+/* The universe: all stocks the Trade ideas screener scans (NSE feed through the Worker) plus every stock on your sheet. */
+function znUniverse() {
+  const out = [], seen = new Set(); let M = null; try { M = MARKET; } catch (e) {}
+  ((typeof lastRows !== "undefined" && lastRows) || []).forEach(r => {
+    try { if (isIdxStock(r.s, r.c)) return; } catch (e) {}
+    const sym = symOf(r.s.ticker); if (!sym || seen.has(sym)) return; seen.add(sym);
+    out.push({sym, name: r.s.short || sym, mc: r.c.mc, px: r.c.p, sheet: true, tk: String(r.s.ticker).toUpperCase()});
   });
-  ZCACHE = {key, data: out}; return out;
+  ((M && M.stocks) || []).forEach(x => { if (!x || !x.s) return; const sym = String(x.s).toUpperCase(); if (seen.has(sym)) return; seen.add(sym); out.push({sym, name: sym, mc: NaN, px: +x.p, sheet: false, tk: ""}); });
+  return out;
+}
+const znHistBars = (u, tf) => { const h = u.tk && HIST && HIST[u.tk]; return (tf === "D" || tf === "W") && h && h.length ? znAgg(h, tf) : null; };
+function znSchedulePaint() { if (ZPT) return; ZPT = setTimeout(() => { ZPT = null; if (typeof current !== "undefined" && current === "zn") { try { znPaintRes(); } catch (e) {} } }, 400); }
+async function znLoad(force) {
+  if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
+  if (ZBUSY) { ZAGAIN = true; return; }
+  ZBUSY = true;
+  try {
+    for (const tf of ["D", "240", "60", "15", "5", "W"]) {
+      if (!ZO.tfs[tf]) continue;
+      const uni = znUniverse(), now = Date.now(), ST = ZSTAT[tf] = {done: 0, total: 0, fail: 0, busy: true, err: ""}, cache = ZB[tf] = ZB[tf] || {};
+      const need = uni.filter(u => !znHistBars(u, tf)), todo = need.filter(u => force || !cache[u.sym] || now - cache[u.sym].t > ZN_TTL[tf]);
+      ST.total = need.length; ST.done = need.length - todo.length;
+      const chunks = []; for (let i = 0; i < todo.length; i += 12) chunks.push(todo.slice(i, i + 12).map(u => u.sym));
+      let next = 0;
+      const run = async () => {
+        while (next < chunks.length) {
+          const syms = chunks[next++];
+          try {
+            const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(syms.join(",")) + "&tf=" + tf, {cache: "no-store"}), j = await r.json(), t = Date.now();
+            Object.keys(j.bars || {}).forEach(sy => { cache[sy] = {t, bars: j.bars[sy].map(x => ({time: x[0], open: x[1], high: x[2], low: x[3], close: x[4], vol: x[5], end: x[0]}))}; });
+            ST.fail += (j.failed || []).length; if (j.error) ST.err = j.error;
+          } catch (e) { ST.fail += syms.length; ST.err = String((e && e.message) || e); }
+          ST.done += syms.length; ZVER++; znSchedulePaint();
+        }
+      };
+      await Promise.all([run(), run(), run(), run()]);
+      ST.busy = false; ST.t = Date.now(); ZVER++; znSchedulePaint();
+    }
+  } finally { ZBUSY = false; ZVER++; znSchedulePaint(); if (ZAGAIN) { ZAGAIN = false; setTimeout(() => znLoad(false), 0); } }
+}
+setInterval(() => { try { if (typeof current !== "undefined" && current === "zn" && !document.hidden) znLoad(false); } catch (e) {} }, 60 * 1000);
+
+function znData() {
+  const uni = znUniverse(), tfs = ZN_TFS.map(x => x[0]).filter(tf => ZO.tfs[tf]);
+  const key = [ZVER, histVer, uni.length, tfs.join(","), JSON.stringify(ZO.f), ZO.atrLen, ZO.maxBase, ZO.maxLeg, ZO.prox, ZO.tick, ZO.maxGap, ZO.minP, ZO.maxP, ZO.minMc, ZO.rr, ZO.bufPct].join("|");
+  if (ZCACHE.key === key && ZCACHE.data) return ZCACHE.data;
+  const items = [], daily = {};
+  uni.forEach(u => tfs.forEach(tf => {
+    let bars = znHistBars(u, tf); if (!bars) { const c = ZB[tf] && ZB[tf][u.sym]; bars = c && c.bars; }
+    if (!bars || bars.length < ZO.atrLen + 10) return;
+    let dm = null; if (ZO.f.buf && (tf === "D" || tf === "W")) { const h = u.tk && HIST && HIST[u.tk]; if (h) dm = daily[u.sym] || (daily[u.sym] = znDailyAtrMap(h)); }
+    let zones = []; try { zones = znScan(bars, ZO, u.mc, dm); } catch (e) {}
+    const lp = isFinite(u.px) && u.px > 0 ? u.px : bars[bars.length - 1].close;
+    items.push({u, tf, bars, zones, px: lp});
+  }));
+  ZCACHE = {key, data: {items, uni, tfs}}; return ZCACHE.data;
 }
 function znShown(z) {
   const s = ZO.show;
   if (z.type === "D" ? !s.D : !s.S) return false;
   return z.status === "fresh" ? !!s.fresh : z.status === "respected" ? !!s.resp : !!s.mit;
 }
-const znPx = it => { const p = it.r.c.p; return isFinite(p) && p > 0 ? p : it.bars[it.bars.length - 1].close; };
 const znAway = (z, px) => z.type === "D" ? (px - z.prox) / px * 100 : (z.prox - px) / px * 100;
+const znActive = z => z.status !== "mitigated";
+function znStatusLine(D) {
+  return D.tfs.map(tf => { const S = ZSTAT[tf]; if (!S) return znTfName(tf) + " waiting"; return znTfName(tf) + " " + Math.min(S.done, S.total) + "/" + S.total + (S.busy ? "..." : "") + (S.fail ? " (" + S.fail + " missing)" : ""); }).join(" · ");
+}
 function znBuild(sec) {
   const btn = (attr, key, label, on, tip) => '<button type="button" class="cbtn" ' + attr + '="' + key + '" aria-pressed="' + (on ? "true" : "false") + '" title="' + esc(tip || "") + '">' + esc(label) + "</button>";
   const inp = (k, label, extra) => '<div><label>' + label + '</label><input type="number" inputmode="decimal" data-zno="' + k + '" value="' + esc(ZO[k]) + '" ' + (extra || "") + "></div>";
   const sel = (k, label, opts) => '<div><label>' + label + '</label><select data-zno="' + k + '">' + opts.map(x => '<option value="' + x[0] + '"' + (ZO[k] === x[0] ? " selected" : "") + ">" + x[1] + "</option>").join("") + "</select></div>";
   sec.innerHTML =
     '<h2>ZONE: demand and supply zones</h2>' +
-    '<p class="note">Zones are found automatically on the daily candles in your History tab, using the same rules as your Supply &amp; Demand [MTF] indicator (leg-in, base, leg-out). Switch a filter off to see more zones, on to see fewer. Screening aid, not buy or sell advice.</p>' +
+    '<p class="note">Zones are found automatically with the same rules as your Supply &amp; Demand [MTF] indicator (leg-in, base, leg-out) on every stock the Trade ideas screener scans, plus your own stocks, across the indicator\'s timeframes. Switch a filter off to see more zones, on to see fewer. Screening aid, not buy or sell advice.</p>' +
+    '<div class="card"><div class="charttools" style="border:0;padding:0"><b>Timeframes</b>' + ZN_TFS.map(x => btn("data-zntf", x[0], x[1], ZO.tfs[x[0]], "Scan " + x[1] + " candles")).join("") +
+      '<span class="csep"></span>' + btn("data-znrefresh", "1", "↻ Rescan", false, "Fetch fresh candles for every stock") + "</div>" +
+      '<div class="note" id="znstat" style="margin:6px 0 0"></div></div>' +
     '<div class="card"><b>Filters</b> <span class="note">tap to switch on or off</span><div class="charttools" style="border:0;padding:8px 0 0">' +
       ZN_FILTERS.map(f => btn("data-znf", f[0], f[1], ZO.f[f[0]], f[2])).join("") +
       '<span class="csep"></span>' + btn("data-znall", "1", "All on", false) + btn("data-znall", "0", "All off", false) + btn("data-znall", "r", "Reset", false) +
     "</div></div>" +
     '<div class="card"><b>Settings</b><div class="pos">' +
-      sel("tf", "Candles", [["D", "Daily"], ["W", "Weekly"]]) + inp("atrLen", "ATR length", 'min="2" max="100"') + inp("maxBase", "Max base candles", 'min="1" max="6"') + inp("maxLeg", "Max leg-out candles", 'min="1" max="5"') +
+      inp("atrLen", "ATR length", 'min="2" max="100"') + inp("maxBase", "Max base candles", 'min="1" max="6"') + inp("maxLeg", "Max leg-out candles", 'min="1" max="5"') +
       sel("prox", "Proximal line from", [["Wick", "Wick"], ["Body", "Body"]]) + inp("tick", "Tick size", 'step="0.01" min="0.01"') + inp("maxGap", "Max base gap (ticks)", 'min="0"') +
       inp("minP", "Min price", 'min="0"') + inp("maxP", "Max price", 'min="0"') + inp("minMc", "Min mcap (Rs cr)", 'min="0"') + inp("rr", "Target risk:reward (1:X)", 'step="0.5" min="0.5"') +
       inp("bufPct", "ATR buffer %", 'min="0"') + inp("near", "Only within % of price (0 = all)", 'min="0"') +
-    '</div><p class="note" style="margin:6px 0 0">Price range, market cap and ATR buffer only apply when their filter is switched on. The 12:30 PM intraday filter of the indicator is left out because these are daily candles.</p></div>' +
+    '</div><p class="note" style="margin:6px 0 0">Price range, market cap and ATR buffer only apply when their filter is switched on. Market cap is known only for stocks on your sheet (others pass the filter only if it is off), and the ATR buffer applies only to daily and weekly candles of your sheet stocks. The indicator\'s 12:30 PM filter belongs to its native chart zones, not its MTF dashboard, so it is left out here too.</p></div>' +
     '<div class="card"><div class="charttools" style="border:0;padding:0"><b>Show</b>' +
       btn("data-znshow", "D", "Demand", ZO.show.D) + btn("data-znshow", "S", "Supply", ZO.show.S) + '<span class="csep"></span>' +
       btn("data-znshow", "fresh", "Fresh", ZO.show.fresh, "Price has not come back to the zone yet") + btn("data-znshow", "resp", "Respected", ZO.show.resp, "Price touched the proximal line and the zone is still valid") + btn("data-znshow", "mit", "Mitigated", ZO.show.mit, "Zone used up or broken") +
+      '<span class="csep"></span><b>View</b>' + btn("data-znview", "list", "Zone list", ZO.view !== "mtf") + btn("data-znview", "mtf", "MTF dashboard", ZO.view === "mtf", "One row per stock, one column per timeframe, like the indicator's MTF table") +
     "</div></div>" +
     '<div id="znres"></div>';
   if (sec.dataset.znl) return; sec.dataset.znl = "1";
   sec.addEventListener("click", ev => {
     const t = ev.target; if (!t || !t.closest) return;
-    let b = t.closest("[data-znf]");
+    let b = t.closest("[data-zntf]");
+    if (b) { const k = b.dataset.zntf; ZO.tfs[k] = ZO.tfs[k] ? 0 : 1; b.setAttribute("aria-pressed", String(!!ZO.tfs[k])); if (!ZO.tfs[ZTFSEL]) ZTFSEL = ZN_TFS.map(x => x[0]).find(x => ZO.tfs[x]) || "D"; znSave(); znLoad(false); znPaintRes(); return; }
+    b = t.closest("[data-znrefresh]");
+    if (b) { Object.keys(ZB).forEach(k => { ZB[k] = {}; }); znLoad(true); znPaintRes(); return; }
+    b = t.closest("[data-znview]");
+    if (b) { ZO.view = b.dataset.znview; sec.querySelectorAll("[data-znview]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); ZSHOWN = 150; znSave(); znPaintRes(); return; }
+    b = t.closest("[data-znmore]");
+    if (b) { ZSHOWN += 150; znPaintRes(); return; }
+    b = t.closest("[data-znf]");
     if (b) { const k = b.dataset.znf; ZO.f[k] = ZO.f[k] ? 0 : 1; b.setAttribute("aria-pressed", String(!!ZO.f[k])); znSave(); znPaintRes(); return; }
     b = t.closest("[data-znshow]");
     if (b) { const k = b.dataset.znshow; ZO.show[k] = ZO.show[k] ? 0 : 1; b.setAttribute("aria-pressed", String(!!ZO.show[k])); znSave(); znPaintRes(); return; }
@@ -2433,15 +2500,17 @@ function znBuild(sec) {
       znSave(); znPaintRes(); return;
     }
     b = t.closest("[data-znrange]");
-    if (b) { ZRANGE = b.dataset.znrange; sec.querySelectorAll("[data-znrange]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); znRange(); return; }
-    b = t.closest("tr[data-zrow]");
-    if (b) { ZSEL = b.dataset.zrow; znPaintRes(); const c = document.getElementById("znchartcard"); if (c && c.scrollIntoView) c.scrollIntoView({behavior: "smooth", block: "start"}); }
+    if (b) { if (znIntra(ZTFSEL)) ZRANGEI = b.dataset.znrange; else ZRANGE = b.dataset.znrange; sec.querySelectorAll("[data-znrange]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); znRange(); return; }
+    b = t.closest("[data-zntfc]");
+    if (b) { ZTFSEL = b.dataset.zntfc; znPaintRes(); return; }
+    b = t.closest("[data-zrow]");
+    if (b) { ZSEL = b.dataset.zrow; if (b.dataset.ztf) ZTFSEL = b.dataset.ztf; znPaintRes(); const c = document.getElementById("znchartcard"); if (c && c.scrollIntoView) c.scrollIntoView({behavior: "smooth", block: "start"}); }
   });
   sec.addEventListener("change", ev => {
     const el = ev.target; if (!el) return;
     if (el.id === "znsel") { ZSEL = el.value; znPaintRes(); return; }
     const k = el.dataset && el.dataset.zno; if (!k) return;
-    if (k === "tf" || k === "prox") ZO[k] = el.value;
+    if (k === "prox") ZO[k] = el.value;
     else {
       let v = parseFloat(el.value); if (!isFinite(v)) v = ZN_DEF[k];
       const lim = {atrLen: [2, 100, 1], maxBase: [1, 6, 1], maxLeg: [1, 5, 1], maxGap: [0, 1e6, 1], tick: [0.01, 1e6, 0], rr: [0.5, 100, 0], bufPct: [0, 1000, 0], near: [0, 1000, 0], minP: [0, 1e9, 0], maxP: [0, 1e9, 0], minMc: [0, 1e9, 0]}[k];
@@ -2453,28 +2522,29 @@ function znBuild(sec) {
 }
 function znRange() {
   if (!ZCH || !ZCH.bars || !ZCH.bars.length) return;
-  const last = ZCH.bars[ZCH.bars.length - 1].time, ts = ZCH.chart.timeScale();
+  const ts = ZCH.chart.timeScale(), n = ZCH.bars.length;
+  if (ZCH.intra) { const r = ZRANGEI; if (r === "All") { ts.fitContent(); return; } const N = Math.min(n, parseInt(r, 10) || 150); try { ts.setVisibleLogicalRange({from: n - N, to: n + 4}); } catch (e) { ts.fitContent(); } return; }
+  const last = ZCH.bars[n - 1].time;
   if (ZRANGE === "All") { ts.fitContent(); return; }
   const m = {"3M": 3, "6M": 6, "1Y": 12, "2Y": 24}[ZRANGE] || 12;
   try { ts.setVisibleRange({from: shiftDate(last, m), to: last}); } catch (e) { ts.fitContent(); }
 }
-function znDrawChart(it) {
+function znDrawChart(bars, zones, intra) {
   const box = document.getElementById("znbox"); if (!box) return;
   if (ZCH) { try { ZCH.chart.remove(); } catch (e) {} ZCH = null; }
   const LW = window.LightweightCharts; if (!LW) { box.innerHTML = '<div class="chartempty">The chart library did not load. Zones are still listed in the table above.</div>'; return; }
   box.innerHTML = "";
-  const c = colors(), bars = it.bars, last = bars[bars.length - 1];
+  const c = colors(), last = bars[bars.length - 1];
   const chart = LW.createChart(box, {
     autoSize: true,
     layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"},
     grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}},
     rightPriceScale: {borderColor: c.grid, scaleMargins: {top: 0.06, bottom: 0.08}},
-    timeScale: {borderColor: c.grid, rightOffset: 4},
+    timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: !!intra, secondsVisible: false},
     crosshair: {mode: 1}, localization: {locale: "en-IN"}
   });
-  /* zones first, so the candles are drawn on top of the shaded boxes */
-  it.zones.filter(znShown).forEach(z => {
-    const dem = z.type === "D", act = z.status !== "mitigated", col = act ? (dem ? c.up : c.dn) : "#94a3b8";
+  zones.filter(znShown).forEach(z => {
+    const dem = z.type === "D", act = znActive(z), col = act ? (dem ? c.up : c.dn) : "#94a3b8";
     const endT = act ? last.time : (z.mitTime || last.time);
     const pts = bars.filter(b => b.time >= z.startTime && b.time <= endT).map(b => ({time: b.time, value: z.prox}));
     if (!pts.length) return;
@@ -2487,55 +2557,85 @@ function znDrawChart(it) {
   });
   const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: false});
   candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
-  ZCH = {chart, bars}; znRange();
+  ZCH = {chart, bars, intra: !!intra}; znRange();
 }
 function znPaintRes() {
   const host = document.getElementById("znres"); if (!host) return;
-  const data = znData();
-  if (!data.length) {
-    host.innerHTML = '<div class="card empty">' + (HIST ? "None of your stocks has enough candles in the History tab yet (needs about " + (ZO.atrLen + 10) + " or more)." : (histState === "none" ? "Zones need the History tab of your sheet. Paste its link into HISTORY_CSV_URL in this file." : histState === "error" ? "Could not load the History tab. Check that it is published as CSV." : "Loading candles from your History tab...")) + "</div>";
+  const D = znData(), items = D.items, stat = document.getElementById("znstat");
+  if (stat) stat.textContent = "Scanning " + D.uni.length + " stocks (" + D.uni.filter(u => u.sheet).length + " from your sheet, the rest from the Trade ideas screener). " + znStatusLine(D);
+  if (!D.uni.length || !items.length) {
+    const loading = ZBUSY || D.tfs.some(tf => !ZSTAT[tf] || ZSTAT[tf].busy);
+    host.innerHTML = '<div class="card empty">' + (!D.uni.length ? "Waiting for the market feed to list the stocks (needs the Worker)..." : loading ? "Loading candles for " + D.uni.length + " stocks, the first zones appear in a moment..." : "No candles could be loaded. Check that the updated Worker (worker_v29) is deployed; test it with ?bars=RELIANCE&tf=D on your Worker address.") + "</div>";
     if (ZCH) { try { ZCH.chart.remove(); } catch (e) {} ZCH = null; }
     return;
   }
+  const near = +ZO.near > 0 ? +ZO.near : 0;
   const all = [];
-  data.forEach(it => { const px = znPx(it); it.zones.forEach(z => { if (znShown(z)) { const away = z.status === "mitigated" ? NaN : znAway(z, px); if (!(ZO.near > 0) || (isFinite(away) && Math.abs(away) <= ZO.near)) all.push({it, z, away, px}); } }); });
-  all.sort((a, b) => { const am = a.z.status === "mitigated", bm = b.z.status === "mitigated"; if (am !== bm) return am ? 1 : -1; return (isFinite(a.away) ? Math.abs(a.away) : 1e9) - (isFinite(b.away) ? Math.abs(b.away) : 1e9); });
-  const act = all.filter(x => x.z.status !== "mitigated"), dem = act.filter(x => x.z.type === "D"), sup = act.filter(x => x.z.type === "S");
-  const near = list => list.length ? list[0] : null;
-  const nd = near(dem), ns = near(sup);
+  items.forEach(it => it.zones.forEach(z => { if (!znShown(z)) return; const away = znActive(z) ? znAway(z, it.px) : NaN; if (near && !(isFinite(away) && Math.abs(away) <= near)) return; all.push({it, z, away}); }));
+  const act = all.filter(x => znActive(x.z)), dem = act.filter(x => x.z.type === "D"), sup = act.filter(x => x.z.type === "S");
+  /* confluence: how many timeframes have an active zone within 3% of the price, per stock and side */
+  const CN = 3, conf = {};
+  act.forEach(x => { if (!isFinite(x.away) || Math.abs(x.away) > CN) return; const c = conf[x.it.u.sym] = conf[x.it.u.sym] || {u: x.it.u, D: new Set(), S: new Set(), best: 1e9}; c[x.z.type].add(x.it.tf); c.best = Math.min(c.best, Math.abs(x.away)); });
+  const confList = Object.keys(conf).map(k => conf[k]).sort((a, b) => Math.max(b.D.size, b.S.size) - Math.max(a.D.size, a.S.size) || a.best - b.best);
+  const nearest = list => list.slice().filter(x => isFinite(x.away)).sort((a, b) => Math.abs(a.away) - Math.abs(b.away))[0];
+  const nd = nearest(dem), ns = nearest(sup), top = confList[0];
   const tile = (small, big, sub) => '<div class="dtile"><small>' + small + "</small><b>" + big + "</b><span>" + sub + "</span></div>";
-  const nm = x => esc(x.it.r.s.short || x.it.r.s.ticker);
+  const nm = x => esc(x.it.u.name);
+  const stocksWith = new Set(items.map(i => i.u.sym)).size;
   let h = '<div class="dtiles">' +
     tile("Demand zones", dem.length, "active, matching your filters") + tile("Supply zones", sup.length, "active, matching your filters") +
-    tile("Nearest demand", nd ? fmt(nd.z.prox) : "—", nd ? nm(nd) + " · " + fmt(nd.away, 1) + "% away" : "none") +
-    tile("Nearest supply", ns ? fmt(ns.z.prox) : "—", ns ? nm(ns) + " · " + fmt(ns.away, 1) + "% away" : "none") +
-    tile("Stocks scanned", data.length, (ZO.tf === "W" ? "weekly" : "daily") + " candles") + "</div>";
+    tile("Nearest demand", nd ? fmt(nd.z.prox) : "—", nd ? nm(nd) + " · " + znTfName(nd.it.tf) + " · " + fmt(nd.away, 1) + "% away" : "none") +
+    tile("Nearest supply", ns ? fmt(ns.z.prox) : "—", ns ? nm(ns) + " · " + znTfName(ns.it.tf) + " · " + fmt(ns.away, 1) + "% away" : "none") +
+    tile("Best confluence", top ? Math.max(top.D.size, top.S.size) + " TF" : "—", top ? esc(top.u.name) + " · " + (top.D.size >= top.S.size ? "demand" : "supply") + " zones within " + CN + "%" : "no stock has a zone within " + CN + "% of price") +
+    tile("Stocks scanned", stocksWith, "of " + D.uni.length + " · " + D.tfs.map(znTfName).join(", ")) + "</div>";
   if (!all.length) h += '<div class="card empty">No zones match the current filters. Try switching a filter off, or tick Mitigated under Show.</div>';
-  else {
-    h += '<div class="wrap"><table><thead><tr><th>Stock</th><th>Zone</th><th>Pattern</th><th class="num">Proximal</th><th class="num">Distal</th><th class="num">Target</th><th class="num">Away %</th><th class="num">Prob</th><th>Formed</th><th>Status</th></tr></thead><tbody>';
-    all.slice(0, 300).forEach(x => {
+  else if (ZO.view === "mtf") {
+    /* one row per stock, one column per timeframe: newest active demand and supply zone, like the indicator's MTF dashboard */
+    const by = {};
+    all.forEach(x => { if (!znActive(x.z)) return; const k = x.it.u.sym, r = by[k] = by[k] || {u: x.it.u, tf: {}}, c = r.tf[x.it.tf] = r.tf[x.it.tf] || {}; const cur = c[x.z.type]; if (!cur || x.z.sig > cur.z.sig) c[x.z.type] = x; });
+    const pxOf = {}; items.forEach(i => { pxOf[i.u.sym] = i.px; });
+    const rows = Object.keys(by).map(k => { const r = by[k], cf = conf[k]; r.nD = cf ? cf.D.size : 0; r.nS = cf ? cf.S.size : 0; r.best = cf ? cf.best : 1e9; return r; }).sort((a, b) => Math.max(b.nD, b.nS) - Math.max(a.nD, a.nS) || a.best - b.best);
+    h += '<div class="wrap"><table class="znm"><thead><tr><th>Stock</th><th class="num">Price</th>' + D.tfs.map(tf => "<th>" + znTfName(tf) + "</th>").join("") + '<th class="num" title="Timeframes with an active zone within ' + CN + '% of price">Near TFs</th></tr></thead><tbody>';
+    rows.slice(0, ZSHOWN).forEach(r => {
+      h += '<tr data-zrow="' + esc(r.u.sym) + '"><td><b>' + esc(r.u.name) + '</b></td><td class="num">' + fmt(pxOf[r.u.sym]) + "</td>" + D.tfs.map(tf => {
+        const c = r.tf[tf] || {}, cell = (x, cls) => x ? '<div class="zc ' + cls + '" data-zrow="' + esc(r.u.sym) + '" data-ztf="' + tf + '"><b>' + (cls === "g" ? "D " : "S ") + fmt(x.z.prox) + '</b> <small>' + x.z.pat + " &middot; " + Math.round(x.z.prob) + "% &middot; " + fmt(x.away, 1) + "%</small></div>" : "";
+        return "<td>" + (cell(c.D, "g") + cell(c.S, "r") || '<span class="note">—</span>') + "</td>";
+      }).join("") + '<td class="num">' + (r.nD ? '<span class="chip g">' + r.nD + " D</span> " : "") + (r.nS ? '<span class="chip r">' + r.nS + " S</span>" : "") + (!r.nD && !r.nS ? "—" : "") + "</td></tr>";
+    });
+    h += "</tbody></table></div>" + (rows.length > ZSHOWN ? '<p><button type="button" class="cbtn" data-znmore="1">Show more (' + (rows.length - ZSHOWN) + " left)</button></p>" : "") +
+      '<p class="note">Each cell is the newest active zone on that timeframe: proximal price, pattern, score and how far the live price is from it. Near TFs counts the timeframes with an active zone within ' + CN + '% of the price. Tap a cell to chart that stock and timeframe.</p>';
+  } else {
+    all.sort((a, b) => { const am = !znActive(a.z), bm = !znActive(b.z); if (am !== bm) return am ? 1 : -1; return (isFinite(a.away) ? Math.abs(a.away) : 1e9) - (isFinite(b.away) ? Math.abs(b.away) : 1e9); });
+    h += '<div class="wrap"><table><thead><tr><th>Stock</th><th>TF</th><th>Zone</th><th>Pattern</th><th class="num">Proximal</th><th class="num">Distal</th><th class="num">Target</th><th class="num">Away %</th><th class="num">Prob</th><th>Formed</th><th>Status</th></tr></thead><tbody>';
+    all.slice(0, ZSHOWN).forEach(x => {
       const z = x.z, chipT = z.type === "D" ? '<span class="chip g">&#9650; Demand</span>' : '<span class="chip r">&#9660; Supply</span>';
       const chipS = z.status === "fresh" ? '<span class="chip g">Fresh</span>' : z.status === "respected" ? '<span class="chip w">Respected</span>' : '<span class="chip n">Mitigated</span>';
-      h += '<tr data-zrow="' + esc(x.it.tk) + '"' + (ZSEL === x.it.tk ? ' style="outline:2px solid var(--a);outline-offset:-2px"' : "") + "><td><b>" + nm(x) + "</b></td><td>" + chipT + "</td><td>" + z.pat + '</td><td class="num">' + fmt(z.prox) + '</td><td class="num">' + fmt(z.dist) + '</td><td class="num">' + fmt(z.target) + '</td><td class="num"' + (isFinite(x.away) && x.away < 0 ? ' style="color:var(--warn);font-weight:600"' : "") + ">" + (isFinite(x.away) ? fmt(x.away, 1) + "%" : "—") + '</td><td class="num">' + Math.round(z.prob) + "%</td><td>" + znDate(z.formTime) + "</td><td>" + chipS + "</td></tr>";
+      h += '<tr data-zrow="' + esc(x.it.u.sym) + '" data-ztf="' + x.it.tf + '"><td><b>' + nm(x) + '</b></td><td><span class="chip n">' + znTfName(x.it.tf) + "</span></td><td>" + chipT + "</td><td>" + z.pat + '</td><td class="num">' + fmt(z.prox) + '</td><td class="num">' + fmt(z.dist) + '</td><td class="num">' + fmt(z.target) + '</td><td class="num"' + (isFinite(x.away) && x.away < 0 ? ' style="color:var(--warn);font-weight:600"' : "") + ">" + (isFinite(x.away) ? fmt(x.away, 1) + "%" : "—") + '</td><td class="num">' + Math.round(z.prob) + "%</td><td>" + znFmtT(z.formTime) + "</td><td>" + chipS + "</td></tr>";
     });
-    h += "</tbody></table></div>";
-    h += '<p class="note">Away % is how far the live price is from the proximal line (negative: price is already beyond it). Prob is the indicator\'s score for the zone (base candles, leg-out strength, trend). Tap a row to draw its stock below.</p>';
+    h += "</tbody></table></div>" + (all.length > ZSHOWN ? '<p><button type="button" class="cbtn" data-znmore="1">Show more (' + (all.length - ZSHOWN) + " left)</button></p>" : "") +
+      '<p class="note">Away % is how far the live price is from the proximal line (negative: price is already beyond it). Prob is the indicator\'s score for the zone (base candles, leg-out strength, trend). Tap a row to draw its stock and timeframe below.</p>';
   }
-  /* chart for the chosen stock */
-  const withData = data.filter(d => d.bars && d.bars.length);
-  if (!ZSEL || !withData.some(d => d.tk === ZSEL)) ZSEL = (nd || ns || {it: withData[0]}).it.tk;
-  const cur = withData.find(d => d.tk === ZSEL);
+  /* chart for the chosen stock and timeframe */
+  const syms = []; items.forEach(i => { if (syms.indexOf(i.u.sym) < 0) syms.push(i.u.sym); });
+  const cnt = s => items.filter(i => i.u.sym === s).reduce((a, i) => a + i.zones.filter(z => znShown(z) && znActive(z)).length, 0);
+  if (!ZSEL || syms.indexOf(ZSEL) < 0) ZSEL = (top && top.u.sym) || (nd && nd.it.u.sym) || (ns && ns.it.u.sym) || syms[0];
+  const avail = D.tfs.filter(tf => items.some(i => i.u.sym === ZSEL && i.tf === tf));
+  if (avail.indexOf(ZTFSEL) < 0) ZTFSEL = avail.indexOf("D") >= 0 ? "D" : avail[0];
+  const cur = items.find(i => i.u.sym === ZSEL && i.tf === ZTFSEL), intra = znIntra(ZTFSEL);
+  const rngs = intra ? [["60", "60 bars"], ["150", "150 bars"], ["300", "300 bars"], ["All", "All"]] : [["3M", "3M"], ["6M", "6M"], ["1Y", "1Y"], ["2Y", "2Y"], ["All", "All"]], rcur = intra ? ZRANGEI : ZRANGE;
+  const nmOf = s => (D.uni.find(u => u.sym === s) || {name: s}).name;
   h += '<h2>Chart</h2><div class="card chartcard" id="znchartcard"><div class="charttools"><select id="znsel" aria-label="Stock" style="font:inherit;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)">' +
-    withData.map(d => { const n = d.zones.filter(z => znShown(z) && z.status !== "mitigated").length; return '<option value="' + esc(d.tk) + '"' + (d.tk === ZSEL ? " selected" : "") + ">" + esc(d.r.s.short || d.r.s.ticker) + " (" + n + ")</option>"; }).join("") + "</select>" +
-    '<span class="csep"></span>' + ["3M", "6M", "1Y", "2Y", "All"].map(r => '<button type="button" class="cbtn" data-znrange="' + r + '" aria-pressed="' + (r === ZRANGE) + '">' + r + "</button>").join("") +
-    '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(cur ? cur.r.s.ticker : "") + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
+    syms.map(s => '<option value="' + esc(s) + '"' + (s === ZSEL ? " selected" : "") + ">" + esc(nmOf(s)) + " (" + cnt(s) + ")</option>").join("") + "</select>" +
+    '<span class="csep"></span>' + avail.map(tf => '<button type="button" class="cbtn" data-zntfc="' + tf + '" aria-pressed="' + (tf === ZTFSEL) + '">' + znTfName(tf) + "</button>").join("") +
+    '<span class="csep"></span>' + rngs.map(r => '<button type="button" class="cbtn" data-znrange="' + r[0] + '" aria-pressed="' + (r[0] === rcur) + '">' + r[1] + "</button>").join("") +
+    '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(ZSEL || "").replace(/[&-]/g, "_")) + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
   host.innerHTML = h;
-  if (cur) znDrawChart(cur);
+  if (cur) znDrawChart(cur.bars, cur.zones, intra);
 }
 function znPaint() {
   const sec = document.getElementById("zn"); if (!sec) return;
   if (!sec.dataset.built) { znBuild(sec); sec.dataset.built = "1"; }
-  znPaintRes();
+  znPaintRes(); znLoad(false);
 }
 
 /* ===== APP ===== */
