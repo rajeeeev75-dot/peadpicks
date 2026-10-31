@@ -2373,6 +2373,8 @@ function znMerge(d, s) {
 }
 let ZO = null; try { ZO = JSON.parse(localStorage.getItem("znOpt") || "null"); } catch (e) {}
 ZO = znMerge(ZN_DEF, ZO);
+["atrLen", "maxBase", "maxLeg", "prox", "tick", "maxGap", "minP", "maxP", "minMc", "rr", "bufPct"].forEach(k => { ZO[k] = ZN_DEF[k]; });
+if (![0, 2, 5, 10].includes(+ZO.near)) ZO.near = 0;
 let ZSEL = null, ZTFSEL = "D", ZCH = null, ZRANGE = "1Y", ZRANGEI = "150", ZCACHE = {key: "", data: null}, ZVER = 0, ZB = {}, ZSTAT = {}, ZBUSY = false, ZAGAIN = false, ZPT = null, ZSHOWN = 150;
 function znSave() { try { localStorage.setItem("znOpt", JSON.stringify(ZO)); } catch (e) {} }
 const znDate = s => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "-" + p[1] + "-" + p[0] : "—"; };
@@ -2464,16 +2466,10 @@ function znBuild(sec) {
       ZN_FILTERS.map(f => btn("data-znf", f[0], f[1], ZO.f[f[0]], f[2])).join("") +
       '<span class="csep"></span>' + btn("data-znall", "1", "All on", false) + btn("data-znall", "0", "All off", false) + btn("data-znall", "r", "Reset", false) +
     "</div></div>" +
-    '<div class="card"><b>Settings</b><div class="pos">' +
-      inp("atrLen", "ATR length", 'min="2" max="100"') + inp("maxBase", "Max base candles", 'min="1" max="6"') + inp("maxLeg", "Max leg-out candles", 'min="1" max="5"') +
-      sel("prox", "Proximal line from", [["Wick", "Wick"], ["Body", "Body"]]) + inp("tick", "Tick size", 'step="0.01" min="0.01"') + inp("maxGap", "Max base gap (ticks)", 'min="0"') +
-      inp("minP", "Min price", 'min="0"') + inp("maxP", "Max price", 'min="0"') + inp("minMc", "Min mcap (Rs cr)", 'min="0"') + inp("rr", "Target risk:reward (1:X)", 'step="0.5" min="0.5"') +
-      inp("bufPct", "ATR buffer %", 'min="0"') + inp("near", "Only within % of price (0 = all)", 'min="0"') +
-    '</div><p class="note" style="margin:6px 0 0">Price range, market cap and ATR buffer only apply when their filter is switched on. Market cap is known only for stocks on your sheet (others pass the filter only if it is off), and the ATR buffer applies only to daily and weekly candles of your sheet stocks. The indicator\'s 12:30 PM filter belongs to its native chart zones, not its MTF dashboard, so it is left out here too.</p></div>' +
     '<div class="card"><div class="charttools" style="border:0;padding:0"><b>Show</b>' +
       btn("data-znshow", "D", "Demand", ZO.show.D) + btn("data-znshow", "S", "Supply", ZO.show.S) + '<span class="csep"></span>' +
       btn("data-znshow", "fresh", "Fresh", ZO.show.fresh, "Price has not come back to the zone yet") + btn("data-znshow", "resp", "Respected", ZO.show.resp, "Price touched the proximal line and the zone is still valid") + btn("data-znshow", "mit", "Mitigated", ZO.show.mit, "Zone used up or broken") +
-      '<span class="csep"></span><b>View</b>' + btn("data-znview", "list", "Zone list", ZO.view !== "mtf") + btn("data-znview", "mtf", "MTF dashboard", ZO.view === "mtf", "One row per stock, one column per timeframe, like the indicator's MTF table") +
+      '<span class="csep"></span><b>Price near zone</b>' + [[0,"Any"],[2,"within 2%"],[5,"within 5%"],[10,"within 10%"]].map(x => btn("data-znnear", x[0], x[1], +ZO.near === x[0], "Only zones whose proximal line is within this distance of the live price")).join("") + '<span class="csep"></span><b>View</b>' + btn("data-znview", "list", "Zone list", ZO.view !== "mtf") + btn("data-znview", "mtf", "MTF dashboard", ZO.view === "mtf", "One row per stock, one column per timeframe, like the indicator's MTF table") +
     "</div></div>" +
     '<div id="znres"></div>';
   if (sec.dataset.znl) return; sec.dataset.znl = "1";
@@ -2485,6 +2481,8 @@ function znBuild(sec) {
     if (b) { Object.keys(ZB).forEach(k => { ZB[k] = {}; }); znLoad(true); znPaintRes(); return; }
     b = t.closest("[data-znview]");
     if (b) { ZO.view = b.dataset.znview; sec.querySelectorAll("[data-znview]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); ZSHOWN = 150; znSave(); znPaintRes(); return; }
+    b = t.closest("[data-znnear]");
+    if (b) { ZO.near = +b.dataset.znnear; sec.querySelectorAll("[data-znnear]").forEach(x => x.setAttribute("aria-pressed", String(+x.dataset.znnear === ZO.near))); ZSHOWN = 150; znSave(); znPaintRes(); return; }
     b = t.closest("[data-znmore]");
     if (b) { ZSHOWN += 150; znPaintRes(); return; }
     b = t.closest("[data-znf]");
