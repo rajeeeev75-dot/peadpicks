@@ -32,6 +32,39 @@ class Skip(Exception):
     """Raised with a human-readable reason when a stock cannot be (re)built."""
 
 
+FILING_KEYS = ("broadcast", "exchdiss", "disseminat", "filingdate", "filing_date", "filing", "submission")
+SKIP_KEYS = ("fromdate", "from_date", "todate", "to_date", "period", "audit", "xbrl", "attachment")
+QEND = {(3, 31), (6, 30), (9, 30), (12, 31)}
+
+
+def is_qend(d):
+    return (d.month, d.day) in QEND
+
+
+def filing_date(row):
+    """The day the company filed its results, from one NSE row. Looks at the broadcast / filing
+    style keys in priority order and ignores quarter-end dates (30-Sep etc.), which are the
+    period the results cover, not the day they were announced."""
+    found = []
+    for k, v in row.items():
+        kl = k.lower()
+        if any(x in kl for x in SKIP_KEYS) or not any(x in kl for x in FILING_KEYS):
+            continue
+        d = pd.to_datetime(v, dayfirst=True, errors="coerce")
+        if pd.isna(d) or is_qend(d.date()):
+            continue
+        found.append((min(i for i, x in enumerate(FILING_KEYS) if x in kl), d.date()))
+    return min(found)[1] if found else None
+
+
+def valid_rd(text, qend):
+    """An old result_date from pead.csv is only trusted if it is a real day after the quarter end."""
+    d = pd.to_datetime(text, dayfirst=True, errors="coerce")
+    if pd.isna(d) or is_qend(d.date()):
+        return None
+    return d.date() if not qend or d.date() > dt.date.fromisoformat(qend) else None
+
+
 def nse_recent():
     """Best effort: {symbol: result_date} from NSE's financial-results feed. NSE often blocks
     cloud IPs; if so we fall back to tickers.txt and detect new quarters from the data itself."""
@@ -44,12 +77,15 @@ def nse_recent():
                   headers=h, timeout=30)
         r.raise_for_status()
         cut = dt.date.today() - dt.timedelta(days=RECENT_DAYS)
-        for row in r.json():
+        rows = r.json()
+        rows = rows if isinstance(rows, list) else rows.get("data", [])
+        if rows:
+            print("NSE row keys:", ", ".join(rows[0].keys()), file=sys.stderr)
+        for row in rows:
             sym = row.get("symbol")
-            raw = next((row[k] for k in row if "broadcast" in k.lower() or "filing" in k.lower()), None)
-            d = pd.to_datetime(raw, dayfirst=True, errors="coerce")
-            if sym and not pd.isna(d) and d.date() >= cut:
-                out[sym] = d.date()
+            d = filing_date(row)
+            if sym and d and d >= cut:
+                out[sym] = d
     except Exception as e:
         print("NSE feed unavailable:", e, file=sys.stderr)
     return out
@@ -232,6 +268,7 @@ def main():
     if os.path.exists("tickers.txt"):
         uni = [x.strip().upper().replace("NSE:", "") for x in open("tickers.txt") if x.strip() and not x.startswith("#")]
     syms = [s for s in recent if not uni or s in uni] if recent else uni
+    fast = os.environ.get("FAST") == "1"   # quick runs: only stocks that filed in the last 2 days, new ones, or behind the calendar quarter
     print(f"Scanning {len(syms)} symbols (NSE feed gave {len(recent)})")
     old = {}
     if os.path.exists("pead.csv"):
@@ -239,11 +276,27 @@ def main():
             qd = pd.to_datetime(r.get("quarter_end"), errors="coerce")
             if not pd.isna(qd) and (today - qd.date()).days <= QTR_MAX_AGE:
                 old[r["ticker"]] = r
+    if fast:
+        keep = []
+        for s in syms:
+            o, fd = old.get("NSE:" + s), recent.get(s)
+            if o is None or (o.get("quarter_end") or "") < expected.isoformat() or (fd and (today - fd).days <= 2):
+                keep.append(s)
+        print(f"FAST run: {len(keep)} of {len(syms)} symbols")
+        syms = keep
     new, behind, skipped = 0, [], []
     for s in syms:
         key = "NSE:" + s
         try:
             r = build(s, recent.get(s))
+            if not r["result_date"]:
+                o = old.get(key)
+                prev = valid_rd(o.get("result_date"), r["quarter_end"]) if o and o.get("quarter_end") == r["quarter_end"] else None
+                if prev:
+                    r["result_date"] = prev.strftime("%d/%m/%Y")
+                elif o and (o.get("quarter_end") or "") < r["quarter_end"]:
+                    r["result_date"] = today.strftime("%d/%m/%Y")   # a new quarter appeared since the last run: first seen today
+                    r["feed_note"] = "; ".join(x for x in (r["feed_note"], "result date = first seen") if x)
             if dt.date.fromisoformat(r["quarter_end"]) < expected:
                 note = f"newest quarter {r['quarter_end']} is behind calendar quarter {expected}"
                 r["feed_note"] = "; ".join(x for x in (r["feed_note"], note) if x)
