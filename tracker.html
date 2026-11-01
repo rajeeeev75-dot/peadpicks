@@ -95,6 +95,7 @@ li{margin:6px 0;max-width:70ch}
 .pead .note{padding:0 16px}.pead-line{margin:8px 0}.pead-warn{color:var(--warn);font-weight:600}
 .pmode{display:block;padding:4px 16px;font-size:.86rem;color:var(--mute)}.pmode select{font:inherit;margin-left:6px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 .pead>.note:last-child{padding-bottom:14px}
+#zn td .chip,#zn td b{white-space:nowrap}#zn td .chip{display:inline-block}#zn .tvl{font-size:.74rem;font-weight:600;color:var(--a);text-decoration:none;margin-left:4px;white-space:nowrap}#zn .tvl:hover{text-decoration:underline}#zn .cbtn{font-size:.94rem;padding:5px 12px}
 .znm td{vertical-align:top}.znm .zc{margin:0 0 4px;padding:3px 6px;border-radius:8px;border:1px solid var(--line);font-size:.8rem;white-space:nowrap;cursor:pointer}.znm .zc.g{border-left:4px solid var(--good)}.znm .zc.r{border-left:4px solid var(--bad)}.znm .zc small{color:var(--mute)}.znm tr[data-zrow]{cursor:pointer}
 .dvm{margin-top:12px}.dtiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:10px 0 8px}
 .dtile{border:1px solid var(--line);border-radius:12px;padding:10px 12px}.dtile small{display:block;color:var(--mute);font-weight:600}
@@ -2247,8 +2248,8 @@ const ZN_FILTERS = [
   ["mcap",   "Market cap",           "Only stocks with market cap (from your sheet) above Min market cap"],
   ["buf",    "ATR buffer",           "Adds a buffer of x% of the daily ATR to the proximal line and the stop"]
 ];
-const ZN_TFS = [["5","5m"],["15","15m"],["60","1H"],["240","4H"],["D","Daily"],["W","Weekly"]];
-const ZN_DEF = {view: "list", tfs: {"5": 1, "15": 1, "60": 1, "240": 1, "D": 1, "W": 0}, atrLen: 14, maxBase: 6, maxLeg: 3, prox: "Wick", tick: 0.05, maxGap: 15, minP: 100, maxP: 4000, minMc: 500, rr: 5, bufPct: 10, near: 0,
+const ZN_TFS = [["1","1m"],["5","5m"],["15","15m"],["60","1H"],["120","2H"],["240","4H"],["D","Daily"],["W","Weekly"]];
+const ZN_DEF = {view: "list", tfs: {"1": 0, "5": 1, "15": 1, "60": 1, "120": 1, "240": 1, "D": 1, "W": 0}, atrLen: 14, maxBase: 6, maxLeg: 3, prox: "Wick", tick: 0.05, maxGap: 15, minP: 100, maxP: 4000, minMc: 500, rr: 5, bufPct: 10, near: 0,
   show: {D: 1, S: 1, fresh: 1, resp: 1, mit: 0},
   f: {ratio: 1, white: 1, behind: 1, gap: 1, lgap: 1, cover: 1, ema: 1, price: 0, mcap: 0, buf: 0}};
 
@@ -2380,10 +2381,13 @@ function znSave() { try { localStorage.setItem("znOpt", JSON.stringify(ZO)); } c
 const znDate = s => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "-" + p[1] + "-" + p[0] : "—"; };
 const znTfName = tf => (ZN_TFS.find(x => x[0] === tf) || [0, tf])[1];
 const znIntra = tf => tf !== "D" && tf !== "W";
+const znTv = (sym, tf) => "https://www.tradingview.com/chart/?symbol=NSE%3A" + encodeURIComponent(String(sym || "").replace(/[&-]/g, "_")) + (tf ? "&interval=" + tf : "");
+const znTvA = (sym, tf) => ' <a class="tvl" href="' + znTv(sym, tf) + '" target="_blank" rel="noopener" title="Open on TradingView">TV &#8599;</a>';
 const znP2 = n => String(n).padStart(2, "0");
 function znFmtT(t) { if (typeof t === "number") { const d = new Date(t * 1000); return znP2(d.getUTCDate()) + "-" + znP2(d.getUTCMonth() + 1) + " " + znP2(d.getUTCHours()) + ":" + znP2(d.getUTCMinutes()); } return znDate(t); }
-const ZN_TTL = {"5": 120e3, "15": 300e3, "60": 600e3, "240": 900e3, "D": 1800e3, "W": 3600e3};
+const ZN_TTL = {"1": 60e3, "5": 120e3, "15": 300e3, "60": 600e3, "240": 900e3, "D": 1800e3, "W": 3600e3};
 
+const ZN_FNO = "360ONE ABB ABCAPITAL ADANIENSOL ADANIENT ADANIGREEN ADANIPORTS ALKEM AMBER AMBUJACEM ANGELONE APLAPOLLO APOLLOHOSP ASHOKLEY ASIANPAINT ASTRAL AUBANK AUROPHARMA AXISBANK BAJAJ-AUTO BAJAJFINSV BAJFINANCE BANDHANBNK BANKBARODA BANKINDIA BDL BEL BHARATFORG BHARTIARTL BHEL BIOCON BLUESTARCO BOSCHLTD BPCL BRITANNIA BSE CAMS CANBK CDSL CGPOWER CHOLAFIN CIPLA COALINDIA COFORGE COLPAL CONCOR CROMPTON CUMMINSIND DABUR DALBHARAT DELHIVERY DIVISLAB DIXON DLF DMART DRREDDY EICHERMOT EXIDEIND FEDERALBNK FORTIS GAIL GLENMARK GMRAIRPORT GODREJCP GODREJPROP GRASIM HAL HAVELLS HCLTECH HDFCAMC HDFCBANK HDFCLIFE HEROMOTOCO HFCL HINDALCO HINDPETRO HINDUNILVR HINDZINC HUDCO ICICIBANK ICICIGI ICICIPRULI IDEA IDFCFIRSTB IEX IGL IIFL INDHOTEL INDIANB INDIGO INDUSINDBK INDUSTOWER INFY INOXWIND IOC IRCTC IREDA IRFC ITC JINDALSTEL JIOFIN JSWENERGY JSWSTEEL JUBLFOOD KALYANKJIL KAYNES KEI KFINTECH KOTAKBANK KPITTECH LAURUSLABS LICHSGFIN LICI LODHA LT LTF LTIM LUPIN M&M MANAPPURAM MANKIND MARICO MARUTI MAXHEALTH MAZDOCK MCX MFSL MOTHERSON MPHASIS MUTHOOTFIN NATIONALUM NAUKRI NBCC NCC NESTLEIND NHPC NMDC NTPC NUVAMA NYKAA OBEROIRLTY OFSS OIL ONGC PAGEIND PATANJALI PAYTM PERSISTENT PETRONET PFC PGEL PHOENIXLTD PIDILITIND PIIND PNB PNBHOUSING POLICYBZR POLYCAB POWERGRID POWERINDIA PPLPHARMA PRESTIGE RBLBANK RECLTD RELIANCE RVNL SAIL SBICARD SBILIFE SBIN SHREECEM SHRIRAMFIN SIEMENS SOLARINDS SONACOMS SRF SUNPHARMA SUPREMEIND SUZLON SWIGGY SYNGENE TATACONSUM TATAELXSI TATAMOTORS TATAPOWER TATASTEEL TATATECH TCS TECHM TIINDIA TITAGARH TITAN TORNTPHARM TORNTPOWER TRENT TVSMOTOR ULTRACEMCO UNIONBANK UNITDSPR UNOMINDA UPL VBL VEDL VOLTAS WIPRO YESBANK ZYDUSLIFE".split(" ");
 /* The universe: all stocks the Trade ideas screener scans (NSE feed through the Worker) plus every stock on your sheet. */
 function znUniverse() {
   const out = [], seen = new Set(); let M = null; try { M = MARKET; } catch (e) {}
@@ -2393,6 +2397,7 @@ function znUniverse() {
     out.push({sym, name: r.s.short || sym, mc: r.c.mc, px: r.c.p, sheet: true, tk: String(r.s.ticker).toUpperCase()});
   });
   ((M && M.stocks) || []).forEach(x => { if (!x || !x.s) return; const sym = String(x.s).toUpperCase(); if (seen.has(sym)) return; seen.add(sym); out.push({sym, name: sym, mc: NaN, px: +x.p, sheet: false, tk: ""}); });
+  ZN_FNO.forEach(sym => { if (seen.has(sym)) return; seen.add(sym); out.push({sym, name: sym, mc: NaN, px: NaN, sheet: false, tk: ""}); });
   return out;
 }
 const znHistBars = (u, tf) => { const h = u.tk && HIST && HIST[u.tk]; return (tf === "D" || tf === "W") && h && h.length ? znAgg(h, tf) : null; };
@@ -2402,7 +2407,7 @@ async function znLoad(force) {
   if (ZBUSY) { ZAGAIN = true; return; }
   ZBUSY = true;
   try {
-    for (const tf of ["D", "240", "60", "15", "5", "W"]) {
+    for (const tf of ["D", "240", "120", "60", "15", "5", "1", "W"]) {
       if (!ZO.tfs[tf]) continue;
       const uni = znUniverse(), now = Date.now(), ST = ZSTAT[tf] = {done: 0, total: 0, fail: 0, busy: true, err: ""}, cache = ZB[tf] = ZB[tf] || {};
       const need = uni.filter(u => !znHistBars(u, tf)), todo = need.filter(u => force || !cache[u.sym] || now - cache[u.sym].t > ZN_TTL[tf]);
@@ -2475,6 +2480,7 @@ function znBuild(sec) {
   if (sec.dataset.znl) return; sec.dataset.znl = "1";
   sec.addEventListener("click", ev => {
     const t = ev.target; if (!t || !t.closest) return;
+    if (t.closest("a")) return;
     let b = t.closest("[data-zntf]");
     if (b) { const k = b.dataset.zntf; ZO.tfs[k] = ZO.tfs[k] ? 0 : 1; b.setAttribute("aria-pressed", String(!!ZO.tfs[k])); if (!ZO.tfs[ZTFSEL]) ZTFSEL = ZN_TFS.map(x => x[0]).find(x => ZO.tfs[x]) || "D"; znSave(); znLoad(false); znPaintRes(); return; }
     b = t.closest("[data-znrefresh]");
@@ -2560,7 +2566,7 @@ function znDrawChart(bars, zones, intra) {
 function znPaintRes() {
   const host = document.getElementById("znres"); if (!host) return;
   const D = znData(), items = D.items, stat = document.getElementById("znstat");
-  if (stat) stat.textContent = "Scanning " + D.uni.length + " stocks (" + D.uni.filter(u => u.sheet).length + " from your sheet, the rest from the Trade ideas screener). " + znStatusLine(D);
+  if (stat) stat.textContent = "Scanning " + D.uni.length + " stocks (" + D.uni.filter(u => u.sheet).length + " from your sheet, the rest from the Trade ideas screener and the F&O list). " + znStatusLine(D);
   if (!D.uni.length || !items.length) {
     const loading = ZBUSY || D.tfs.some(tf => !ZSTAT[tf] || ZSTAT[tf].busy);
     host.innerHTML = '<div class="card empty">' + (!D.uni.length ? "Waiting for the market feed to list the stocks (needs the Worker)..." : loading ? "Loading candles for " + D.uni.length + " stocks, the first zones appear in a moment..." : "No candles could be loaded. Check that the updated Worker (worker_v29) is deployed; test it with ?bars=RELIANCE&tf=D on your Worker address.") + "</div>";
@@ -2595,7 +2601,7 @@ function znPaintRes() {
     const rows = Object.keys(by).map(k => { const r = by[k], cf = conf[k]; r.nD = cf ? cf.D.size : 0; r.nS = cf ? cf.S.size : 0; r.best = cf ? cf.best : 1e9; return r; }).sort((a, b) => Math.max(b.nD, b.nS) - Math.max(a.nD, a.nS) || a.best - b.best);
     h += '<div class="wrap"><table class="znm"><thead><tr><th>Stock</th><th class="num">Price</th>' + D.tfs.map(tf => "<th>" + znTfName(tf) + "</th>").join("") + '<th class="num" title="Timeframes with an active zone within ' + CN + '% of price">Near TFs</th></tr></thead><tbody>';
     rows.slice(0, ZSHOWN).forEach(r => {
-      h += '<tr data-zrow="' + esc(r.u.sym) + '"><td><b>' + esc(r.u.name) + '</b></td><td class="num">' + fmt(pxOf[r.u.sym]) + "</td>" + D.tfs.map(tf => {
+      h += '<tr data-zrow="' + esc(r.u.sym) + '"><td><b>' + esc(r.u.name) + '</b>' + znTvA(r.u.sym, "D") + '</td><td class="num">' + fmt(pxOf[r.u.sym]) + "</td>" + D.tfs.map(tf => {
         const c = r.tf[tf] || {}, cell = (x, cls) => x ? '<div class="zc ' + cls + '" data-zrow="' + esc(r.u.sym) + '" data-ztf="' + tf + '"><b>' + (cls === "g" ? "D " : "S ") + fmt(x.z.prox) + '</b> <small>' + x.z.pat + " &middot; " + Math.round(x.z.prob) + "% &middot; " + fmt(x.away, 1) + "%</small></div>" : "";
         return "<td>" + (cell(c.D, "g") + cell(c.S, "r") || '<span class="note">—</span>') + "</td>";
       }).join("") + '<td class="num">' + (r.nD ? '<span class="chip g">' + r.nD + " D</span> " : "") + (r.nS ? '<span class="chip r">' + r.nS + " S</span>" : "") + (!r.nD && !r.nS ? "—" : "") + "</td></tr>";
@@ -2608,7 +2614,7 @@ function znPaintRes() {
     all.slice(0, ZSHOWN).forEach(x => {
       const z = x.z, chipT = z.type === "D" ? '<span class="chip g">&#9650; Demand</span>' : '<span class="chip r">&#9660; Supply</span>';
       const chipS = z.status === "fresh" ? '<span class="chip g">Fresh</span>' : z.status === "respected" ? '<span class="chip w">Respected</span>' : '<span class="chip n">Mitigated</span>';
-      h += '<tr data-zrow="' + esc(x.it.u.sym) + '" data-ztf="' + x.it.tf + '"><td><b>' + nm(x) + '</b></td><td><span class="chip n">' + znTfName(x.it.tf) + "</span></td><td>" + chipT + "</td><td>" + z.pat + '</td><td class="num">' + fmt(z.prox) + '</td><td class="num">' + fmt(z.dist) + '</td><td class="num">' + fmt(z.target) + '</td><td class="num"' + (isFinite(x.away) && x.away < 0 ? ' style="color:var(--warn);font-weight:600"' : "") + ">" + (isFinite(x.away) ? fmt(x.away, 1) + "%" : "—") + '</td><td class="num">' + Math.round(z.prob) + "%</td><td>" + znFmtT(z.formTime) + "</td><td>" + chipS + "</td></tr>";
+      h += '<tr data-zrow="' + esc(x.it.u.sym) + '" data-ztf="' + x.it.tf + '"><td><b>' + nm(x) + '</b>' + znTvA(x.it.u.sym, x.it.tf) + '</td><td><span class="chip n">' + znTfName(x.it.tf) + "</span></td><td>" + chipT + "</td><td>" + z.pat + '</td><td class="num">' + fmt(z.prox) + '</td><td class="num">' + fmt(z.dist) + '</td><td class="num">' + fmt(z.target) + '</td><td class="num"' + (isFinite(x.away) && x.away < 0 ? ' style="color:var(--warn);font-weight:600"' : "") + ">" + (isFinite(x.away) ? fmt(x.away, 1) + "%" : "—") + '</td><td class="num">' + Math.round(z.prob) + "%</td><td>" + znFmtT(z.formTime) + "</td><td>" + chipS + "</td></tr>";
     });
     h += "</tbody></table></div>" + (all.length > ZSHOWN ? '<p><button type="button" class="cbtn" data-znmore="1">Show more (' + (all.length - ZSHOWN) + " left)</button></p>" : "") +
       '<p class="note">Away % is how far the live price is from the proximal line (negative: price is already beyond it). Prob is the indicator\'s score for the zone (base candles, leg-out strength, trend). Tap a row to draw its stock and timeframe below.</p>';
@@ -2626,7 +2632,7 @@ function znPaintRes() {
     syms.map(s => '<option value="' + esc(s) + '"' + (s === ZSEL ? " selected" : "") + ">" + esc(nmOf(s)) + " (" + cnt(s) + ")</option>").join("") + "</select>" +
     '<span class="csep"></span>' + avail.map(tf => '<button type="button" class="cbtn" data-zntfc="' + tf + '" aria-pressed="' + (tf === ZTFSEL) + '">' + znTfName(tf) + "</button>").join("") +
     '<span class="csep"></span>' + rngs.map(r => '<button type="button" class="cbtn" data-znrange="' + r[0] + '" aria-pressed="' + (r[0] === rcur) + '">' + r[1] + "</button>").join("") +
-    '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(ZSEL || "").replace(/[&-]/g, "_")) + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
+    '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(ZSEL || "").replace(/[&-]/g, "_")) + '&interval=' + ZTFSEL + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
   host.innerHTML = h;
   if (cur) znDrawChart(cur.bars, cur.zones, intra);
 }
