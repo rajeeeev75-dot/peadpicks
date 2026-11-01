@@ -15,7 +15,10 @@ Changes vs the previous version
 - Optional overrides.csv: type a newer quarter by hand while the feed lags.
 """
 import csv, os, sys, time, datetime as dt
+import warnings
 import requests, pandas as pd, yfinance as yf
+
+warnings.filterwarnings("ignore")   # hides the harmless yfinance/pandas deprecation spam in the Action log
 
 RECENT_DAYS = 14        # "just announced" = results filed in the last N days
 KEEP_DAYS = 45          # (kept for reference)
@@ -66,26 +69,44 @@ def valid_rd(text, qend):
 
 
 def nse_recent():
-    """Best effort: {symbol: result_date} from NSE's financial-results feed. NSE often blocks
-    cloud IPs; if so we fall back to tickers.txt and detect new quarters from the data itself."""
+    """Best effort: {symbol: filing_date} from NSE's financial-results feed. Tries the date-range form
+    first (what NSE's own website uses), then the plain form, and keeps whichever gives results. Prints
+    what it saw so the Action log shows exactly why a date is missing. If NSE gives nothing we fall
+    back to tickers.txt and detect new quarters from the data itself."""
     out = {}
     try:
         s = requests.Session()
-        h = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": "https://www.nseindia.com/"}
+        h = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-financial-results"}
         s.get("https://www.nseindia.com", headers=h, timeout=20)
-        r = s.get("https://www.nseindia.com/api/corporates-financial-results?index=equities&period=Quarterly",
-                  headers=h, timeout=30)
-        r.raise_for_status()
-        cut = dt.date.today() - dt.timedelta(days=RECENT_DAYS)
-        rows = r.json()
-        rows = rows if isinstance(rows, list) else rows.get("data", [])
-        if rows:
-            print("NSE row keys:", ", ".join(rows[0].keys()), file=sys.stderr)
-        for row in rows:
-            sym = row.get("symbol")
-            d = filing_date(row)
-            if sym and d and d >= cut:
-                out[sym] = d
+        s.get("https://www.nseindia.com/companies-listing/corporate-filings-financial-results", headers=h, timeout=20)
+        today = dt.date.today(); cut = today - dt.timedelta(days=RECENT_DAYS)
+        fmt = lambda d: d.strftime("%d-%m-%Y")
+        urls = [
+            f"https://www.nseindia.com/api/corporates-financial-results?index=equities&from_date={fmt(cut)}&to_date={fmt(today)}&period=Quarterly",
+            "https://www.nseindia.com/api/corporates-financial-results?index=equities&period=Quarterly",
+        ]
+        for u in urls:
+            try:
+                r = s.get(u, headers=h, timeout=30)
+                r.raise_for_status()
+                rows = r.json()
+                rows = rows if isinstance(rows, list) else rows.get("data", [])
+            except Exception as e:
+                print("NSE feed attempt failed:", u.split("?")[1][:60], "->", e, file=sys.stderr)
+                continue
+            got = {}
+            for row in rows:
+                sym = row.get("symbol")
+                d = filing_date(row)
+                if sym and d and d >= cut and (sym not in got or d > got[sym]):
+                    got[sym] = d
+            print(f"NSE feed ({u.split('?')[1][:40]}...): {len(rows)} rows, {len(got)} filed since {cut}", file=sys.stderr)
+            if rows:
+                print("NSE sample:", {k: rows[0].get(k) for k in ("symbol", "broadCastDate", "filingDate", "exchdisstime", "fromDate", "toDate")}, file=sys.stderr)
+            if len(got) > len(out):
+                out = got
+            if out:
+                break
     except Exception as e:
         print("NSE feed unavailable:", e, file=sys.stderr)
     return out
@@ -148,9 +169,9 @@ def build(sym, rdate):
     gap = lambda i: (qdate - cols[i].date()).days
     if len(cols) < 2 or not 60 <= gap(1) <= 125:
         raise Skip("previous quarter missing in Yahoo data")
-    j = next((i for i in range(1, len(cols)) if abs(gap(i) - 365) <= 20), None)
+    j = next((i for i in range(1, len(cols)) if abs(gap(i) - 365) <= 45), None)
     if j is None:
-        raise Skip(f"year-ago quarter missing (Yahoo gave {len(cols)} quarters)")
+        raise Skip(f"year-ago quarter missing (Yahoo gave {len(cols)} quarters: " + ", ".join(c.date().isoformat() for c in cols) + ")")
 
     rev_s, np_s = pick(q, ["Total Revenue", "Operating Revenue"]), pick(q, ["Net Income", "Net Income Common Stockholders"])
     ebd_s = pick(q, ["EBITDA", "Normalized EBITDA"])
@@ -266,7 +287,7 @@ def main():
     recent = nse_recent()
     uni = []
     if os.path.exists("tickers.txt"):
-        uni = [x.strip().upper().replace("NSE:", "") for x in open("tickers.txt") if x.strip() and not x.startswith("#")]
+        uni = list(dict.fromkeys(x.strip().upper().replace("NSE:", "") for x in open("tickers.txt") if x.strip() and not x.startswith("#")))
     syms = [s for s in recent if not uni or s in uni] if recent else uni
     fast = os.environ.get("FAST") == "1"   # quick runs: only stocks that filed in the last 2 days, new ones, or behind the calendar quarter
     print(f"Scanning {len(syms)} symbols (NSE feed gave {len(recent)})")
