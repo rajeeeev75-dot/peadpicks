@@ -613,6 +613,33 @@ function fiiHTML() {
   }
   return h + '<p class="note">Rs crore, NSE provisional figures published after the close. The table fills up day by day once the Worker has seen each day, so a longer history builds over time. FII/FPI means foreign portfolio investors, DII means domestic institutions.</p>';
 }
+/* ===== OI SPURTS (NSE, F&O underlyings): data only ===== */
+let OI = null, OI_ERR = "", oiBusy = false, OI_ALL = false;
+function oiHTML() {
+  const h2 = '<h2 class="hb hbn">&#128200; OI spurts (F&amp;O)</h2>';
+  if (!OI) return h2 + '<div class="card"><p class="note" style="margin:0">' + (OI_ERR ? "OI spurts are not available right now: " + esc(OI_ERR) + ". Deploy the latest Worker file, then reload." : "Loading...") + "</p></div>";
+  const n = x => (x !== null && isFinite(x) ? Math.round(+x).toLocaleString("en-IN") : "-"), d2 = x => (x !== null && isFinite(x) ? (+x).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+  const rows = OI.rows || [], shown = OI_ALL ? rows : rows.slice(0, 25);
+  const cls = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
+  let h = h2 + '<div class="card"><div class="wrap"><table><thead><tr><th>Symbol</th><th class="num">Open interest</th><th class="num">Previous OI</th><th class="num">Change in OI</th><th class="num">% change in OI</th><th class="num">Volume (contracts)</th><th class="num">Futures value (Rs lakh)</th><th class="num">Option value (Rs lakh)</th><th class="num">Total value (Rs lakh)</th><th class="num">Premium value (Rs lakh)</th><th class="num">Underlying value</th></tr></thead><tbody>' +
+    shown.map(r => "<tr><td><b>" + esc(r.s) + '</b></td><td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
+  if (rows.length > 25) h += '<p style="margin:8px 0 0"><button type="button" class="cbtn" data-oiall="1">' + (OI_ALL ? "Show top 25" : "Show all " + rows.length) + "</button></p>";
+  return h + '<p class="note">NSE OI spurts, sorted by % change in open interest' + (OI.asOf ? ", as of " + esc(OI.asOf) : "") + ". Data only, no interpretation.</p></div>";
+}
+async function loadOi() {
+  if (!MARKET_API_URL || oiBusy) return;
+  oiBusy = true;
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null, killer = setTimeout(() => { if (ctl) ctl.abort(); }, 25000);
+  try {
+    const r = await fetch(MARKET_API_URL + "?oispurts=1", {cache: "no-store", signal: ctl ? ctl.signal : undefined});
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j || j.error || !Array.isArray(j.rows)) throw new Error((j && j.error) || ("HTTP " + r.status));
+    OI = j; OI_ERR = "";
+  } catch (e) { OI_ERR = e && e.name === "AbortError" ? "no answer after 25 seconds" : String((e && e.message) || e); }
+  clearTimeout(killer); oiBusy = false;
+  const box = document.getElementById("oibox"); if (box) box.innerHTML = oiHTML();
+}
+document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-oiall]") : null; if (b) { OI_ALL = !OI_ALL; const box = document.getElementById("oibox"); if (box) box.innerHTML = oiHTML(); } });
 async function loadFiiDii() {
   if (!MARKET_API_URL || fdBusy) return;
   fdBusy = true;
@@ -930,6 +957,7 @@ function niftyHTML(s, c, id) {
 
   h += '<div id="fdbox">' + fiiHTML() + "</div>";
   h += '<div id="optbox">' + optBoxHTML() + "</div>";
+  h += '<div id="oibox">' + oiHTML() + "</div>";
   try { h += guideHTML(); } catch (e) {}
   return h;
 }
@@ -3561,6 +3589,7 @@ async function load(auto) {
   loadMarket();
   loadLive(true);
   loadOptions();
+  loadOi();
   loadFiiDii();
   loadHeavy();
   $("#loaded").textContent = "Loaded " + new Date().toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"});
@@ -3569,7 +3598,7 @@ $("#refresh").addEventListener("click", () => load(false));
 setInterval(() => load(true), REFRESH_MS);
 setInterval(loadMarket, MARKET_REFRESH_MS);
 setInterval(() => loadLive(false), 60 * 1000);
-setInterval(() => { if (liveHours()) loadOptions(); }, 2 * 60 * 1000);
+setInterval(() => { if (liveHours()) { loadOptions(); loadOi(); } }, 2 * 60 * 1000);
 setInterval(loadFiiDii, 15 * 60 * 1000);
 setInterval(() => { if (liveHours()) loadHeavy(); }, 60 * 1000);
 load(false);
