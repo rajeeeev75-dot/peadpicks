@@ -68,6 +68,38 @@ def valid_rd(text, qend):
     return d.date() if not qend or d.date() > dt.date.fromisoformat(qend) else None
 
 
+NSE = {"s": None, "h": None, "feed": {}, "calls": 0}
+
+
+def feed_add(rows):
+    """Remember every NSE row as {(symbol, quarter end): earliest filing date}, so any stock's real
+    announcement date can be looked up by the quarter it reports."""
+    for row in rows:
+        sym, q = row.get("symbol"), pd.to_datetime(row.get("toDate"), dayfirst=True, errors="coerce")
+        d = filing_date(row)
+        if sym and d and not pd.isna(q):
+            k = (sym, q.date().isoformat())
+            if k not in NSE["feed"] or d < NSE["feed"][k]:
+                NSE["feed"][k] = d
+
+
+def nse_filing_for(sym, qend):
+    """Real announcement date of one stock's quarter: from the big feed if present, else one
+    per-stock request (NSE's website does the same). Returns a date or None."""
+    d = NSE["feed"].get((sym, qend))
+    if d or NSE["s"] is None or NSE["calls"] >= 250:
+        return d
+    NSE["calls"] += 1
+    try:
+        r = NSE["s"].get("https://www.nseindia.com/api/corporates-financial-results?index=equities&symbol=" + requests.utils.quote(sym) + "&period=Quarterly", headers=NSE["h"], timeout=20)
+        r.raise_for_status()
+        rows = r.json()
+        feed_add(rows if isinstance(rows, list) else rows.get("data", []))
+    except Exception as e:
+        print(f"  NSE per-stock date lookup failed for {sym}: {e}", file=sys.stderr)
+    return NSE["feed"].get((sym, qend))
+
+
 def nse_recent():
     """Best effort: {symbol: filing_date} from NSE's financial-results feed. Tries the date-range form
     first (what NSE's own website uses), then the plain form, and keeps whichever gives results. Prints
@@ -79,6 +111,7 @@ def nse_recent():
         h = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": "https://www.nseindia.com/companies-listing/corporate-filings-financial-results"}
         s.get("https://www.nseindia.com", headers=h, timeout=20)
         s.get("https://www.nseindia.com/companies-listing/corporate-filings-financial-results", headers=h, timeout=20)
+        NSE["s"], NSE["h"] = s, h
         today = dt.date.today(); cut = today - dt.timedelta(days=RECENT_DAYS)
         fmt = lambda d: d.strftime("%d-%m-%Y")
         urls = [
@@ -94,6 +127,7 @@ def nse_recent():
             except Exception as e:
                 print("NSE feed attempt failed:", u.split("?")[1][:60], "->", e, file=sys.stderr)
                 continue
+            feed_add(rows)
             got = {}
             for row in rows:
                 sym = row.get("symbol")
@@ -101,6 +135,9 @@ def nse_recent():
                 if sym and d and d >= cut and (sym not in got or d > got[sym]):
                     got[sym] = d
             print(f"NSE feed ({u.split('?')[1][:40]}...): {len(rows)} rows, {len(got)} filed since {cut}", file=sys.stderr)
+            if NSE["feed"]:
+                ds = sorted(NSE["feed"].values())
+                print(f"NSE feed dates: {len(NSE['feed'])} stock-quarters, filings from {ds[0]} to {ds[-1]}", file=sys.stderr)
             if rows:
                 print("NSE sample:", {k: rows[0].get(k) for k in ("symbol", "broadCastDate", "filingDate", "exchdisstime", "fromDate", "toDate")}, file=sys.stderr)
             if len(got) > len(out):
@@ -310,6 +347,10 @@ def main():
         key = "NSE:" + s
         try:
             r = build(s, recent.get(s))
+            if not r["result_date"]:
+                fd = nse_filing_for(s, r["quarter_end"])
+                if fd:
+                    r["result_date"] = fd.strftime("%d/%m/%Y")
             if not r["result_date"]:
                 o = old.get(key)
                 prev = valid_rd(o.get("result_date"), r["quarter_end"]) if o and o.get("quarter_end") == r["quarter_end"] else None
