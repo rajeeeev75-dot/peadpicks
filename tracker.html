@@ -2271,9 +2271,37 @@ function eventsHTML() {
   try { h += earningsHTML(MARKET); } catch (e) {}
   return h || '<p class="note">No event data yet.</p>';
 }
+const WV_URL = "https://wealthview.in/articles/";
+let WV = null, wvBusy = false, wvAt = 0;
+async function wvLoad() {
+  if (wvBusy || (WV && Date.now() - wvAt < 30 * 60 * 1000)) return;
+  wvBusy = true;
+  const ctl = typeof AbortController === "function" ? new AbortController() : null, killer = setTimeout(() => { try { ctl && ctl.abort(); } catch (e) {} }, 15000);
+  try {
+    const r = await fetch("https://wealthview.in/wp-json/wp/v2/posts?per_page=6&_fields=date,link,title", {signal: ctl ? ctl.signal : undefined});
+    const j = await r.json();
+    if (!r.ok || !Array.isArray(j)) throw new Error("HTTP " + r.status);
+    WV = j.map(x => ({t: String((x.title && x.title.rendered) || "").replace(/<[^>]*>/g, "").replace(/&#8211;|&#8212;/g, "-").replace(/&#8217;|&#8216;/g, "'").replace(/&amp;/g, "&").replace(/&#038;/g, "&").trim(), l: x.link, d: x.date})).filter(x => /^https?:\/\//.test(x.l || ""));
+    wvAt = Date.now();
+  } catch (e) { /* the page cannot read the list (site blocks it): the plain link below still works */ }
+  clearTimeout(killer); wvBusy = false; try { nwPaint(); } catch (e) {}
+}
+function wvHTML() {
+  let h = "<h2>WealthView weekly outlook</h2>";
+  if (WV && WV.length) {
+    h += '<div class="ngrid">' + WV.slice(0, 3).map(x => {
+      const href = esc(x.l);
+      return '<article class="ncard neu"><div class="nct"><span class="nsrc" style="background:#0891b2">WealthView</span><span class="ntime">' + esc(new Date(x.d).toLocaleDateString("en-GB", {day: "numeric", month: "short", year: "numeric"})) + "</span></div>" +
+        '<h3 class="nttl"><a href="' + href + '" target="_blank" rel="noopener noreferrer">' + esc(x.t) + "</a></h3>" +
+        '<div class="nft"><span class="nimp">&#9679; Weekly outlook</span><a class="nrd" href="' + href + '" target="_blank" rel="noopener noreferrer">Read &rarr;</a></div></article>';
+    }).join("") + "</div>";
+  } else h += '<div class="card"><p class="note" style="margin:0">Weekly Nifty key levels and time-cycle outlook from WealthView Analytics.</p></div>';
+  return h + '<p class="note" style="margin:6px 2px 14px"><a href="' + WV_URL + '" target="_blank" rel="noopener noreferrer">All WealthView articles &#8599;</a></p>';
+}
 function nwPaint() {
   const o = document.getElementById("nwbody"); if (!o) return;
-  let h = ""; try { h += mnHTML(); } catch (e) { h += '<div class="card"><p class="note">Problem drawing news: ' + esc(e && e.message) + "</p></div>"; }
+  let h = ""; try { h += wvHTML(); } catch (e) {}
+  try { wvLoad(); } catch (e) {} try { h += mnHTML(); } catch (e) { h += '<div class="card"><p class="note">Problem drawing news: ' + esc(e && e.message) + "</p></div>"; }
   try { h += astroHTML(); } catch (e) { h += '<div class="card"><p class="note">Problem drawing the astro calendar: ' + esc(e && e.message) + "</p></div>"; }
   try { h += eventsHTML(); } catch (e) {}
   o.innerHTML = h;
@@ -2833,11 +2861,46 @@ const ppApi = (function () {
     h += rows.length ? rows.map(x => {
       const P = x.P, s = x.s, sy = symOfTk(s.ticker), o = openTk === s.ticker;
       let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer"><td><b>' + E(sy) + '</b> <span class="note">' + E(s.name) + '</span>' + (x.ad && x.d >= 0 && x.d <= 3 ? ' <span class="chip g">Results ' + dTxt(x.ad) + "</span>" : "") + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td><td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td>' + (x.ad ? E(dTxt(x.ad, true)) : '<span class="note" title="Not in the data file or the results calendar">not known</span>') + '</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td><td><a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener">TV &#8599;</a></td></tr>';
-      if (o) r += '<tr class="det"><td colspan="10"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Result date in data file", E(s.result_date || "not given")], ["Quarter ended", E(s.quarter_end)], ["Announcement date used", x.ad ? E(x.ad) : "not known"]].map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + "</dl></td></tr>";
+      if (o) r += '<tr class="det"><td colspan="10"><div style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px))"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Result date in data file", E(s.result_date || "not given")], ["Quarter ended", E(s.quarter_end)], ["Announcement date used", x.ad ? E(x.ad) : "not known"]].map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + '</dl><div id="ppchbox" data-sym="' + E(sy) + '" data-ad="' + E(x.ad || "") + '" style="height:360px;margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="ppchnote" class="note" style="margin:6px 0 0">Loading chart...</div></div></td></tr>';
       return r;
     }).join("") : '<tr><td colspan="10" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
     h += '</tbody></table></div><p class="note">Cash-flow quality (10 pts in your Pine indicator) needs 3-year operating cash flow, which the free data feed does not carry, so scores here can be up to 10 points lower than the dashboard. Check the filing before buying.</p>';
     host.innerHTML = h; paintStatus();
+    try { chartDraw(); } catch (e) {}
+  }
+  /* Candlestick chart under the opened stock: daily candles from the Worker, 50 / 200-day averages, and a marker on the result date. */
+  const PC = {}; let PCH = null;
+  async function chartDraw() {
+    if (PCH) { try { PCH.remove(); } catch (e) {} PCH = null; }
+    const first = $e("#ppchbox"); if (!first) return;
+    try { const wr = first.closest(".wrap"); if (wr && first.parentElement) first.parentElement.style.width = Math.max(300, wr.clientWidth - 24) + "px"; } catch (e) {}   // the table is wider than the screen; keep the detail panel (and chart axis) inside the visible part
+    const sym = first.dataset.sym, ad = first.dataset.ad, tvLink = ' <a class="tvl" href="' + tv(sym) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a>';
+    const say = t => { const n = $e("#ppchnote"); if (n) n.innerHTML = t; };
+    const LW = window.LightweightCharts; if (!LW) { say("The chart library did not load." + tvLink); return; }
+    let o = PC[sym];
+    if (!o || Date.now() - o.t > 4 * 60e3) {
+      try {
+        const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF", {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym];
+        if (rows && rows.length > 30) PC[sym] = o = {t: Date.now(), bars: rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4]}))};
+      } catch (e) {}
+    }
+    const box = $e("#ppchbox"); if (!box || box.dataset.sym !== sym) return;   // user opened another stock meanwhile
+    if (!o || !o.bars) { say("Could not load the chart from your Worker." + tvLink); return; }
+    const c = colors(), bars = o.bars;
+    box.innerHTML = "";
+    const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true});
+    candle.setData(bars);
+    const sma = n => { const out = []; let sum = 0; bars.forEach((b, i) => { sum += b.close; if (i >= n) sum -= bars[i - n].close; if (i >= n - 1) out.push({time: b.time, value: sum / n}); }); return out; };
+    [[50, "#2563eb"], [200, "#c026d3"]].forEach(m => { const d = sma(m[0]); if (d.length) chart.addLineSeries({color: m[1], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false}).setData(d); });
+    let mk = "";
+    if (ad) {
+      const rb = bars.find(b => b.time >= ad);
+      if (rb) { try { candle.setMarkers([{time: rb.time, position: "belowBar", color: "#d97706", shape: "arrowUp", text: "Result"}]); mk = " Orange arrow = result date."; } catch (e) {} }
+    }
+    try { const last = bars[bars.length - 1].time, d = new Date(last + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: last}); } catch (e) { chart.timeScale().fitContent(); }
+    PCH = chart;
+    say("Daily candles from your Cloudflare Worker, last bar " + bars[bars.length - 1].time + ". Blue = 50-day, purple = 200-day average." + mk + tvLink);
   }
   function paint() { build(); paintStatus(); view(); }
   function open() { build(); paint(); if (META.state !== "ok" || Date.now() - META.fetchedAt > 3 * 60 * 1000) load(false); }
