@@ -218,7 +218,7 @@ def load_state():
 # for a company that has just announced results (or one of yours).
 # ---------------------------------------------------------------------------------------------
 SCR = {"off": False, "n": 0, "fail429": 0}
-SCR_MAX = int(os.environ.get("SCREENER_MAX", "900"))
+SCR_MAX = int(os.environ.get("SCREENER_MAX", "1500"))
 SCR_HEAD = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleScreener/1.0 Chrome/124 Safari/537.36", "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-IN,en;q=0.9"}
 
 
@@ -259,9 +259,13 @@ def scr_table(html, sec_id):
 def parse_screener(html):
     """Pure parser (no network) so it can be tested on a saved page. Returns a dict or None."""
     q = scr_table(html, "quarters")
-    sales, npf = q.get("Sales"), q.get("Net Profit")
+    sales, npf = q.get("Sales") or q.get("Revenue"), q.get("Net Profit")   # banks and NBFCs show "Revenue"
     if not sales or not npf:
         return None
+    if not q.get("Sales"):
+        q["Sales"] = sales
+    if not q.get("Operating Profit") and q.get("Financing Profit"):
+        q["Operating Profit"] = q["Financing Profit"]
     dates = sorted(d for d in sales if sales.get(d) is not None and npf.get(d) is not None and re.match(r"\d{4}-\d\d-\d\d$", d))
     if not dates:
         return None
@@ -360,6 +364,8 @@ def screener_build(sym, rdate):
     if not P:
         raise Skip("Screener: no quarterly table found")
     row = scr_row(sym, rdate, P)
+    if (dt.date.today() - dt.date.fromisoformat(row["quarter_end"])).days > QTR_MAX_AGE:
+        raise Skip(f"Screener: newest quarter {row['quarter_end']} is older than {QTR_MAX_AGE} days")
     row.update(hist_fields(sym, rdate))
     return row
 
@@ -598,7 +604,7 @@ def main():
         key = "NSE:" + s
         try:
             rd = recent.get(s)
-            fresh = s in mine or (cal.get(s) and (today - cal[s]).days <= 30)   # reported lately (or yours): worth asking Screener when Yahoo lags
+            fresh = bool(cal.get(s)) and (today - cal[s]).days <= 30   # announced results lately: worth asking Screener when Yahoo lags
             try:
                 r = build(s, rd, cap_check=(MCAP_MAX_CR > 0 and s not in mine))
                 if fresh and r["quarter_end"] < expected.isoformat():
