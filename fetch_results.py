@@ -14,7 +14,7 @@ Changes vs the previous version
 - Old rows that could not be refreshed are kept but tagged in the feed_note column.
 - Optional overrides.csv: type a newer quarter by hand while the feed lags.
 """
-import csv, os, sys, time, datetime as dt
+import csv, io, json, os, sys, time, datetime as dt
 import warnings
 import requests, pandas as pd, yfinance as yf
 
@@ -24,6 +24,9 @@ RECENT_DAYS = 14        # "just announced" = results filed in the last N days
 KEEP_DAYS = 45          # (kept for reference)
 QTR_MAX_AGE = 120       # ignore stocks whose newest quarter is older than this (days)
 CR = 1e7
+MCAP_MAX_CR = float(os.environ.get("MCAP_MAX_CR", "0"))   # 0 = no market-cap filter (every NSE stock is scored); set e.g. 50000 to skip very large caps
+BUDGET_MIN = float(os.environ.get("BUDGET_MIN", "100"))       # stop scanning after this many minutes; the rest is picked up by the next run
+RECHECK = {"ok": 7, "big": 30, "nodata": 14}                  # days before a stock is looked at again (full runs)
 COLS = ["ticker","name","price","mcap","pe","high52","result_date","quarter_end",
         "rev_cur","rev_prev","rev_yoy","np_cur","np_prev","np_yoy",
         "ebitda_cur","ebitda_prev","ebitda_yoy","eps_cur","eps_prev","eps_yoy",
@@ -149,6 +152,47 @@ def nse_recent():
     return out
 
 
+class Big(Exception):
+    pass
+
+
+def nse_universe():
+    """Every NSE equity symbol (series EQ/BE/SM/ST). Cached in universe.txt so a failed download
+    never shrinks the list."""
+    urls = ["https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv", "https://archives.nseindia.com/content/equities/EQUITY_L.csv"]
+    got = []
+    for u in urls:
+        try:
+            r = requests.get(u, headers={"User-Agent": "Mozilla/5.0"}, timeout=40)
+            r.raise_for_status()
+            rd = csv.DictReader(io.StringIO(r.text))
+            for row in rd:
+                row = {(k or "").strip().upper(): (v or "").strip() for k, v in row.items()}
+                if row.get("SERIES") in ("EQ", "BE", "SM", "ST") and row.get("SYMBOL"):
+                    got.append(row["SYMBOL"].upper())
+            if len(got) > 1000:
+                break
+        except Exception as e:
+            print("NSE equity list failed:", u, "->", e, file=sys.stderr)
+            got = []
+    if len(got) > 1000:
+        got = sorted(set(got))
+        open("universe.txt", "w").write("\n".join(got) + "\n")
+        print(f"NSE equity list: {len(got)} symbols (saved to universe.txt)")
+        return got
+    if os.path.exists("universe.txt"):
+        got = [x.strip() for x in open("universe.txt") if x.strip()]
+        print(f"NSE equity list unavailable, using cached universe.txt ({len(got)} symbols)")
+    return got
+
+
+def load_state():
+    try:
+        return json.load(open("scan_state.json"))
+    except Exception:
+        return {}
+
+
 def last_quarter_end(today):
     ends = [dt.date(y, m, d) for y in (today.year - 1, today.year) for m, d in ((3, 31), (6, 30), (9, 30), (12, 31))]
     return max(e for e in ends if e < today)
@@ -183,8 +227,17 @@ def get_quarters(t):
     return None
 
 
-def build(sym, rdate):
+def build(sym, rdate, cap_check=False):
     t = yf.Ticker(sym + ".NS")
+    if cap_check:
+        try:
+            mc = t.fast_info["market_cap"]
+            if mc and mc / CR > MCAP_MAX_CR:
+                raise Big(f"market cap {mc / CR:,.0f} Cr is above {MCAP_MAX_CR:,.0f} Cr")
+        except Big:
+            raise
+        except Exception:
+            pass   # cannot tell: carry on and let the normal path decide
     q = get_quarters(t)
     if q is None:
         raise Skip("Yahoo returned no quarterly statements")
@@ -325,9 +378,12 @@ def main():
     uni = []
     if os.path.exists("tickers.txt"):
         uni = list(dict.fromkeys(x.strip().upper().replace("NSE:", "") for x in open("tickers.txt") if x.strip() and not x.startswith("#")))
-    syms = [s for s in recent if not uni or s in uni] if recent else uni
+    mine = set(uni) | set(recent)                    # your own list + fresh filers: never skipped by market cap
+    full_list = nse_universe()
+    state = load_state()
+    syms = list(dict.fromkeys(list(uni) + list(recent) + full_list))
     fast = os.environ.get("FAST") == "1"   # quick runs: only stocks that filed in the last 2 days, new ones, or behind the calendar quarter
-    print(f"Scanning {len(syms)} symbols (NSE feed gave {len(recent)})")
+    print(f"Universe {len(syms)} symbols (your list {len(uni)}, fresh filers {len(recent)}, NSE list {len(full_list)})")
     old = {}
     if os.path.exists("pead.csv"):
         for r in csv.DictReader(open("pead.csv", encoding="utf-8")):
@@ -338,15 +394,30 @@ def main():
         keep = []
         for s in syms:
             o, fd = old.get("NSE:" + s), recent.get(s)
-            if o is None or (o.get("quarter_end") or "") < expected.isoformat() or (fd and (today - fd).days <= 2):
+            if (o is None and s in mine) or (o is not None and (o.get("quarter_end") or "") < expected.isoformat()) or (fd and (today - fd).days <= 2):
                 keep.append(s)
         print(f"FAST run: {len(keep)} of {len(syms)} symbols")
         syms = keep
-    new, behind, skipped = 0, [], []
+    else:
+        # full run: your list and fresh filers first, then everything else, least recently checked first
+        def due(s):
+            st = state.get(s)
+            if not st or s in mine:
+                return True
+            return (today - dt.date.fromisoformat(st["d"])).days >= RECHECK.get(st["r"], 7)
+        syms = [s for s in syms if due(s)]
+        syms.sort(key=lambda s: (0 if s in mine else 1, (state.get(s) or {}).get("d", "")))
+        print(f"Full run: {len(syms)} symbols due (rest checked recently)")
+    t0 = time.time()
+    new, behind, skipped, big, scanned = 0, [], [], 0, 0
     for s in syms:
+        if time.time() - t0 > BUDGET_MIN * 60:
+            print(f"Time budget of {BUDGET_MIN:.0f} min reached after {scanned} symbols; the next run continues with the rest")
+            break
+        scanned += 1
         key = "NSE:" + s
         try:
-            r = build(s, recent.get(s))
+            r = build(s, recent.get(s), cap_check=(MCAP_MAX_CR > 0 and s not in mine))
             if not r["result_date"]:
                 fd = nse_filing_for(s, r["quarter_end"])
                 if fd:
@@ -364,11 +435,19 @@ def main():
                 r["feed_note"] = "; ".join(x for x in (r["feed_note"], note) if x)
                 behind.append(f"{s} ({r['quarter_end']})")
             old[key] = r
+            state[s] = {"d": today.isoformat(), "r": "ok"}
             new += 1
             print(f"OK    {s}: quarter {r['quarter_end']}" + (f"  [{r['feed_note']}]" if r["feed_note"] else ""))
+        except Big as e:
+            state[s] = {"d": today.isoformat(), "r": "big"}
+            old.pop(key, None)
+            big += 1
+            time.sleep(0.15)
+            continue   # no log line: thousands of large caps would drown the log
         except Skip as e:
             print(f"SKIP  {s}: {e}")
             skipped.append(s)
+            state[s] = {"d": today.isoformat(), "r": "nodata"}
             if key in old:
                 old[key]["feed_note"] = f"stale, not refreshed: {e}"
         except Exception as e:
@@ -377,6 +456,8 @@ def main():
             if key in old:
                 old[key]["feed_note"] = f"stale, not refreshed: {type(e).__name__}"
         time.sleep(0.4)
+    json.dump(state, open("scan_state.json", "w"), separators=(",", ":"))
+    print(f"Scanned {scanned}: {new} scored, {big} above {MCAP_MAX_CR:,.0f} Cr, {len(skipped)} skipped (no usable Yahoo data)")
     apply_overrides(old)
     rows = list(old.values())
     with open("pead.csv", "w", newline="", encoding="utf-8") as fh:
