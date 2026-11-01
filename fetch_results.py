@@ -26,7 +26,8 @@ QTR_MAX_AGE = 120       # ignore stocks whose newest quarter is older than this 
 CR = 1e7
 MCAP_MAX_CR = float(os.environ.get("MCAP_MAX_CR", "0"))   # 0 = no market-cap filter (every NSE stock is scored); set e.g. 50000 to skip very large caps
 BUDGET_MIN = float(os.environ.get("BUDGET_MIN", "100"))       # stop scanning after this many minutes; the rest is picked up by the next run
-RECHECK = {"ok": 7, "big": 30, "nodata": 14}                  # days before a stock is looked at again (full runs)
+WORKER = os.environ.get("WORKER_URL", "https://market-feed.rajeeeev75.workers.dev")
+RECHECK = {"ok": 7, "big": 30, "nodata": 14, "stale": 25}   # "stale" = newest quarter is old, i.e. the company has not reported yet; re-opened early when the Worker calendar shows a new filing                  # days before a stock is looked at again (full runs)
 COLS = ["ticker","name","price","mcap","pe","high52","result_date","quarter_end",
         "rev_cur","rev_prev","rev_yoy","np_cur","np_prev","np_yoy",
         "ebitda_cur","ebitda_prev","ebitda_yoy","eps_cur","eps_prev","eps_yoy",
@@ -184,6 +185,24 @@ def nse_universe():
         got = [x.strip() for x in open("universe.txt") if x.strip()]
         print(f"NSE equity list unavailable, using cached universe.txt ({len(got)} symbols)")
     return got
+
+
+def worker_results():
+    """{symbol: date} of results announced in the last 60 days, from your Worker's NSE board-meeting
+    calendar (?results=1). Works from GitHub where NSE's own results feed returns stale rows."""
+    out = {}
+    try:
+        r = requests.get(WORKER + "/?results=1", timeout=60)
+        r.raise_for_status()
+        for x in r.json().get("results", []):
+            try:
+                out[x["s"].upper()] = dt.date.fromisoformat(x["d"][:10])
+            except Exception:
+                pass
+        print(f"Worker calendar: {len(out)} companies announced results in the last 60 days")
+    except Exception as e:
+        print("Worker calendar unavailable:", e, file=sys.stderr)
+    return out
 
 
 def load_state():
@@ -378,6 +397,10 @@ def main():
     uni = []
     if os.path.exists("tickers.txt"):
         uni = list(dict.fromkeys(x.strip().upper().replace("NSE:", "") for x in open("tickers.txt") if x.strip() and not x.startswith("#")))
+    cal = worker_results()
+    for k, v in cal.items():
+        if (today - v).days <= RECENT_DAYS and (k not in recent or v > recent[k]):
+            recent[k] = v   # fresh filers: scanned first and given a real announcement date
     mine = set(uni) | set(recent)                    # your own list + fresh filers: never skipped by market cap
     full_list = nse_universe()
     state = load_state()
@@ -404,6 +427,8 @@ def main():
             st = state.get(s)
             if not st or s in mine:
                 return True
+            if cal.get(s) and (cal[s] >= dt.date.fromisoformat(st["d"]) or (today - cal[s]).days <= 7):
+                return True   # announced results since we last looked, or within the last week (Yahoo can lag a day or two)
             return (today - dt.date.fromisoformat(st["d"])).days >= RECHECK.get(st["r"], 7)
         syms = [s for s in syms if due(s)]
         syms.sort(key=lambda s: (0 if s in mine else 1, (state.get(s) or {}).get("d", "")))
@@ -447,7 +472,7 @@ def main():
         except Skip as e:
             print(f"SKIP  {s}: {e}")
             skipped.append(s)
-            state[s] = {"d": today.isoformat(), "r": "nodata"}
+            state[s] = {"d": today.isoformat(), "r": "stale" if "is older than" in str(e) else "nodata"}
             if key in old:
                 old[key]["feed_note"] = f"stale, not refreshed: {e}"
         except Exception as e:
