@@ -1183,7 +1183,34 @@ function skeleton(tk) {
     MAS.map(m => '<button type="button" class="cbtn ma" style="--mc:' + m.color + '" data-ma="' + m.n + '" aria-pressed="' + (m.n !== 200) + '">' + m.n + " MA</button>").join("") +
     '</div>' + (isNiftyTk(tk) ? symRowHTML() : "") + '<div class="chartbox"><div class="chartempty">Loading chart data...</div></div><div class="chartbar"><span class="chartmsg"></span><a href="https://www.tradingview.com/chart/?symbol=' + encodeURIComponent(tk) + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
 }
+/* Live daily candles from your Cloudflare Worker (Yahoo), used instead of the slow Google Sheet history; the last candle follows the live NSE price. */
+const LB = {};
+const lbSym = tk => { try { return isNiftyTk(tk) ? "" : symOf(tk); } catch (e) { return ""; } };
+const chartBarsOf = tk => { const l = LB[String(tk).toUpperCase()]; if (l && l.bars && l.bars.length > 30) return l.bars; return (HIST && HIST[String(tk).toUpperCase()]) || null; };
+const chartStamp = tk => { const l = LB[String(tk).toUpperCase()]; return histVer + ":" + (l && l.bars ? l.t : 0); };
+async function lbLoad(tk, force) {
+  const key = String(tk).toUpperCase(), sym = lbSym(tk); if (!sym || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
+  const o = LB[key]; if (o && o.busy) return; if (!force && o && o.bars && Date.now() - o.t < 4 * 60e3) return;
+  LB[key] = Object.assign({}, o || {}, {busy: true});
+  try {
+    const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF", {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym];
+    if (rows && rows.length > 30) LB[key] = {t: Date.now(), busy: false, bars: rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))};
+    else LB[key] = Object.assign({}, o || {}, {busy: false, err: (j && j.error) || "no data"});
+  } catch (e) { LB[key] = Object.assign({}, o || {}, {busy: false, err: String((e && e.message) || e)}); }
+  try { paintChart(tk); } catch (e) {}
+}
+function liveBar(tk) {
+  const s = CH[tk]; if (!s || !s.bars || !s.bars.length) return;
+  const r = lastRows.find(x => x.s.ticker === tk), p = r && r.c.p; if (!(p > 0)) return;
+  const b = s.bars[s.bars.length - 1], today = new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Kolkata"});
+  if (b.time !== today) return;
+  b.high = Math.max(b.high, p); b.low = Math.min(b.low, p); b.close = p;
+  try { s.candle.update({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close}); } catch (e) {}
+}
+setInterval(() => { try { Object.keys(CH).forEach(liveBar); } catch (e) {} }, 15000);
+setInterval(() => { try { const n = document.querySelector("section.stock.on[data-tk]"); if (n && !document.hidden) lbLoad(n.dataset.tk, false); } catch (e) {} }, 60000);
 function emptyMessage(tk) {
+  if (window.LightweightCharts && chartBarsOf(tk)) return "";
   if (histState === "none") return "Charts need the History tab of your sheet. Follow step 7 in SETUP.md, then paste its link into HISTORY_CSV_URL in this file.";
   if (histState === "error" && !HIST) return "Could not load the History tab. Check that it is published as CSV and that the link in HISTORY_CSV_URL is correct.";
   if (!HIST) return "Loading chart data...";
@@ -1236,8 +1263,8 @@ function buildChart(tk, box) {
   CH[tk] = {chart, candle, vol, ma, maOn, lines: [], ver: -1, range: "6M", bars: null};
 }
 function setChartData(tk) {
-  const s = CH[tk], bars = HIST[tk.toUpperCase()], c = colors();
-  s.bars = bars;
+  const s = CH[tk], bars = chartBarsOf(tk), c = colors();
+  s.bars = bars; s.src = chartStamp(tk);
   s.candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
   s.vol.setData(bars.map(b => ({time: b.time, value: b.vol, color: withAlpha(b.close >= b.open ? c.up : c.dn, "66")})));
   MAS.forEach(m => s.ma[m.n].setData(sma(bars, m.n)));
@@ -1266,10 +1293,12 @@ function paintChart(tk) {
     note.textContent = ""; return;
   }
   if (!CH[tk]) { if (!sec.classList.contains("on")) return; buildChart(tk, box); }
-  if (CH[tk].ver !== histVer) setChartData(tk);
+  if (CH[tk].ver !== histVer || CH[tk].src !== chartStamp(tk)) setChartData(tk);
+  liveBar(tk);
   refreshLines(tk);
   const last = CH[tk].bars[CH[tk].bars.length - 1];
-  note.textContent = "Daily candles from Google Finance via your sheet, last bar " + last.time + ". Dashed lines are your saved levels.";
+  const live = LB[tk.toUpperCase()] && LB[tk.toUpperCase()].bars;
+  note.textContent = (live ? "Live daily candles from your Cloudflare Worker, last candle follows the NSE price, last bar " : "Daily candles from Google Finance via your sheet, last bar ") + last.time + ". Dashed lines are your saved levels.";
 }
 function paintAll() { document.querySelectorAll("section.stock[data-tk]").forEach(n => paintChart(n.dataset.tk)); }
 function ensureChart(sec) {
@@ -1277,6 +1306,7 @@ function ensureChart(sec) {
   const slot = sec.querySelector(".chartslot"); if (!slot) return;
   if (!slot.firstChild) { slot.innerHTML = skeleton(sec.dataset.tk); setupToolbar(slot, sec.dataset.tk); }
   paintChart(sec.dataset.tk);
+  lbLoad(sec.dataset.tk, false);
 }
 function histFromCache() {
   if (HIST || !HISTORY_CSV_URL) return;
@@ -2982,16 +3012,16 @@ const tcApi = (function () {
     const up = O.view === "up", dir = up ? 1 : -1;
     const stocks = V.slice().sort(bySt(dir)), secs = R.secs.slice().sort(bySt(1));
     const bs = secs[0], ws = secs.length ? secs[secs.length - 1] : null, bk = V.slice().sort(bySt(1))[0], wk = V.slice().sort(bySt(-1))[0];
-    const tile = (lab, title, S, sub, c) => '<div class="dtile"><small>' + lab + "</small><b" + (c ? ' style="color:' + c + '"' : "") + ">" + esc(title) + " <i>" + (isFinite(S.prob) ? S.prob.toFixed(0) + "%" : "") + "</i></b><span>" + sub + "</span></div>";
+    const tile = (lab, title, S, sub, c, link) => '<div class="dtile"><small>' + lab + "</small><b" + (c ? ' style="color:' + c + '"' : "") + ">" + esc(title) + (link ? znTvA(link, "D") : "") + " <i>" + (isFinite(S.prob) ? S.prob.toFixed(0) + "%" : "") + "</i></b><span>" + sub + "</span></div>";
     const sub = (S, extra) => "Up in " + S.w + " of " + S.n + " years &middot; avg " + pct(S.avg * 100, 1) + (extra ? " &middot; " + extra : "");
     let h = '<div class="dtiles">' +
       (bs ? tile("Best sector", bs.name, bs.S, sub(bs.S, bs.count + " stocks"), pcol(bs.S.prob)) : "") +
-      tile("Best stock", bk.sym, bk.S, sub(bk.S, esc(bk.sec || "—")), pcol(bk.S.prob)) +
+      tile("Best stock", bk.sym, bk.S, sub(bk.S, esc(bk.sec || "—")), pcol(bk.S.prob), bk.sym) +
       (ws ? tile("Weakest sector", ws.name, ws.S, sub(ws.S, ws.count + " stocks"), pcol(ws.S.prob)) : "") +
-      tile("Weakest stock", wk.sym, wk.S, sub(wk.S, esc(wk.sec || "—")), pcol(wk.S.prob)) + "</div>";
-    if (bs && bs.lead) h += '<p class="note">Strongest name inside the best sector (' + esc(bs.name) + "): <b>" + esc(bs.lead.sym) + "</b>, up in " + bs.lead.S.w + " of " + bs.lead.S.n + " years (" + bs.lead.S.prob.toFixed(0) + "%), average " + pct(bs.lead.S.avg * 100, 1) + ".</p>";
+      tile("Weakest stock", wk.sym, wk.S, sub(wk.S, esc(wk.sec || "—")), pcol(wk.S.prob), wk.sym) + "</div>";
+    if (bs && bs.lead) h += '<p class="note">Strongest name inside the best sector (' + esc(bs.name) + "): <b>" + esc(bs.lead.sym) + "</b>" + znTvA(bs.lead.sym, "D") + ", up in " + bs.lead.S.w + " of " + bs.lead.S.n + " years (" + bs.lead.S.prob.toFixed(0) + "%), average " + pct(bs.lead.S.avg * 100, 1) + ".</p>";
     h += '<h3 class="tch">Sectors</h3><div class="wrap"><table class="tctbl"><thead><tr><th>#</th><th>Sector</th><th>Probability</th><th>Up years</th><th class="num">Avg move</th><th class="num">Stocks</th><th class="num">Stocks &ge;60%</th><th>Strongest stock</th></tr></thead><tbody>' +
-      (secs.length ? secs.map((s, i) => "<tr><td>" + (i + 1) + "</td><td><b>" + esc(s.name) + "</b></td><td>" + probCell(s.S) + '</td><td class="num">' + s.S.w + "/" + s.S.n + '</td><td class="num">' + ret(s.S.avg) + '</td><td class="num">' + s.count + '</td><td class="num">' + s.breadth + "</td><td>" + esc(s.lead.sym) + " <small>" + s.lead.S.prob.toFixed(0) + "%</small></td></tr>").join("") : '<tr><td colspan="8" class="note">No sector has three or more stocks with enough history.</td></tr>') + "</tbody></table></div>";
+      (secs.length ? secs.map((s, i) => "<tr><td>" + (i + 1) + "</td><td><b>" + esc(s.name) + "</b></td><td>" + probCell(s.S) + '</td><td class="num">' + s.S.w + "/" + s.S.n + '</td><td class="num">' + ret(s.S.avg) + '</td><td class="num">' + s.count + '</td><td class="num">' + s.breadth + "</td><td>" + esc(s.lead.sym) + znTvA(s.lead.sym, "D") + " <small>" + s.lead.S.prob.toFixed(0) + "%</small></td></tr>").join("") : '<tr><td colspan="8" class="note">No sector has three or more stocks with enough history.</td></tr>') + "</tbody></table></div>";
     h += '<div class="charttools" style="border:0;padding:0;margin:8px 0"><h3 class="tch" style="margin:0 8px 0 0">Stocks</h3><button type="button" class="cbtn" data-tcv="up" aria-pressed="' + up + '">Most likely up</button><button type="button" class="cbtn" data-tcv="dn" aria-pressed="' + !up + '">Most likely down</button></div>';
     h += '<div class="wrap"><table class="tctbl"><thead><tr><th>#</th><th>Stock</th><th>Sector</th><th>Probability</th><th>Up years</th><th class="num">Avg move</th><th class="num">Median</th><th class="num">Worst</th><th>This month</th><th>View</th><th class="num">Years</th></tr></thead><tbody>';
     stocks.slice(0, SHOWN).forEach((r, i) => {
@@ -3237,7 +3267,7 @@ const rmApi = (function () {
   }
   function detail(x) {
     const r = x.r, sg = r.lastSig, pln = sg && sg.plan, T = (r.trades || []).slice(-5).reverse();
-    let h = '<tr class="det"><td colspan="14"><div class="rmdet">' + chartSVG(x) + '<div class="rmside">';
+    let h = '<tr class="det"><td colspan="14"><div class="rmdet">' + chartSVG(x) + '<div class="rmside"><div class="rmk"><a class="tvl" href="' + znTv(x.sym, O.tf) + '" target="_blank" rel="noopener">Open ' + E(x.sym) + ' on TradingView &#8599;</a></div>';
     h += '<div class="rmk"><b>Structure</b> ' + (r.aDir === 1 ? "Bullish" : r.aDir === -1 ? "Bearish" : r.lastDir === 1 ? "Bullish (ended)" : r.lastDir === -1 ? "Bearish (ended)" : "None") + " &middot; " + E(r.stage) + "</div>";
     if (r.p[0] && r.p[0].b !== null) h += '<div class="rmk">1: ' + px(r.p[0].p) + " (" + E(when(x, r.p[0].b)) + ") &middot; 2: " + px(r.p[1].p) + " &middot; 3: " + px(r.p[2].p) + " (" + E(when(x, r.p[2].b)) + ")</div>";
     if (isFinite(r.age)) h += '<div class="rmk">Structure age: ' + r.age + " / " + RM_P.maxAge + " bars &middot; quality " + Math.round(r.score) + " " + r.grade + "</div>";
@@ -3305,7 +3335,7 @@ const rmApi = (function () {
     if (!rows.length) h += '<tr><td colspan="14" class="note">' + (O.view === "sig" ? "No fresh 1-2-3 signals on this timeframe with these filters. Try \"Armed\" to see stocks close to a neckline break, widen \"Signal within\", or lower Min quality." : "Nothing matches these filters. Lower Min quality or change the side.") + "</td></tr>";
     rows.slice(0, SHOWN).forEach((x, i) => {
       const r = x.r, f = freshOf(x), sg = f || null, pn = sg && sg.plan, sd = f ? f.dir : r.aDir, isOpen = openSym === x.sym, nk = toNeck(r), atrAway = isFinite(nk) && r.atr > 0 ? Math.abs(r.neck - r.close) / r.atr : NaN;
-      h += '<tr class="row" data-sym="' + E(x.sym) + '" style="cursor:pointer"><td>' + (i + 1) + "</td><td><b>" + E(x.sym) + "</b></td><td>" + E(x.sec || "—") + "</td><td>" + sideTag(sd) + "</td><td>" + E(r.aDir !== 0 ? r.stage : (f ? "Signal" : r.stage)) + '</td><td class="num"><b style="color:' + gcol(f ? f.score : r.score) + '">' + (isFinite(f ? f.score : r.score) ? Math.round(f ? f.score : r.score) : "—") + "</b> " + rmGrade(f ? f.score : r.score) + "</td><td>" +
+      h += '<tr class="row" data-sym="' + E(x.sym) + '" style="cursor:pointer"><td>' + (i + 1) + "</td><td><b>" + E(x.sym) + "</b>" + znTvA(x.sym, O.tf) + "</td><td>" + E(x.sec || "—") + "</td><td>" + sideTag(sd) + "</td><td>" + E(r.aDir !== 0 ? r.stage : (f ? "Signal" : r.stage)) + '</td><td class="num"><b style="color:' + gcol(f ? f.score : r.score) + '">' + (isFinite(f ? f.score : r.score) ? Math.round(f ? f.score : r.score) : "—") + "</b> " + rmGrade(f ? f.score : r.score) + "</td><td>" +
         (f ? (f.dir === 1 ? "BUY " : "SELL ") + f.kind + " <small>" + (r.n - 1 - f.i === 0 ? "latest bar" : (r.n - 1 - f.i) + " bars ago") + "</small>" : r.lastSig ? '<small>' + (r.lastSig.dir === 1 ? "BUY " : "SELL ") + r.lastSig.kind + ", " + (r.n - 1 - r.lastSig.i) + " bars ago</small>" : "—") +
         '</td><td class="num">' + (pn ? px(pn.entry) : "—") + '</td><td class="num">' + (pn ? px(pn.stop) : "—") + '</td><td class="num">' + (pn ? px(pn.t1) : "—") + '</td><td class="num">' + (pn ? px(pn.t2) : "—") + '</td><td class="num">' + (isFinite(nk) ? pct(nk, 1) + (isFinite(atrAway) ? " <small>" + atrAway.toFixed(1) + " ATR</small>" : "") : "—") + '</td><td class="num">' + bpText(r.be) + "</td><td>" + tlText(r) + "</td></tr>";
       if (isOpen) h += detail(x);
