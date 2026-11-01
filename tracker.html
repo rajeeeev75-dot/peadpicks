@@ -2703,7 +2703,13 @@ const ppApi = (function () {
     return rows.map(a => Object.fromEntries(h.map((k, i) => [k, a[i]])));
   }
   const symOfTk = t => String(t || "").split(":").pop().trim().toUpperCase();
-  function isoOf(d) { const m = String(d || "").match(/^(\d+)\/(\d+)\/(\d+)$/); if (m) return m[3] + "-" + String(m[2]).padStart(2, "0") + "-" + String(m[1]).padStart(2, "0"); return /^\d{4}-\d{2}-\d{2}$/.test(String(d || "")) ? d : ""; }
+  function isoOf(d) {
+    d = String(d || "").trim(); let m = d.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/), a, b;
+    if (m) { a = +m[1]; b = +m[2]; if (b > 12 && a <= 12) { const t = a; a = b; b = t; } return m[3] + "-" + String(b).padStart(2, "0") + "-" + String(a).padStart(2, "0"); }
+    m = d.match(/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})/); if (m) return m[1] + "-" + String(m[2]).padStart(2, "0") + "-" + String(m[3]).padStart(2, "0");
+    const t = Date.parse(d); return isFinite(t) ? new Date(t).toISOString().slice(0, 10) : "";
+  }
+  const dTxt = (iso, yr) => { if (!iso) return "—"; const dt = new Date(iso + "T00:00:00Z"); return dt.toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short", ...(yr ? {year: "numeric"} : {}), timeZone: "UTC"}); };
   const todayISO = () => new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Kolkata"});
   const ageOf = iso => iso ? Math.round((Date.parse(todayISO() + "T00:00:00Z") - Date.parse(iso + "T00:00:00Z")) / 864e5) : NaN;
   let DATA = [], META = {state: "loading", err: "", fetchedAt: 0, modified: ""}, sortKey = "total", sortDir = -1, openTk = null, F = {min: 65, days: 30, cap: 500, mode: "auto"}, busy = false;
@@ -2763,7 +2769,7 @@ const ppApi = (function () {
     let rows = DATA.map(s => ({s, P: score(s, F.mode), d: ageOf(isoOf(s.result_date))})).filter(x => x.P);
     rows.forEach(x => { if (!isFinite(x.d)) { const m = String(x.s.quarter_end || "").split("-"); x.d = m.length === 3 ? Math.floor((Date.now() - Date.UTC(+m[0], m[1] - 1, +m[2])) / 864e5) - 45 : NaN; } });
     rows = rows.filter(x => x.P.total >= F.min && (!isFinite(x.d) || x.d <= F.days) && (!(num(x.s.mcap) >= 0) || num(x.s.mcap) >= F.cap));
-    const key = {total: x => x.P.total, fwdPe: x => x.P.fwdPe || 1e9, revY: x => x.P.revY, npY: x => x.P.npY, d: x => x.d, ticker: x => String(x.s.ticker)};
+    const key = {total: x => x.P.total, fwdPe: x => x.P.fwdPe || 1e9, revY: x => x.P.revY, npY: x => x.P.npY, d: x => x.d, rd: x => isoOf(x.s.result_date) || "", ticker: x => String(x.s.ticker)};
     rows.sort((a, b) => { const A = key[sortKey](a), B = key[sortKey](b); return (A > B ? 1 : A < B ? -1 : 0) * sortDir; });
     let h = "";
     const pend = pending();
@@ -2772,14 +2778,14 @@ const ppApi = (function () {
         pend.slice(0, 40).map(x => '<a class="ppchip' + (x.fno ? " f" : "") + '" href="' + tv(x.sym) + '" target="_blank" rel="noopener" title="' + E(x.n) + " | " + (x.age === 0 ? "today" : x.age === 1 ? "yesterday" : x.age + " days ago") + '">' + E(x.sym) + " <i>" + (x.age === 0 ? "today" : x.age === 1 ? "yest." : x.age + "d") + "</i></a>").join("") + (pend.length > 40 ? '<span class="note">+' + (pend.length - 40) + " more</span>" : "") + "</div></div>";
     }
     h += '<div class="dtiles">' + rows.slice(0, 4).map(x => '<div class="dtile" data-tk="' + E(x.s.ticker) + '" style="cursor:pointer"><small>' + E(symOfTk(x.s.ticker)) + '</small><b>' + pf(x.P.total, 0) + '</b><span><span class="tag" style="background:' + x.P.rec[1] + '">' + x.P.rec[0] + "</span> Fwd P/E " + pf(x.P.fwdPe) + "x</span></div>").join("") + "</div>";
-    const th = [["ticker", "Stock"], ["total", "Score"], ["", "Call"], ["revY", "Sales YoY"], ["npY", "Profit YoY"], ["fwdPe", "Fwd P/E"], ["", "From 52w high"], ["d", "Days since result"], ["", "Chart"]];
+    const th = [["ticker", "Stock"], ["total", "Score"], ["", "Call"], ["revY", "Sales YoY"], ["npY", "Profit YoY"], ["fwdPe", "Fwd P/E"], ["", "From 52w high"], ["rd", "Result date"], ["d", "Days since result"], ["", "Chart"]];
     h += '<div class="wrap"><table class="pptbl"><thead><tr>' + th.map(a => '<th data-k="' + a[0] + '"' + (a[0] ? ' style="cursor:pointer"' : "") + ">" + a[1] + (a[0] === sortKey ? (sortDir < 0 ? " ▼" : " ▲") : "") + "</th>").join("") + "</tr></thead><tbody>";
     h += rows.length ? rows.map(x => {
       const P = x.P, s = x.s, sy = symOfTk(s.ticker), o = openTk === s.ticker;
-      let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer"><td><b>' + E(sy) + '</b> <span class="note">' + E(s.name) + '</span>' + (isFinite(x.d) && x.d <= 1 ? ' <span class="chip g">' + (x.d === 0 ? "Results today" : "Results yesterday") + "</span>" : "") + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td><td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td><td><a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener">TV &#8599;</a></td></tr>';
-      if (o) r += '<tr class="det"><td colspan="9"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Quarter ended", E(s.quarter_end)]].map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + "</dl></td></tr>";
+      let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer"><td><b>' + E(sy) + '</b> <span class="note">' + E(s.name) + '</span>' + (isFinite(x.d) && x.d >= 0 && x.d <= 3 && isoOf(s.result_date) ? ' <span class="chip g">Results ' + dTxt(isoOf(s.result_date)) + "</span>" : "") + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td><td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td>' + E(dTxt(isoOf(s.result_date), true)) + '</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td><td><a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener">TV &#8599;</a></td></tr>';
+      if (o) r += '<tr class="det"><td colspan="10"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Result date in data file", E(s.result_date || "not given")], ["Quarter ended", E(s.quarter_end)]].map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + "</dl></td></tr>";
       return r;
-    }).join("") : '<tr><td colspan="9" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
+    }).join("") : '<tr><td colspan="10" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
     h += '</tbody></table></div><p class="note">Cash-flow quality (10 pts in your Pine indicator) needs 3-year operating cash flow, which the free data feed does not carry, so scores here can be up to 10 points lower than the dashboard. Check the filing before buying.</p>';
     host.innerHTML = h; paintStatus();
   }
