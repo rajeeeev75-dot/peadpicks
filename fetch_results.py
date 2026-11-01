@@ -32,7 +32,7 @@ COLS = ["ticker","name","price","mcap","pe","high52","result_date","quarter_end"
         "rev_cur","rev_prev","rev_yoy","np_cur","np_prev","np_yoy",
         "ebitda_cur","ebitda_prev","ebitda_yoy","eps_cur","eps_prev","eps_yoy",
         "eps_ttm","np_ttm","equity","debt","bvps","earn_ratio","vol_ratio","above_ema200",
-        "feed_note"]
+        "react_pct","gap_pct","pre_close","feed_note"]
 
 
 class Skip(Exception):
@@ -316,11 +316,39 @@ def scr_row(sym, rdate, P):
             "feed_note": "data from Screener.in (Yahoo had no newer quarter)"}
 
 
+def reaction(hist, rdate):
+    """Market reaction to a result. pre_close = last close BEFORE the announcement date; react_pct = close of the first
+    session AFTER the announcement date vs pre_close (covers results out during market hours and after close);
+    gap_pct = that session's open vs the close on the announcement date. Blank until a session after the announcement exists."""
+    out = {"react_pct": "", "gap_pct": "", "pre_close": ""}
+    try:
+        if not rdate or hist is None or len(hist) < 5:
+            return out
+        d = hist.index.date
+        before = [k for k in range(len(hist)) if d[k] < rdate]
+        after = [k for k in range(len(hist)) if d[k] > rdate]
+        if not before or not after:
+            return out
+        j0, i = before[-1], after[0]
+        pre = float(hist["Close"].iloc[j0])
+        if pre <= 0:
+            return out
+        ann = [k for k in range(len(hist)) if d[k] == rdate]
+        ref = float(hist["Close"].iloc[ann[0]]) if ann else pre
+        out["pre_close"] = round(pre, 2)
+        out["react_pct"] = round((float(hist["Close"].iloc[i]) / pre - 1) * 100, 2)
+        out["gap_pct"] = round((float(hist["Open"].iloc[i]) / ref - 1) * 100, 2)
+    except Exception:
+        pass
+    return out
+
+
 def hist_fields(sym, rdate):
     """volume ratio / result-day volume surge / above 200-EMA from Yahoo price history (blank if unavailable)."""
-    out = {"earn_ratio": "", "vol_ratio": "", "above_ema200": ""}
+    out = {"earn_ratio": "", "vol_ratio": "", "above_ema200": "", "react_pct": "", "gap_pct": "", "pre_close": ""}
     try:
         hist = yf.Ticker(sym + ".NS").history(period="2y", auto_adjust=False)
+        out.update(reaction(hist, rdate))
         if len(hist) > 30:
             v, c = hist["Volume"], hist["Close"]
             avg = v.tail(21).iloc[:-1].mean()
@@ -508,8 +536,9 @@ def build(sym, rdate, cap_check=False):
                 i = hist.index.get_loc(after.index[0])
                 base = v.iloc[max(0, i - 20):i].mean()
                 earn_ratio = round(float(v.iloc[i] / base), 2) if base else ""
+    rx = reaction(hist, rdate)
     f = lambda x: "" if x is None else round(x / CR, 2)
-    return {"ticker": "NSE:" + sym, "name": info.get("shortName", sym),
+    return {"ticker": "NSE:" + sym, "name": info.get("shortName", sym), "react_pct": rx["react_pct"], "gap_pct": rx["gap_pct"], "pre_close": rx["pre_close"],
             "price": info.get("currentPrice") or info.get("regularMarketPrice") or "",
             "mcap": f(info.get("marketCap")), "pe": info.get("trailingPE") or "", "high52": info.get("fiftyTwoWeekHigh") or "",
             "result_date": rdate.strftime("%d/%m/%Y") if rdate else "", "quarter_end": qdate.isoformat(),
@@ -587,7 +616,7 @@ def main():
                 return True
             if cal.get(s):
                 o = old.get("NSE:" + s)
-                behind = st["r"] != "ok" or (o is not None and (o.get("quarter_end") or "") < expected.isoformat())
+                behind = st["r"] != "ok" or (o is not None and ((o.get("quarter_end") or "") < expected.isoformat() or (o.get("react_pct") in (None, "") and (today - cal[s]).days >= 1)))
                 if behind and (cal[s] >= dt.date.fromisoformat(st["d"]) or (today - cal[s]).days <= 14):
                     return True   # announced results since we last looked, or lately and our data is still the old quarter (Yahoo / Screener can lag)
             return (today - dt.date.fromisoformat(st["d"])).days >= RECHECK.get(st["r"], 7)
@@ -603,7 +632,7 @@ def main():
         scanned += 1
         key = "NSE:" + s
         try:
-            rd = recent.get(s)
+            rd = recent.get(s) or cal.get(s)
             fresh = bool(cal.get(s)) and (today - cal[s]).days <= 30   # announced results lately: worth asking Screener when Yahoo lags
             try:
                 r = build(s, rd, cap_check=(MCAP_MAX_CR > 0 and s not in mine))
