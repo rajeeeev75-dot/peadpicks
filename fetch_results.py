@@ -14,7 +14,7 @@ Changes vs the previous version
 - Old rows that could not be refreshed are kept but tagged in the feed_note column.
 - Optional overrides.csv: type a newer quarter by hand while the feed lags.
 """
-import csv, io, json, os, sys, time, datetime as dt
+import csv, io, json, os, re, sys, time, datetime as dt
 import warnings
 import requests, pandas as pd, yfinance as yf
 
@@ -210,6 +210,158 @@ def load_state():
         return json.load(open("scan_state.json"))
     except Exception:
         return {}
+
+
+# ---------------------------------------------------------------------------------------------
+# Screener.in fallback. Yahoo updates Indian quarterly results slowly (days to weeks) and misses many
+# small caps; Screener shows a result within about a day. Used only when Yahoo has no usable / no newer quarter
+# for a company that has just announced results (or one of yours).
+# ---------------------------------------------------------------------------------------------
+SCR = {"off": False, "n": 0, "fail429": 0}
+SCR_MAX = int(os.environ.get("SCREENER_MAX", "900"))
+SCR_HEAD = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleScreener/1.0 Chrome/124 Safari/537.36", "Accept": "text/html,application/xhtml+xml", "Accept-Language": "en-IN,en;q=0.9"}
+
+
+def _txt(x):
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", x)).replace("&nbsp;", " ").replace("&amp;", "&").strip()
+
+
+def _num(x):
+    x = (x or "").replace(",", "").replace("%", "").replace("\u20b9", "").strip()
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+def scr_table(html, sec_id):
+    """{row label: {date 'YYYY-MM-DD': value}} for one section of a Screener page."""
+    m = re.search(r'<section id="%s".*?</section>' % sec_id, html, re.S)
+    if not m:
+        return {}
+    sec = m.group(0)
+    head = re.search(r"<thead>(.*?)</thead>", sec, re.S)
+    if not head:
+        return {}
+    keys = re.findall(r'data-date-key="([^"]+)"', head.group(1))
+    out = {}
+    body = re.search(r"<tbody>(.*?)</tbody>", sec, re.S)
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", body.group(1) if body else "", re.S):
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+        if len(tds) < 2:
+            continue
+        lab = _txt(tds[0]).rstrip("+").strip()
+        if lab and lab not in out:
+            out[lab] = {k: _num(_txt(v)) for k, v in zip(keys, tds[1:])}
+    return out
+
+
+def parse_screener(html):
+    """Pure parser (no network) so it can be tested on a saved page. Returns a dict or None."""
+    q = scr_table(html, "quarters")
+    sales, npf = q.get("Sales"), q.get("Net Profit")
+    if not sales or not npf:
+        return None
+    dates = sorted(d for d in sales if sales.get(d) is not None and npf.get(d) is not None and re.match(r"\d{4}-\d\d-\d\d$", d))
+    if not dates:
+        return None
+    ratios = {}
+    for li in re.findall(r'<li class="flex flex-space-between"[^>]*>(.*?)</li>', html, re.S):
+        nm = re.search(r'<span class="name">(.*?)</span>', li, re.S)
+        if nm:
+            ratios[_txt(nm.group(1))] = [_num(_txt(v)) for v in re.findall(r'<span class="number">(.*?)</span>', li, re.S)]
+    bs = scr_table(html, "balance-sheet")
+    bdates = sorted(d for d in (bs.get("Equity Capital") or {}) if re.match(r"\d{4}-\d\d-\d\d$", d))
+    eq = debt = None
+    if bdates:
+        d = bdates[-1]
+        ec, rs, bo = (bs.get("Equity Capital") or {}).get(d), (bs.get("Reserves") or {}).get(d), (bs.get("Borrowings") or {}).get(d)
+        eq = (ec or 0) + rs if rs is not None else None
+        debt = bo
+    nm = re.search(r"<h1[^>]*>.*?<span[^>]*>([^<]+)</span>\s*</h1>", html, re.S)
+    return {"q": q, "dates": dates, "ratios": ratios, "equity": eq, "debt": debt, "name": _txt(nm.group(1)) if nm else ""}
+
+
+def scr_row(sym, rdate, P):
+    """Turn the parsed Screener page into one pead.csv row (same columns/units as build())."""
+    q, ds = P["q"], P["dates"]
+    cur = ds[-1]
+    cd = dt.date.fromisoformat(cur)
+    gap = lambda d: (cd - dt.date.fromisoformat(d)).days
+    prev = next((d for d in reversed(ds[:-1]) if 60 <= gap(d) <= 125), None)
+    yago = next((d for d in reversed(ds[:-1]) if abs(gap(d) - 365) <= 45), None)
+    if prev is None or yago is None:
+        raise Skip("Screener: previous or year-ago quarter missing")
+    g = lambda lab, d: (q.get(lab) or {}).get(d)
+    sales, npf, opp, eps = [g("Sales", d) for d in (cur, prev, yago)], [g("Net Profit", d) for d in (cur, prev, yago)], [g("Operating Profit", d) for d in (cur, prev, yago)], [g("EPS in Rs", d) for d in (cur, prev, yago)]
+    if None in sales or None in npf:
+        raise Skip("Screener: sales / net profit missing")
+    last4 = ds[-4:]
+    eps4 = [g("EPS in Rs", d) for d in last4]
+    np4 = [g("Net Profit", d) for d in last4]
+    r = P["ratios"]
+    first = lambda k: (r.get(k) or [None])[0]
+    hl = r.get("High / Low") or []
+    f = lambda x: "" if x is None else round(x, 2)
+    return {"ticker": "NSE:" + sym, "name": P["name"] or sym, "price": first("Current Price") or "", "mcap": first("Market Cap") or "", "pe": first("Stock P/E") or "",
+            "high52": hl[0] if hl else "", "result_date": rdate.strftime("%d/%m/%Y") if rdate else "", "quarter_end": cur,
+            "rev_cur": f(sales[0]), "rev_prev": f(sales[1]), "rev_yoy": f(sales[2]), "np_cur": f(npf[0]), "np_prev": f(npf[1]), "np_yoy": f(npf[2]),
+            "ebitda_cur": f(opp[0]), "ebitda_prev": f(opp[1]), "ebitda_yoy": f(opp[2]), "eps_cur": eps[0] if eps[0] is not None else "", "eps_prev": eps[1] if eps[1] is not None else "", "eps_yoy": eps[2] if eps[2] is not None else "",
+            "eps_ttm": round(sum(eps4), 2) if len(eps4) == 4 and None not in eps4 else "", "np_ttm": round(sum(np4), 2) if len(np4) == 4 and None not in np4 else "",
+            "equity": f(P["equity"]), "debt": f(P["debt"]), "bvps": first("Book Value") or "", "earn_ratio": "", "vol_ratio": "", "above_ema200": "",
+            "feed_note": "data from Screener.in (Yahoo had no newer quarter)"}
+
+
+def hist_fields(sym, rdate):
+    """volume ratio / result-day volume surge / above 200-EMA from Yahoo price history (blank if unavailable)."""
+    out = {"earn_ratio": "", "vol_ratio": "", "above_ema200": ""}
+    try:
+        hist = yf.Ticker(sym + ".NS").history(period="2y", auto_adjust=False)
+        if len(hist) > 30:
+            v, c = hist["Volume"], hist["Close"]
+            avg = v.tail(21).iloc[:-1].mean()
+            out["vol_ratio"] = round(float(v.iloc[-1] / avg), 2) if avg else ""
+            if len(c) >= 200:
+                out["above_ema200"] = int(c.iloc[-1] > c.ewm(span=200, adjust=False).mean().iloc[-1])
+            if rdate:
+                after = hist[hist.index.date > rdate]
+                if len(after):
+                    i = hist.index.get_loc(after.index[0])
+                    base = v.iloc[max(0, i - 20):i].mean()
+                    out["earn_ratio"] = round(float(v.iloc[i] / base), 2) if base else ""
+    except Exception:
+        pass
+    return out
+
+
+def screener_build(sym, rdate):
+    if SCR["off"] or SCR["n"] >= SCR_MAX:
+        raise Skip("Screener fallback not used (disabled or request cap reached)")
+    P = None
+    for path in ("/consolidated/", "/"):
+        SCR["n"] += 1
+        time.sleep(1.2)
+        try:
+            r = requests.get(f"https://www.screener.in/company/{sym}{path}", headers=SCR_HEAD, timeout=30)
+        except Exception as e:
+            raise Skip(f"Screener unreachable: {type(e).__name__}")
+        if r.status_code == 429 or r.status_code == 403:
+            SCR["fail429"] += 1
+            if SCR["fail429"] >= 3:
+                SCR["off"] = True
+                print("Screener is refusing requests (HTTP %s); fallback switched off for this run" % r.status_code, file=sys.stderr)
+            time.sleep(10)
+            raise Skip(f"Screener HTTP {r.status_code}")
+        if r.status_code != 200:
+            continue
+        P = parse_screener(r.text)
+        if P:
+            break
+    if not P:
+        raise Skip("Screener: no quarterly table found")
+    row = scr_row(sym, rdate, P)
+    row.update(hist_fields(sym, rdate))
+    return row
 
 
 def last_quarter_end(today):
@@ -427,8 +579,11 @@ def main():
             st = state.get(s)
             if not st or s in mine:
                 return True
-            if cal.get(s) and (cal[s] >= dt.date.fromisoformat(st["d"]) or (today - cal[s]).days <= 7):
-                return True   # announced results since we last looked, or within the last week (Yahoo can lag a day or two)
+            if cal.get(s):
+                o = old.get("NSE:" + s)
+                behind = st["r"] != "ok" or (o is not None and (o.get("quarter_end") or "") < expected.isoformat())
+                if behind and (cal[s] >= dt.date.fromisoformat(st["d"]) or (today - cal[s]).days <= 14):
+                    return True   # announced results since we last looked, or lately and our data is still the old quarter (Yahoo / Screener can lag)
             return (today - dt.date.fromisoformat(st["d"])).days >= RECHECK.get(st["r"], 7)
         syms = [s for s in syms if due(s)]
         syms.sort(key=lambda s: (0 if s in mine else 1, (state.get(s) or {}).get("d", "")))
@@ -442,7 +597,24 @@ def main():
         scanned += 1
         key = "NSE:" + s
         try:
-            r = build(s, recent.get(s), cap_check=(MCAP_MAX_CR > 0 and s not in mine))
+            rd = recent.get(s)
+            fresh = s in mine or (cal.get(s) and (today - cal[s]).days <= 30)   # reported lately (or yours): worth asking Screener when Yahoo lags
+            try:
+                r = build(s, rd, cap_check=(MCAP_MAX_CR > 0 and s not in mine))
+                if fresh and r["quarter_end"] < expected.isoformat():
+                    try:
+                        r2 = screener_build(s, rd)
+                        if r2["quarter_end"] > r["quarter_end"]:
+                            r = r2
+                    except Skip:
+                        pass
+            except Skip as e:
+                if not fresh:
+                    raise
+                try:
+                    r = screener_build(s, rd)
+                except Skip as e2:
+                    raise Skip(f"{e} | {e2}")
             if not r["result_date"]:
                 fd = nse_filing_for(s, r["quarter_end"])
                 if fd:
@@ -482,6 +654,8 @@ def main():
                 old[key]["feed_note"] = f"stale, not refreshed: {type(e).__name__}"
         time.sleep(0.4)
     json.dump(state, open("scan_state.json", "w"), separators=(",", ":"))
+    if SCR["n"]:
+        print(f"Screener fallback: {SCR['n']} page requests" + (" (switched off after repeated refusals)" if SCR["off"] else ""))
     print(f"Scanned {scanned}: {new} scored, {big} above {MCAP_MAX_CR:,.0f} Cr, {len(skipped)} skipped (no usable Yahoo data)")
     apply_overrides(old)
     rows = list(old.values())
