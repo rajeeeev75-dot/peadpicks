@@ -2,7 +2,8 @@ name: Update PEAD data
 on:
   schedule:
     - cron: "*/30 3-16 * * 1-6"   # every 30 min, 08:30-22:00 IST, Mon-Sat: quick refresh of fresh filers
-    - cron: "30 13 * * 1-6"       # 19:00 IST, Mon-Sat: full refresh of every stock
+    - cron: "30 13 * * *"         # 19:00 IST daily: full scan of every NSE stock (resumes where the last run stopped)
+    - cron: "30 20 * * *"         # 02:00 IST daily: second full-scan pass, so the whole universe is covered quickly
   workflow_dispatch: {}
 permissions:
   contents: write
@@ -12,9 +13,10 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 130
     env:
       FAST: ${{ github.event.schedule == '*/30 3-16 * * 1-6' && '1' || '0' }}
+      BUDGET_MIN: ${{ github.event.schedule == '*/30 3-16 * * 1-6' && '20' || '110' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,5 +25,5 @@ jobs:
       - run: python fetch_results.py
       - run: |
           git config user.name "pead-bot"; git config user.email "bot@users.noreply.github.com"
-          git add pead.csv
+          git add pead.csv scan_state.json universe.txt
           git diff --staged --quiet || (git commit -m "Update PEAD data" && git pull --rebase && git push)
