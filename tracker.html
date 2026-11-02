@@ -223,6 +223,8 @@ const HISTORY_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxnPpS
 // Paste the published CSV link of your News tab here (SETUP.md step 8). It shows the headlines.
 const NEWS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxnPpSg1pL49TVLeLj00vJpnzcjRdTqW3TW1ooB0YkZlDpLUJteWmZw5YMhTJme8tPwQkT3gkXWn5S/pub?gid=1893505221&single=true&output=csv";
 // Paste the address of your Cloudflare Worker (worker.js) between the quotes. It feeds the "Market today" section on the Overview tab. Not a Google Sheet.
+// Paste the published CSV link of your Symbols tab here (daily smileys typed by you: Date, Up/Down, Symbol). Leave empty to use only the built-in history.
+const SYMBOLS_CSV_URL = "";
 const MARKET_API_URL = "https://market-feed.rajeeeev75.workers.dev";
 const MARKET_REFRESH_MS = 2 * 60 * 1000;
 const REFRESH_MS = 5 * 60 * 1000;
@@ -619,12 +621,13 @@ function oiHTML() {
   const h2 = '<h2 class="hb hbn">&#128200; OI spurts (F&amp;O)</h2>';
   if (!OI) return h2 + '<div class="card"><p class="note" style="margin:0">' + (OI_ERR ? "OI spurts are not available right now: " + esc(OI_ERR) + ". Deploy the latest Worker file, then reload." : "Loading...") + "</p></div>";
   const n = x => (x !== null && isFinite(x) ? Math.round(+x).toLocaleString("en-IN") : "-"), d2 = x => (x !== null && isFinite(x) ? (+x).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
-  const rows = OI.rows || [], shown = OI_ALL ? rows : rows.slice(0, 25);
+  const ideaSyms = new Set(IDEAS_LAST ? IDEAS_LAST.L.concat(IDEAS_LAST.S).map(x => String(x.s).toUpperCase()) : []), all = OI.rows || [];
+  const common = all.filter(r => ideaSyms.has(String(r.s).toUpperCase())), top = all.filter(r => !ideaSyms.has(String(r.s).toUpperCase()));
+  const rows = common.concat(top.slice(0, Math.max(0, 10 - common.length))), shown = rows;   // stocks that are also trade ideas first, then the biggest spurts up to 10 rows
   const cls = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
   let h = h2 + '<div class="card"><div class="wrap"><table><thead><tr><th>Symbol</th><th class="num">Open interest</th><th class="num">Previous OI</th><th class="num">Change in OI</th><th class="num">% change in OI</th><th class="num">Volume (contracts)</th><th class="num">Futures value (Rs lakh)</th><th class="num">Option value (Rs lakh)</th><th class="num">Total value (Rs lakh)</th><th class="num">Premium value (Rs lakh)</th><th class="num">Underlying value</th></tr></thead><tbody>' +
-    shown.map(r => "<tr><td><b>" + esc(r.s) + '</b></td><td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
-  if (rows.length > 25) h += '<p style="margin:8px 0 0"><button type="button" class="cbtn" data-oiall="1">' + (OI_ALL ? "Show top 25" : "Show all " + rows.length) + "</button></p>";
-  return h + '<p class="note">NSE OI spurts, sorted by % change in open interest' + (OI.asOf ? ", as of " + esc(OI.asOf) : "") + ". Data only, no interpretation.</p></div>";
+    shown.map(r => "<tr><td style=\"white-space:nowrap\"><b>" + esc(r.s) + "</b>" + znTvA(r.s, "D") + (ideaSyms.has(String(r.s).toUpperCase()) ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in Trade ideas">Trade idea</span>' : "") + '</td><td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
+  return h + '<p class="note">NSE OI spurts (stocks that are also trade ideas first, then the biggest by % change in open interest)' + (OI.asOf ? ", as of " + esc(OI.asOf) : "") + ". Data only, no interpretation.</p></div>";
 }
 async function loadOi() {
   if (!MARKET_API_URL || oiBusy) return;
@@ -637,9 +640,32 @@ async function loadOi() {
     OI = j; OI_ERR = "";
   } catch (e) { OI_ERR = e && e.name === "AbortError" ? "no answer after 25 seconds" : String((e && e.message) || e); }
   clearTimeout(killer); oiBusy = false;
-  const box = document.getElementById("oibox"); if (box) box.innerHTML = oiHTML();
+  try { ixPaint(); } catch (e) {}
 }
-document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-oiall]") : null; if (b) { OI_ALL = !OI_ALL; const box = document.getElementById("oibox"); if (box) box.innerHTML = oiHTML(); } });
+document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-oiall]") : null; if (b) { OI_ALL = !OI_ALL; try { ixPaint(); } catch (e) {} } });
+/* ===== INTRADAY TAB: Trade ideas, then OI spurts. Stocks that are in both come first (and in a short list at the very top). ===== */
+function ixPaint() {
+  const o = document.getElementById("ixbody"); if (!o) return;
+  let h = "";
+  const M = (typeof MARKET !== "undefined") ? MARKET : null;
+  if (!M) { o.innerHTML = '<div class="card"><p class="note" style="margin:0">Waiting for the market feed (needs the Worker)...</p></div>'; return; }
+  const oiRows = (OI && OI.rows) || [], oiBy = {}; oiRows.forEach(r => { oiBy[String(r.s).toUpperCase()] = r; });
+  const mc = v => (isFinite(v) ? '<span class="num" style="color:var(--' + (v >= 0 ? "good" : "bad") + ')">' + pct(v, 2) + "</span>" : '<span class="num">-</span>');
+  let ideas = ""; try { ideas = ideasHTML(M, mc, {oiSet: new Set(Object.keys(oiBy))}); } catch (e) { ideas = '<div class="card"><p class="note">Problem drawing trade ideas: ' + esc(e && e.message) + "</p></div>"; }
+  /* stocks present in both lists */
+  const both = [];
+  if (IDEAS_LAST) [[IDEAS_LAST.L, "Long"], [IDEAS_LAST.S, "Short"]].forEach(a => a[0].forEach(x => { const r = oiBy[String(x.s).toUpperCase()]; if (r) both.push({x, r, side: a[1]}); }));
+  both.sort((a, b) => b.x.sc - a.x.sc || (b.r.pct || 0) - (a.r.pct || 0));
+  if (both.length) {
+    const read = (pc, chg) => (chg > 0 ? (pc >= 0 ? "Long build-up" : "Short build-up") : chg < 0 ? (pc >= 0 ? "Short covering" : "Long unwinding") : "-");
+    const f0 = v => (v !== null && isFinite(v) ? Math.round(+v).toLocaleString("en-IN") : "-"), f2 = v => (v !== null && isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+    h += '<h2 class="hb hbn">&#11088; In both: trade idea and OI spurt</h2><div class="card"><div class="wrap"><table><thead><tr><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price today</th><th class="num">% change in OI</th><th class="num">Change in OI</th><th>OI read</th><th class="num">Trigger</th><th class="num">Stop</th></tr></thead><tbody>' +
+      both.map(b => '<tr><td style="white-space:nowrap"><b>' + esc(b.x.s) + "</b>" + znTvA(b.x.s, "D") + "</td><td>" + '<span class="chip ' + (b.side === "Long" ? "g" : "r") + '">' + b.side + '</span></td><td class="num"><b>' + b.x.sc + "</b> / 10</td><td class=\"num\">" + mc(b.x.pc) + '</td><td class="num">' + f2(b.r.pct) + '</td><td class="num">' + f0(b.r.chg) + "</td><td style=\"white-space:nowrap\">" + read(b.x.pc, b.r.chg) + '</td><td class="num">' + (b.x.lv ? f2(b.x.lv.t) : "-") + '</td><td class="num">' + (b.x.lv ? f2(b.x.lv.st) : "-") + "</td></tr>").join("") +
+      '</tbody></table></div><p class="note" style="margin-bottom:0">Stocks the screen ranks as intraday candidates that also show a jump in open interest. OI read: price up with OI up is long build-up, price down with OI up is short build-up, price up with OI down is short covering, price down with OI down is long unwinding. These are data labels, not advice.</p></div>';
+  }
+  h += ideas + oiHTML();
+  o.innerHTML = h;
+}
 async function loadFiiDii() {
   if (!MARKET_API_URL || fdBusy) return;
   fdBusy = true;
@@ -957,7 +983,6 @@ function niftyHTML(s, c, id) {
 
   h += '<div id="fdbox">' + fiiHTML() + "</div>";
   h += '<div id="optbox">' + optBoxHTML() + "</div>";
-  h += '<div id="oibox">' + oiHTML() + "</div>";
   try { h += guideHTML(); } catch (e) {}
   return h;
 }
@@ -1177,9 +1202,42 @@ const SYM_DEF = {BS: 1, R: 1, V: 1, Y: 1, B: 1, HB: 1, HR: 1, BP: 1, AR: 1, WA: 
 let SYM_SEL = Object.assign({}, SYM_DEF); try { Object.assign(SYM_SEL, JSON.parse(localStorage.getItem("symSel") || "{}")); } catch (e) {}
 const SYM_LIST = [["BS", "\u{1F916} Blue smiley"], ["R", "\u{1F621} Red"], ["V", "\u{1F47F} Violet"], ["Y", "\u{1F600} Yellow"], ["B", "\u{1F60D} Bro"], ["HB", "\u{1F402} H Bull"], ["HR", "\u{1F43B} H Bear"], ["BP", "1️⃣ Bull point"], ["AR", "▲▼ Green/Red"], ["WA", "△▽ White"], ["BA", "⬆⬇ Blue"], ["YA", "↑↓ Yellow"], ["S", "⭐ Star"], ["F", "⚽ Ball"]];
 const isNiftyTk = tk => /^(INDEXNSE:NIFTY_50|NSE:NIFTY|NSE:NIFTY50|NIFTY|NIFTY_50)$/i.test(String(tk || ""));
+/* Smileys you type in the Symbols tab of your sheet (one row per date; up to 3 Up/Down + Symbol pairs). They override the built-in history for that date. */
+let SHEET_SYM = {}, symSheetState = "";
+const SYM_EMO = {BS: "\u{1F916}", R: "\u{1F621}", V: "\u{1F47F}", Y: "\u{1F600}", B: "\u{1F60D}", HB: "\u{1F402}", HR: "\u{1F43B}", S: "\u2B50", F: "\u26BD"};
+const symKeyOf = t => { const x = String(t || "").toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim(); return x.indexOf("blue") === 0 ? "BS" : x.indexOf("red") === 0 ? "R" : x.indexOf("violet") === 0 ? "V" : x.indexOf("yellow") === 0 ? "Y" : x.indexOf("bro") === 0 ? "B" : x.indexOf("h bull") === 0 ? "HB" : x.indexOf("h bear") === 0 ? "HR" : x.indexOf("star") === 0 ? "S" : x.indexOf("ball") === 0 ? "F" : ""; };
+function symIso(t) {
+  t = String(t || "").trim(); let m;
+  if ((m = t.match(/^(\d{4})-(\d{2})-(\d{2})/))) return m[1] + "-" + m[2] + "-" + m[3];
+  if ((m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/))) return m[3] + "-" + m[2].padStart(2, "0") + "-" + m[1].padStart(2, "0");   // day first, as in India
+  if ((m = t.match(/^(\d{1,2})[ -]([A-Za-z]{3})[A-Za-z]*[ ,-]+(\d{4})$/))) { const mi = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(m[2].toLowerCase()); if (mi >= 0) return m[3] + "-" + String(mi + 1).padStart(2, "0") + "-" + m[1].padStart(2, "0"); }
+  return "";
+}
+function parseSymSheet(text) {
+  const out = {};
+  parseCSV(text).slice(1).forEach(r => {
+    const d = symIso(r[0]); if (!d) return;
+    const list = [];
+    for (let i = 1; i + 1 < r.length; i += 2) { const dir = /^\s*up/i.test(r[i]) ? 1 : /^\s*down/i.test(r[i]) ? 2 : 0, k = symKeyOf(r[i + 1]); if (dir && k) list.push({k, d: dir}); }
+    if (list.length) out[d] = list;
+  });
+  return out;
+}
+async function loadSymSheet() {
+  if (!SYMBOLS_CSV_URL) return;
+  try {
+    const r = await fetch(SYMBOLS_CSV_URL, {cache: "no-store"}); if (!r.ok) throw new Error("HTTP " + r.status);
+    SHEET_SYM = parseSymSheet(await r.text()); symSheetState = "ok";
+  } catch (e) { symSheetState = "error"; }
+  try { Object.keys(CH).forEach(tk => applySymbols(tk)); } catch (e) {}
+}
 function symMarkers(bars) {
   const c = colors(), out = [], KC = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"], X = SYM_SEL;
   bars.forEach(b => {
+    if (typeof b.time === "string" && SHEET_SYM[b.time]) {   // a date typed in your Symbols tab replaces the built-in history for that day
+      SHEET_SYM[b.time].forEach(e => { if (X[e.k]) out.push({time: b.time, position: e.d === 1 ? "belowBar" : "aboveBar", shape: "circle", size: 0, color: c.ink, text: SYM_EMO[e.k]}); });
+      return;
+    }
     let day; if (typeof b.time === "string") { const q = b.time.split("-").map(Number); day = Math.round((Date.UTC(q[0], q[1] - 1, q[2]) - SYM_T0) / 864e5); } else return;
     const code = SYM_DATA[day] | 0, hbv = SYM_HB[day] | 0; if (!code && !hbv) return;
     const k = sh => Math.floor(code / sh) % 4, kR = k(1), kV = k(4), kY = k(16), kB = k(64), kS = k(256), kF = k(1024), kBS = k(16777216), bp = Math.floor(code / 4096) % 16 - 1;
@@ -1677,6 +1735,7 @@ function peadHTML(s, c, P) {
   h += '<tr><td>Cash-flow quality (3 yr)</td><td colspan="5">' + esc(P.cfLabel) + (isFinite(P.cfq) ? " | ratio " + pf(P.cfq) + "x (3-yr OCF " + pf(P.ocf) + " / 3-yr profit " + pf(P.np3) + ")" : " | add ocf_3y and np_3y") + "</td>" + pScoreCell(P.sCf, 10) + "</tr>";
   h += '<tr><td>Growth-to-PE</td><td colspan="5">Avg growth ' + pg(P.avgYoy) + " | Fwd PE " + esc(P.fwdTag) + " " + (P.fwdPe > 0 ? pf(P.fwdPe) : "N/A") + " | ratio " + pf(P.gpe) + "</td>" + pScoreCell(P.sGpe, 20) + "</tr>";
   h += '<tr><td>Earnings surprise*</td><td colspan="5">Accel ' + pg(P.accelG) + " (YoY growth vs QoQ pace x 4)</td>" + pScoreCell(P.sSur, 25) + "</tr>";
+  try { const q = ppApi.reactOf(symOf(s.ticker), c && c.p); if (q) h += '<tr><td>Market reaction</td><td colspan="6"><b style="color:var(' + (q.react >= 0 ? "--good" : "--bad") + ')">' + q.label + " (" + (q.react > 0 ? "+" : "") + q.react.toFixed(1) + "% in the first session after the result)</b> | opening gap " + (isFinite(q.gap) ? (q.gap > 0 ? "+" : "") + q.gap.toFixed(1) + "%" : "-") + " | since result " + (isFinite(q.since) ? (q.since > 0 ? "+" : "") + q.since.toFixed(1) + "%" : "-") + "</td></tr>"; } catch (e) {}
   h += '<tr><td>Consistency bonus</td><td colspan="5">' + P.pos + "/6 metrics positive" + (P.bonus > 0 ? " | bonus applied" : "") + "</td>" + pScoreCell(P.bonus, 10, "+" + pf(P.bonus, 1)) + "</tr></table></div>";
   const chip = (cls, t) => '<span class="pchip ' + cls + '">' + t + "</span>";
   h += '<div class="pchips">' + chip(pPeCls(P.stockPe), "Stock P/E " + (P.stockPe > 0 ? pf(P.stockPe) + "x" : "N/A")) + chip(pPeCls(P.trailPe), "Trailing P/E " + (P.trailPe > 0 ? pf(P.trailPe) + "x" : "N/A")) + chip(pPeCls(P.fwdPe), "Fwd P/E " + esc(P.fwdTag) + " " + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A"));
@@ -1706,7 +1765,8 @@ function paintPead(sec) {
 function paintAllPead() { document.querySelectorAll("section.stock[data-tk]").forEach(paintPead); }
 function peadOvCell(r) {
   let P; try { P = peadFor(r); } catch (e) { P = null; }
-  return P ? '<b>' + pf(P.total, 0) + '</b> <span class="note">' + P.rec[0].toLowerCase() + "</span>" : "-";
+  let rx = ""; try { const q = ppApi.reactOf(symOf(r.s.ticker), r.c && r.c.p); if (q) rx = '<br><span style="white-space:nowrap;font-weight:600;color:var(' + (q.react >= 0 ? "--good" : "--bad") + ')" title="Market reaction: first-session move after the result vs the close before it (' + (q.react > 0 ? "+" : "") + q.react.toFixed(1) + '%). Price since result: ' + (isFinite(q.since) ? (q.since > 0 ? "+" : "") + q.since.toFixed(1) + "%" : "n/a") + '">' + q.label + " reaction <span style=\"font-weight:500\">" + (q.react > 0 ? "+" : "") + q.react.toFixed(1) + "%</span></span>"; } catch (e) {}
+  return P ? '<b>' + pf(P.total, 0) + '</b> <span class="note">' + P.rec[0].toLowerCase() + "</span>" + rx : (rx ? rx.replace("<br>", "") : "-");
 }
 function refreshOverview() {
   const ov = document.getElementById("ov"); if (!ov || !lastRows.length) return;
@@ -1841,7 +1901,9 @@ function resInfoMap(M) {
   Object.keys(out).forEach(k => { const o = out[k], dt = new Date(o.d + "T00:00:00Z"); o.label = o.age === 0 ? "Results today" : o.age === 1 ? "Results yesterday" : "Results " + dt.toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short", timeZone: "UTC"}); });
   return out;
 }
-function ideasHTML(M, mc) {
+let IDEAS_LAST = null;
+function ideasHTML(M, mc, opt) {
+  const oiSet = (opt && opt.oiSet) || new Set();
   const RES = resInfoMap(M);
   const idxs = M.indices || [], nrow = idxs.find(x => String(x.name).toUpperCase() === "NIFTY 50"), nPct = nrow ? +nrow.pct : NaN;
   const secPct = {}; idxs.forEach(x => { secPct[String(x.name).toUpperCase()] = +x.pct; });
@@ -1880,14 +1942,17 @@ function ideasHTML(M, mc) {
       out.push({s: x.s, w: !!x.w, ri, p, pc, sc, why, lv, risk: lv ? (h - l) / lv.t * 100 : NaN});
     });
     const ranked = out.filter(x => x.sc >= 3).sort((a, b) => b.sc - a.sc || Math.abs(b.pc) - Math.abs(a.pc));
-    return ranked.slice(0, 5).concat(ranked.slice(5).filter(x => x.w).slice(0, 3));
+    ranked.forEach(x => { x.oi = oiSet.has(String(x.s).toUpperCase()); });
+    const both = ranked.filter(x => x.oi), rest = ranked.filter(x => !x.oi);   // stocks that are also in the OI spurts list go first
+    return both.concat(rest.slice(0, 5).concat(rest.slice(5).filter(x => x.w).slice(0, 3)));
   };
   const card = (title, rows, side, dir) => '<div class="card' + (dir < 0 ? " shortc" : "") + '"><b>' + title + "</b>" + (rows.length ? tbl(["Stock", "Score", "Why it ranks", "Trigger", "Stop", "Target (1.5R)", "Risk"], rows.map(x => [
-    '<a class="tvl" href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(x.s).replace(/[&-]/g, "_")) + '" target="_blank" rel="noopener" title="Open on TradingView"><b>' + esc(x.s) + "</b></a>" + (x.ri ? ' <span class="chip w" style="font-size:.66rem;padding:0 6px" title="Results reported within the last 3 days, so the move is probably earnings-driven">&#128202; ' + esc(x.ri.label) + "</span>" : "") + (x.w ? ' <span class="chip n" style="font-size:.64rem;padding:0 6px">★ watchlist</span>' : "") + "<br>" + mc(x.pc) + "<br>" + seenCell(x, side, dir),
+    '<a class="tvl" href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(x.s).replace(/[&-]/g, "_")) + '" target="_blank" rel="noopener" title="Open on TradingView"><b>' + esc(x.s) + "</b></a>" + (x.oi ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in the OI spurts list">OI spurt</span>' : "") + (x.ri ? ' <span class="chip w" style="font-size:.66rem;padding:0 6px" title="Results reported within the last 3 days, so the move is probably earnings-driven">&#128202; ' + esc(x.ri.label) + "</span>" : "") + (x.w ? ' <span class="chip n" style="font-size:.64rem;padding:0 6px">★ watchlist</span>' : "") + "<br>" + mc(x.pc) + "<br>" + seenCell(x, side, dir),
     '<span class="num"><b>' + x.sc + "</b> / 10</span>", esc(x.why.join(" · ")),
     x.lv ? '<span class="num">' + fmt(x.lv.t, 2) + "</span>" : "—", x.lv ? '<span class="num">' + fmt(x.lv.st, 2) + "</span>" : "—", x.lv ? '<span class="num">' + fmt(x.lv.tg, 2) + "</span>" : "—",
     isFinite(x.risk) ? '<span class="num">' + x.risk.toFixed(1) + "%" + (x.risk > 4 ? " (wide)" : "") + "</span>" : "—"])) : '<p class="note">No stock scores 3 or more on this side right now.</p>') + "</div>";
   const L = build(1), S = build(-1);
+  IDEAS_LAST = {L, S, pc: nPct};
   try { seenUpdate(M, L, S); } catch (e) {}
   let h = "<h2>Trade ideas (screen)</h2>";
   h += '<div class="chips"><span class="chip ' + (bias > 0 ? "g" : bias < 0 ? "r" : "n") + '">' + (bias > 0 ? "Market bias: long" : bias < 0 ? "Market bias: short" : "Market bias: neutral") + "</span>" +
@@ -1897,10 +1962,12 @@ function ideasHTML(M, mc) {
   if (M.seenOn && M.tracker && M.tracker.msg) h += '<p class="note">Tracker last ran ' + new Date(M.tracker.t).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata"}) + ": " + esc(M.tracker.msg) + "</p>";
   if (!M.seenOn) h += '<p class="note pead-warn">Entry times (the clock under each stock) are for this browser only, so a browser opened later cannot know when a stock really appeared. Set up the Worker tracker for times shared by every browser.</p>';
   h += card("Long candidates", L, "L", 1) + card("Short candidates", S, "S", -1);
+  h += '<details class="card" style="margin-top:12px"><summary style="cursor:pointer"><b>How these trade ideas work</b> <span class="note">(tap to open)</span></summary><div style="margin-top:10px">';
   if (L.concat(S).some(x => x.ri)) h += '<p class="note">&#128202; Results badge: the company reported within the last 3 days, so today\'s move is mostly the market reacting to earnings, not sector or index flow. Look at the results themselves, expect gaps, and keep the stop beyond the results-day range.</p>';
   else if (M.earnings === undefined) h += '<p class="note">Result dates need the updated Worker (worker_v28). Until then only stocks with a pead_date in your sheet get the results badge.</p>';
   h += '<p class="note">Modelled on your F&amp;O Dashboard: strong stock in a strong sector, weak stock in a weak sector, O=L for longs, O=H for shorts, and how many times Nifty it moved. Score is out of 10 (sector up to 3, O=H/O=L 2, close position 1, x-Nifty or beating Nifty up to 2, market bias 1, liquidity 1). Trigger is a break of the last session&#39;s high (long) or low (short), the stop is the other end of that range, and the target is 1.5 times the risk. Levels are mechanical, so check the chart, the news and your own risk. A screening aid, not advice. Stocks below Rs 50 cr turnover are left out.</p>';
   h += '<p class="note"><b>Entry time</b> (the clock under each stock, India time) is when the stock first entered this list today, with how long ago that was and how far the price has moved your way since. It comes from your Worker, which checks every minute during market hours, so every browser shows the same time. NEW means under 15 minutes. "May be late" means the price has already moved 1% or more since it appeared, or it has been listed for 90 minutes or longer. A star (*) means the tracker started after the stock was already listed, so the real time may be earlier. A stock that drops off the list for 12 minutes or more and returns gets a fresh time. NSE data can lag by a few minutes.</p>';
+  h += "</div></details>";
   return h;
 }
 
@@ -2169,13 +2236,12 @@ function marketHTML() {
     h += "<h2>Trending stocks (F&amp;O and Nifty)</h2>" + '<div class="two">' + box("Top gainers", top(st, "pct", 1)) + box("Top losers", top(st, "pct", -1)) + box("Most traded by value", top(st.filter(x => isFinite(x.val)), "val", 1), true) + "</div>";
     h += '<p class="note">"Most traded" ranks by rupees traded today, since NSE does not give the average volume needed for a true volume spike.</p>';
   }
-  try { h += ideasHTML(M, mc); } catch (e) {}
   if (M.warnings && M.warnings.length) h += '<p class="note pead-warn">' + esc(M.warnings.join(" ")) + "</p>";
   h += '<p class="note">' + (marketStale ? "Showing the last data received (" + esc(marketErr || "refresh pending") + "). " : "") + "From NSE" + (M.asOf ? ", as of " + esc(M.asOf) : "") + ". Outside market hours this is the last session. Can be delayed. Not advice.</p>";
   return h;
 }
 function safeMarket() { try { return marketHTML(); } catch (e) { return '<h2>Market today</h2><div class="card"><p class="note" style="margin:0">Problem drawing market data: ' + esc(e && e.message) + "</p></div>"; } }
-function paintMarket() { const o = document.getElementById("mkt"); if (o) o.innerHTML = safeMarket(); try { if (document.getElementById("nwbody")) nwPaint(); } catch (e) {} }
+function paintMarket() { const o = document.getElementById("mkt"); if (o) o.innerHTML = safeMarket(); try { ixPaint(); } catch (e) {} try { if (document.getElementById("nwbody")) nwPaint(); } catch (e) {} }
 
 /* ===== ASTRO AND TRADING CALENDAR =====
    Rows are [start date yyyymmdd, start hhmm IST, end hhmm IST, name, optional end date yyyymmdd]. Dates to Dec 2026 come from your Trading Calendar indicator.
@@ -2787,7 +2853,7 @@ const ppApi = (function () {
     P.volAdj = isFinite(er) && isFinite(vr) ? pVol(Math.min(er, vr)) : 0;
     P.total = clampN(P.sSales + P.sNp + P.sEb + P.sGpe + P.sSur + P.bonus + P.volAdj, 0, 100);
     const surge = vr > 2, up = g("above_ema200") === 1, t = P.total;
-    P.rec = t >= 80 && surge && up ? ["GOLDEN", "#15803d"] : t >= 80 ? ["STRONG BUY", "#15803d"] : t >= 65 ? ["BUY", "#16a34a"] : t >= 45 ? ["WATCH", "#b8860b"] : t >= 30 ? ["SELL", "#ea580c"] : ["STRONG SELL", "#dc2626"];
+    P.rec = t >= 80 && surge && up ? ["EXCELLENT + VOLUME SURGE", "#15803d"] : t >= 80 ? ["EXCELLENT RESULTS", "#15803d"] : t >= 65 ? ["VERY GOOD RESULTS", "#16a34a"] : t >= 45 ? ["GOOD RESULTS", "#b8860b"] : t >= 30 ? ["WEAK RESULTS", "#ea580c"] : ["POOR RESULTS", "#dc2626"];
     return P;
   }
   function parseCSV(t) {
@@ -2820,6 +2886,33 @@ const ppApi = (function () {
   let DATA = [], META = {state: "loading", err: "", fetchedAt: 0, modified: ""}, sortKey = "total", sortDir = -1, openTk = null, F = {min: 65, days: 30, cap: 500, mode: "auto"}, busy = false;
   try { const sv = JSON.parse(localStorage.getItem("ppF") || "null"); if (sv) F = Object.assign(F, sv); } catch (e) {}
   const cls = v => (v > 0 ? "ppu" : v < 0 ? "ppd" : "");
+  /* Market reaction to the result. react = close of the first session after the announcement vs the last close before it; gap = that session's open vs the close on announcement day; since = price now vs the pre-result close. */
+  const rxLabel = p => (p >= 5 ? "Excellent" : p >= 0 ? "Positive" : p > -5 ? "Negative" : "Poor");
+  function reactOf(sym, livePx) {
+    const k = String(sym || "").toUpperCase(), s = DATA.find(x => symOfTk(x.ticker) === k);
+    let r = null, ad = null;
+    if (s && isFinite(num(s.react_pct)) && isFinite(num(s.pre_close))) r = {react: num(s.react_pct), gap: num(s.gap_pct), pre: num(s.pre_close)};
+    else {
+      try {   /* data file has no reaction yet: work it out from the daily candles the page already holds */
+        const AM = annMap(); ad = s ? annDate(s, AM) : (AM[k] ? [...AM[k]].sort().pop() : null);
+        const bars = chartBarsOf("NSE:" + k);
+        if (ad && bars) {
+          let j0 = -1, i1 = -1, ia = -1;
+          bars.forEach((b, i) => { if (b.time < ad) j0 = i; else if (b.time === ad) ia = i; else if (i1 < 0) i1 = i; });
+          if (j0 >= 0 && i1 >= 0) { const pre = bars[j0].close, ref = ia >= 0 ? bars[ia].close : pre; r = {react: (bars[i1].close / pre - 1) * 100, gap: (bars[i1].open / ref - 1) * 100, pre}; }
+        }
+      } catch (e) {}
+    }
+    if (!r) return null;
+    const px = isFinite(livePx) ? livePx : (s ? num(s.price) : NaN);
+    r.since = isFinite(px) && r.pre > 0 ? (px / r.pre - 1) * 100 : NaN; r.label = rxLabel(r.react); r.ad = ad;
+    return r;
+  }
+  const sg = v => (isFinite(v) ? (v > 0 ? "+" : "") + pf(v, 1) + "%" : "-");
+  function rxCell(x) {
+    const r = reactOf(symOfTk(x.s.ticker)); if (!r) return '<td class="note" title="Needs a trading session after the announcement">' + (x.ad && x.d <= 1 ? "awaiting" : "-") + "</td>";
+    return '<td style="white-space:nowrap" title="First-session move after the result vs the close before it' + (isFinite(r.gap) ? "; opening gap " + sg(r.gap) : "") + '"><b class="' + cls(r.react) + '">' + r.label + '</b> <span class="note">' + sg(r.react) + "</span></td>";
+  }
   const tv = sym => "https://www.tradingview.com/chart/?symbol=NSE%3A" + encodeURIComponent(String(sym).replace(/[&-]/g, "_"));
   async function load(force) {
     if (busy) return; busy = true; META.state = "loading"; paintStatus();
@@ -2875,7 +2968,7 @@ const ppApi = (function () {
     const AM = annMap();
     let rows = DATA.map(s => { const ad = annDate(s, AM); return {s, P: score(s, F.mode), ad, d: ad ? ageOf(ad) : NaN}; }).filter(x => x.P);
     rows = rows.filter(x => x.P.total >= F.min && (!isFinite(x.d) || x.d <= F.days) && (!(num(x.s.mcap) >= 0) || num(x.s.mcap) >= F.cap));
-    const key = {total: x => x.P.total, fwdPe: x => x.P.fwdPe || 1e9, revY: x => x.P.revY, npY: x => x.P.npY, d: x => x.d, rd: x => x.ad || "", ticker: x => String(x.s.ticker)};
+    const key = {total: x => x.P.total, fwdPe: x => x.P.fwdPe || 1e9, revY: x => x.P.revY, npY: x => x.P.npY, d: x => x.d, rd: x => x.ad || "", ticker: x => String(x.s.ticker), react: x => { const v = num(x.s.react_pct); return isFinite(v) ? v : -1e9; }};
     rows.sort((a, b) => { const A = key[sortKey](a), B = key[sortKey](b); return (A > B ? 1 : A < B ? -1 : 0) * sortDir; });
     let h = "";
     const pend = pending();
@@ -2884,14 +2977,14 @@ const ppApi = (function () {
         pend.slice(0, 40).map(x => '<a class="ppchip' + (x.fno ? " f" : "") + '" href="' + tv(x.sym) + '" target="_blank" rel="noopener" title="' + E(x.n) + " | " + (x.age === 0 ? "today" : x.age === 1 ? "yesterday" : x.age + " days ago") + '">' + E(x.sym) + " <i>" + (x.age === 0 ? "today" : x.age === 1 ? "yest." : x.age + "d") + "</i></a>").join("") + (pend.length > 40 ? '<span class="note">+' + (pend.length - 40) + " more</span>" : "") + "</div></div>";
     }
     h += '<div class="dtiles">' + rows.slice(0, 4).map(x => '<div class="dtile" data-tk="' + E(x.s.ticker) + '" style="cursor:pointer"><small>' + E(symOfTk(x.s.ticker)) + '</small><b>' + pf(x.P.total, 0) + '</b><span><span class="tag" style="background:' + x.P.rec[1] + '">' + x.P.rec[0] + "</span> Fwd P/E " + pf(x.P.fwdPe) + "x</span></div>").join("") + "</div>";
-    const th = [["ticker", "Stock"], ["total", "Score"], ["", "Call"], ["revY", "Sales YoY"], ["npY", "Profit YoY"], ["fwdPe", "Fwd P/E"], ["", "From 52w high"], ["rd", "Result date"], ["d", "Days since result"], ["", "Chart"]];
+    const th = [["ticker", "Stock"], ["total", "Score"], ["", "Result quality"], ["react", "Market reaction"], ["revY", "Sales YoY"], ["npY", "Profit YoY"], ["fwdPe", "Fwd P/E"], ["", "From 52w high"], ["rd", "Result date"], ["d", "Days since result"], ["", "Chart"]];
     h += '<div class="wrap"><table class="pptbl"><thead><tr>' + th.map(a => '<th data-k="' + a[0] + '"' + (a[0] ? ' style="cursor:pointer"' : "") + ">" + a[1] + (a[0] === sortKey ? (sortDir < 0 ? " ▼" : " ▲") : "") + "</th>").join("") + "</tr></thead><tbody>";
     h += rows.length ? rows.map(x => {
       const P = x.P, s = x.s, sy = symOfTk(s.ticker), o = openTk === s.ticker;
-      let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer"><td><b>' + E(sy) + '</b> <span class="note">' + E(s.name) + '</span>' + (x.ad && x.d >= 0 && x.d <= 3 ? ' <span class="chip g">Results ' + dTxt(x.ad) + "</span>" : "") + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td><td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td>' + (x.ad ? E(dTxt(x.ad, true)) : '<span class="note" title="Not in the data file or the results calendar">not known</span>') + '</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td><td><a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener">TV &#8599;</a></td></tr>';
-      if (o) r += '<tr class="det"><td colspan="10"><div style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px))"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Result date in data file", E(s.result_date || "not given")], ["Quarter ended", E(s.quarter_end)], ["Announcement date used", x.ad ? E(x.ad) : "not known"]].map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + '</dl><div id="ppchbox" data-sym="' + E(sy) + '" data-ad="' + E(x.ad || "") + '" style="height:360px;margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="ppchnote" class="note" style="margin:6px 0 0">Loading chart...</div></div></td></tr>';
+      let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer"><td><b>' + E(sy) + '</b> <span class="note">' + E(s.name) + '</span>' + (x.ad && x.d >= 0 && x.d <= 3 ? ' <span class="chip g">Results ' + dTxt(x.ad) + "</span>" : "") + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td>' + rxCell(x) + '<td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td>' + (x.ad ? E(dTxt(x.ad, true)) : '<span class="note" title="Not in the data file or the results calendar">not known</span>') + '</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td><td><a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener">TV &#8599;</a></td></tr>';
+      if (o) r += '<tr class="det"><td colspan="11"><div style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px))"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Result date in data file", E(s.result_date || "not given")], ["Quarter ended", E(s.quarter_end)], ["Announcement date used", x.ad ? E(x.ad) : "not known"]].concat((() => { const r = reactOf(sy); return r ? [["Market reaction", r.label + " (" + sg(r.react) + " in the first session)"], ["Opening gap", sg(r.gap)], ["Price since result", sg(r.since)], ["Close before result", pf(r.pre, 2)]] : []; })()).map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + '</dl><div id="ppchbox" data-sym="' + E(sy) + '" data-ad="' + E(x.ad || "") + '" style="height:360px;margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="ppchnote" class="note" style="margin:6px 0 0">Loading chart...</div></div></td></tr>';
       return r;
-    }).join("") : '<tr><td colspan="10" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
+    }).join("") : '<tr><td colspan="11" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
     h += '</tbody></table></div><p class="note">Cash-flow quality (10 pts in your Pine indicator) needs 3-year operating cash flow, which the free data feed does not carry, so scores here can be up to 10 points lower than the dashboard. Check the filing before buying.</p>';
     host.innerHTML = h; paintStatus();
     try { chartDraw(); } catch (e) {}
@@ -2933,7 +3026,7 @@ const ppApi = (function () {
   function paint() { build(); paintStatus(); view(); }
   function open() { build(); paint(); if (META.state !== "ok" || Date.now() - META.fetchedAt > 3 * 60 * 1000) load(false); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "pp" && !document.hidden) load(false); } catch (e) {} }, 3 * 60 * 1000);
-  return {open, load, pending, score, parseCSV};
+  return {open, load, pending, score, parseCSV, reactOf};
 })();
 const ppPaint = () => ppApi.open();
 
@@ -3450,6 +3543,7 @@ function show(id) {
   document.querySelectorAll("section.stock").forEach(s => s.classList.toggle("on", s.id === id));
   const sec = document.getElementById(id);
   if (id === "nw") { nwPaint(); mnLoad(false); }
+  if (id === "ix") { try { ixPaint(); loadOi(); } catch (e) {} }
   if (id === "pp") { try { ppPaint(); } catch (e) {} }
   if (id === "zn") { try { znPaint(); } catch (e) {} }
   if (id === "tc") { try { tcPaint(); } catch (e) {} }
@@ -3509,7 +3603,7 @@ function render(stocks) {
   if (!rows.length) { tabs.innerHTML = ""; views.innerHTML = '<div class="card empty">No stocks found. Check that your sheet has a header row and at least one stock.</div>'; return; }
   tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + rows.map((r, i) => {
     const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>";
-  }).join("") + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD Picks</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button>';
+  }).join("") + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD Picks</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button>';
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
   const emptyCard = views.querySelector(".card.empty"); if (emptyCard) emptyCard.remove();
   let ov = document.getElementById("ov");
@@ -3518,6 +3612,10 @@ function render(stocks) {
   if (!document.getElementById("nw")) {
     const nw = document.createElement("section"); nw.className = "stock"; nw.id = "nw"; nw.style.cssText = "--a:#d97706;--b:#dc2626";
     nw.innerHTML = '<div id="nwbody"></div>'; views.appendChild(nw); nwPaint();
+  }
+  if (!document.getElementById("ix")) {
+    const ix = document.createElement("section"); ix.className = "stock"; ix.id = "ix"; ix.style.cssText = "--a:#0891b2;--b:#2563eb";
+    ix.innerHTML = '<div id="ixbody"></div>'; views.appendChild(ix); try { ixPaint(); } catch (e) {}
   }
   if (!document.getElementById("pp")) {
     const pp = document.createElement("section"); pp.className = "stock"; pp.id = "pp"; pp.style.cssText = "--a:#059669;--b:#0d9488";
@@ -3564,7 +3662,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "nw" || current === "zn" || current === "tc" || current === "rm" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
@@ -3590,6 +3688,8 @@ async function load(auto) {
   loadLive(true);
   loadOptions();
   loadOi();
+  loadSymSheet();
+  try { ppApi.load(false).then(() => { try { refreshOverview(); } catch (e) {} }); } catch (e) {}
   loadFiiDii();
   loadHeavy();
   $("#loaded").textContent = "Loaded " + new Date().toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"});
@@ -3600,6 +3700,7 @@ setInterval(loadMarket, MARKET_REFRESH_MS);
 setInterval(() => loadLive(false), 60 * 1000);
 setInterval(() => { if (liveHours()) { loadOptions(); loadOi(); } }, 2 * 60 * 1000);
 setInterval(loadFiiDii, 15 * 60 * 1000);
+setInterval(loadSymSheet, 10 * 60 * 1000);
 setInterval(() => { if (liveHours()) loadHeavy(); }, 60 * 1000);
 load(false);
 </script>
