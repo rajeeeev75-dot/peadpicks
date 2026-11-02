@@ -1202,7 +1202,7 @@ const SYM_DEF = {BS: 1, R: 1, V: 1, Y: 1, B: 1, HB: 1, HR: 1, BP: 1, AR: 1, WA: 
 let SYM_SEL = Object.assign({}, SYM_DEF); try { Object.assign(SYM_SEL, JSON.parse(localStorage.getItem("symSel") || "{}")); } catch (e) {}
 const SYM_LIST = [["BS", "\u{1F916} Blue smiley"], ["R", "\u{1F621} Red"], ["V", "\u{1F47F} Violet"], ["Y", "\u{1F600} Yellow"], ["B", "\u{1F60D} Bro"], ["HB", "\u{1F402} H Bull"], ["HR", "\u{1F43B} H Bear"], ["BP", "1️⃣ Bull point"], ["AR", "▲▼ Green/Red"], ["WA", "△▽ White"], ["BA", "⬆⬇ Blue"], ["YA", "↑↓ Yellow"], ["S", "⭐ Star"], ["F", "⚽ Ball"]];
 const isNiftyTk = tk => /^(INDEXNSE:NIFTY_50|NSE:NIFTY|NSE:NIFTY50|NIFTY|NIFTY_50)$/i.test(String(tk || ""));
-/* Smileys you type in the Symbols tab of your sheet (one row per date; up to 3 Up/Down + Symbol pairs). They override the built-in history for that date. */
+/* Smileys you type in the Symbols tab of your sheet (one row per date: one Up/Down, then up to 3 symbols). They override the built-in history for that date. */
 let SHEET_SYM = {}, symSheetState = "";
 const SYM_EMO = {BS: "\u{1F916}", R: "\u{1F621}", V: "\u{1F47F}", Y: "\u{1F600}", B: "\u{1F60D}", HB: "\u{1F402}", HR: "\u{1F43B}", S: "\u2B50", F: "\u26BD"};
 const symKeyOf = t => { const x = String(t || "").toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim(); return x.indexOf("blue") === 0 ? "BS" : x.indexOf("red") === 0 ? "R" : x.indexOf("violet") === 0 ? "V" : x.indexOf("yellow") === 0 ? "Y" : x.indexOf("bro") === 0 ? "B" : x.indexOf("h bull") === 0 ? "HB" : x.indexOf("h bear") === 0 ? "HR" : x.indexOf("star") === 0 ? "S" : x.indexOf("ball") === 0 ? "F" : ""; };
@@ -1217,8 +1217,8 @@ function parseSymSheet(text) {
   const out = {};
   parseCSV(text).slice(1).forEach(r => {
     const d = symIso(r[0]); if (!d) return;
-    const list = [];
-    for (let i = 1; i + 1 < r.length; i += 2) { const dir = /^\s*up/i.test(r[i]) ? 1 : /^\s*down/i.test(r[i]) ? 2 : 0, k = symKeyOf(r[i + 1]); if (dir && k) list.push({k, d: dir}); }
+    const dir = /^\s*up/i.test(r[1]) ? 1 : /^\s*down/i.test(r[1]) ? 2 : 0, list = [];   // one Up/Down for the date, then up to 3 symbols
+    if (dir) for (let i = 2; i < r.length; i++) { const k = symKeyOf(r[i]); if (k && !list.some(e => e.k === k)) list.push({k, d: dir}); }
     if (list.length) out[d] = list;
   });
   return out;
