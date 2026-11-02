@@ -626,7 +626,7 @@ function oiHTML() {
   const rows = common.concat(top.slice(0, Math.max(0, 10 - common.length))), shown = rows;   // stocks that are also trade ideas first, then the biggest spurts up to 10 rows
   const cls = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
   let h = h2 + '<div class="card"><div class="wrap"><table><thead><tr><th>Symbol</th><th class="num">Open interest</th><th class="num">Previous OI</th><th class="num">Change in OI</th><th class="num">% change in OI</th><th class="num">Volume (contracts)</th><th class="num">Futures value (Rs lakh)</th><th class="num">Option value (Rs lakh)</th><th class="num">Total value (Rs lakh)</th><th class="num">Premium value (Rs lakh)</th><th class="num">Underlying value</th></tr></thead><tbody>' +
-    shown.map(r => "<tr><td style=\"white-space:nowrap\"><b>" + esc(r.s) + "</b>" + znTvA(r.s, "D") + (ideaSyms.has(String(r.s).toUpperCase()) ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in Trade ideas">Trade idea</span>' : "") + '</td><td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
+    shown.map(r => "<tr><td style=\"white-space:nowrap\"><b>" + esc(r.s) + "</b>" + znTvA(r.s, "D") + " " + ixBtn(r.s) + (ideaSyms.has(String(r.s).toUpperCase()) ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in Trade ideas">Trade idea</span>' : "") + '</td><td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
   return h + '<p class="note">NSE OI spurts (stocks that are also trade ideas first, then the biggest by % change in open interest)' + (OI.asOf ? ", as of " + esc(OI.asOf) : "") + ". Data only, no interpretation.</p></div>";
 }
 async function loadOi() {
@@ -644,9 +644,55 @@ async function loadOi() {
 }
 document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-oiall]") : null; if (b) { OI_ALL = !OI_ALL; try { ixPaint(); } catch (e) {} } });
 /* ===== INTRADAY TAB: Trade ideas, then OI spurts. Stocks that are in both come first (and in a short list at the very top). ===== */
+/* ----- chart panel of the Intraday tab: click "Chart" next to a stock in Trade ideas or OI spurts (the TradingView link stays) ----- */
+let IX_SEL = null, IX_CH = null; const IXC = {};
+const IX_TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
+const ixBtn = sym => '<button type="button" class="cbtn" data-ixchart="' + esc(sym) + '" style="padding:1px 9px;font-size:.75rem;margin-left:2px" title="Show the chart on this page">&#128200; Chart</button>';
+async function ixChartDraw() {
+  const host = document.getElementById("ixchart"); if (!host) return;
+  if (IX_CH) { try { IX_CH.remove(); } catch (e) {} IX_CH = null; }
+  if (!IX_SEL) { host.innerHTML = ""; return; }
+  const sym = IX_SEL.sym, tf = IX_SEL.tf, tv = znTv(sym, tf === "D" ? "D" : tf);
+  host.style.scrollMarginTop = "70px";
+  host.innerHTML = '<h2 class="hb hbn">&#128200; Chart: ' + esc(sym) + '</h2><div class="card"><div class="charttools">' + IX_TFS.map(t => '<button type="button" class="cbtn" data-ixtf="' + t[0] + '" aria-pressed="' + (t[0] === tf) + '">' + t[1] + "</button>").join("") +
+    '<span class="csep"></span><a class="tvl" href="' + tv + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-ixclose="1">Close chart</button></div>' +
+    '<div id="ixbox" style="height:420px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="ixnote" class="note" style="margin:6px 0 0">Loading chart...</div></div>';
+  const say = t => { const n = document.getElementById("ixnote"); if (n) n.innerHTML = t; };
+  const LW = window.LightweightCharts; if (!LW) { say("The chart library did not load. Use the TradingView link."); return; }
+  const key = sym + "|" + tf; let o = IXC[key];
+  if (!o || Date.now() - o.t > 45e3) {
+    try {
+      const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + (tf === "D" ? "DF" : tf), {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym];
+      if (rows && rows.length > 5) IXC[key] = o = {t: Date.now(), bars: rows.map(x => ({time: tf === "D" ? String(x[0]).slice(0, 10) : x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))};
+    } catch (e) {}
+  }
+  const box = document.getElementById("ixbox"); if (!box || !IX_SEL || IX_SEL.sym !== sym || IX_SEL.tf !== tf) return;
+  if (!o || !o.bars) { say("No chart data for " + esc(sym) + " from your Worker (index names and some symbols are not available). Use the TradingView link."); return; }
+  const c = colors(), bars = o.bars, intra = tf !== "D";
+  const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+  candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
+  try { const vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(bars.map(b => ({time: b.time, value: b.vol, color: b.close >= b.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+  /* trade idea levels, when the stock is on the Trade ideas list */
+  let lv = null, side = "";
+  if (IDEAS_LAST) [[IDEAS_LAST.L, "Long"], [IDEAS_LAST.S, "Short"]].forEach(a => a[0].forEach(x => { if (!lv && String(x.s).toUpperCase() === sym.toUpperCase() && x.lv) { lv = x.lv; side = a[1]; } }));
+  if (lv) [[lv.t, "Trigger", "#2563eb"], [lv.st, "Stop", c.dn], [lv.tg, "Target", c.up]].forEach(a => { try { candle.createPriceLine({price: a[0], color: a[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[1]}); } catch (e) {} });
+  const n = bars.length;
+  try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const last = bars[n - 1].time, d = new Date(last + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: last}); } } catch (e) { chart.timeScale().fitContent(); }
+  IX_CH = chart;
+  say((intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + (lv ? " Dashed lines: " + side + " trigger, stop and target from the Trade ideas screen." : "") + " Scroll or zoom on the chart.");
+}
+document.addEventListener("click", ev => {
+  const t = ev.target && ev.target.closest ? ev.target.closest("[data-ixchart],[data-ixtf],[data-ixclose]") : null; if (!t) return;
+  if (t.hasAttribute("data-ixclose")) { IX_SEL = null; ixChartDraw(); return; }
+  if (t.hasAttribute("data-ixtf")) { if (IX_SEL) { IX_SEL.tf = t.getAttribute("data-ixtf"); ixChartDraw(); } return; }
+  IX_SEL = {sym: t.getAttribute("data-ixchart"), tf: (IX_SEL && IX_SEL.tf) || "15"}; ixChartDraw();
+  setTimeout(() => { const h = document.getElementById("ixchart"); if (h && h.scrollIntoView) h.scrollIntoView({behavior: "smooth", block: "start"}); }, 50);
+});
+setInterval(() => { try { if (IX_SEL && typeof current !== "undefined" && current === "ix" && !document.hidden && IX_SEL.tf !== "D") ixChartDraw(); } catch (e) {} }, 60 * 1000);
 function ixPaint() {
   const o = document.getElementById("ixbody"); if (!o) return;
-  let h = "";
+  let h = '<div id="ixchart"></div>';
   const M = (typeof MARKET !== "undefined") ? MARKET : null;
   if (!M) { o.innerHTML = '<div class="card"><p class="note" style="margin:0">Waiting for the market feed (needs the Worker)...</p></div>'; return; }
   const oiRows = (OI && OI.rows) || [], oiBy = {}; oiRows.forEach(r => { oiBy[String(r.s).toUpperCase()] = r; });
@@ -660,11 +706,12 @@ function ixPaint() {
     const read = (pc, chg) => (chg > 0 ? (pc >= 0 ? "Long build-up" : "Short build-up") : chg < 0 ? (pc >= 0 ? "Short covering" : "Long unwinding") : "-");
     const f0 = v => (v !== null && isFinite(v) ? Math.round(+v).toLocaleString("en-IN") : "-"), f2 = v => (v !== null && isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
     h += '<h2 class="hb hbn">&#11088; In both: trade idea and OI spurt</h2><div class="card"><div class="wrap"><table><thead><tr><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price today</th><th class="num">% change in OI</th><th class="num">Change in OI</th><th>OI read</th><th class="num">Trigger</th><th class="num">Stop</th></tr></thead><tbody>' +
-      both.map(b => '<tr><td style="white-space:nowrap"><b>' + esc(b.x.s) + "</b>" + znTvA(b.x.s, "D") + "</td><td>" + '<span class="chip ' + (b.side === "Long" ? "g" : "r") + '">' + b.side + '</span></td><td class="num"><b>' + b.x.sc + "</b> / 10</td><td class=\"num\">" + mc(b.x.pc) + '</td><td class="num">' + f2(b.r.pct) + '</td><td class="num">' + f0(b.r.chg) + "</td><td style=\"white-space:nowrap\">" + read(b.x.pc, b.r.chg) + '</td><td class="num">' + (b.x.lv ? f2(b.x.lv.t) : "-") + '</td><td class="num">' + (b.x.lv ? f2(b.x.lv.st) : "-") + "</td></tr>").join("") +
+      both.map(b => '<tr><td style="white-space:nowrap"><b>' + esc(b.x.s) + "</b>" + znTvA(b.x.s, "D") + " " + ixBtn(b.x.s) + "</td><td>" + '<span class="chip ' + (b.side === "Long" ? "g" : "r") + '">' + b.side + '</span></td><td class="num"><b>' + b.x.sc + "</b> / 10</td><td class=\"num\">" + mc(b.x.pc) + '</td><td class="num">' + f2(b.r.pct) + '</td><td class="num">' + f0(b.r.chg) + "</td><td style=\"white-space:nowrap\">" + read(b.x.pc, b.r.chg) + '</td><td class="num">' + (b.x.lv ? f2(b.x.lv.t) : "-") + '</td><td class="num">' + (b.x.lv ? f2(b.x.lv.st) : "-") + "</td></tr>").join("") +
       '</tbody></table></div><p class="note" style="margin-bottom:0">Stocks the screen ranks as intraday candidates that also show a jump in open interest. OI read: price up with OI up is long build-up, price down with OI up is short build-up, price up with OI down is short covering, price down with OI down is long unwinding. These are data labels, not advice.</p></div>';
   }
   h += ideas + oiHTML();
   o.innerHTML = h;
+  try { ixChartDraw(); } catch (e) {}
 }
 async function loadFiiDii() {
   if (!MARKET_API_URL || fdBusy) return;
@@ -1947,7 +1994,7 @@ function ideasHTML(M, mc, opt) {
     return both.concat(rest.slice(0, 5).concat(rest.slice(5).filter(x => x.w).slice(0, 3)));
   };
   const card = (title, rows, side, dir) => '<div class="card' + (dir < 0 ? " shortc" : "") + '"><b>' + title + "</b>" + (rows.length ? tbl(["Stock", "Score", "Why it ranks", "Trigger", "Stop", "Target (1.5R)", "Risk"], rows.map(x => [
-    '<a class="tvl" href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(x.s).replace(/[&-]/g, "_")) + '" target="_blank" rel="noopener" title="Open on TradingView"><b>' + esc(x.s) + "</b></a>" + (x.oi ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in the OI spurts list">OI spurt</span>' : "") + (x.ri ? ' <span class="chip w" style="font-size:.66rem;padding:0 6px" title="Results reported within the last 3 days, so the move is probably earnings-driven">&#128202; ' + esc(x.ri.label) + "</span>" : "") + (x.w ? ' <span class="chip n" style="font-size:.64rem;padding:0 6px">★ watchlist</span>' : "") + "<br>" + mc(x.pc) + "<br>" + seenCell(x, side, dir),
+    '<a class="tvl" href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(x.s).replace(/[&-]/g, "_")) + '" target="_blank" rel="noopener" title="Open on TradingView"><b>' + esc(x.s) + "</b></a> " + ixBtn(x.s) + (x.oi ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in the OI spurts list">OI spurt</span>' : "") + (x.ri ? ' <span class="chip w" style="font-size:.66rem;padding:0 6px" title="Results reported within the last 3 days, so the move is probably earnings-driven">&#128202; ' + esc(x.ri.label) + "</span>" : "") + (x.w ? ' <span class="chip n" style="font-size:.64rem;padding:0 6px">★ watchlist</span>' : "") + "<br>" + mc(x.pc) + "<br>" + seenCell(x, side, dir),
     '<span class="num"><b>' + x.sc + "</b> / 10</span>", esc(x.why.join(" · ")),
     x.lv ? '<span class="num">' + fmt(x.lv.t, 2) + "</span>" : "—", x.lv ? '<span class="num">' + fmt(x.lv.st, 2) + "</span>" : "—", x.lv ? '<span class="num">' + fmt(x.lv.tg, 2) + "</span>" : "—",
     isFinite(x.risk) ? '<span class="num">' + x.risk.toFixed(1) + "%" + (x.risk > 4 ? " (wide)" : "") + "</span>" : "—"])) : '<p class="note">No stock scores 3 or more on this side right now.</p>') + "</div>";
