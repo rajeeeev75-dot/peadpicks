@@ -1378,7 +1378,7 @@ function skeleton(tk) {
 }
 /* Live daily candles from your Cloudflare Worker (Yahoo), used instead of the slow Google Sheet history; the last candle follows the live NSE price. */
 const LB = {};
-const lbSym = tk => { try { return isNiftyTk(tk) ? "" : symOf(tk); } catch (e) { return ""; } };
+const lbSym = tk => { try { return isNiftyTk(tk) ? "NIFTY" : symOf(tk); } catch (e) { return ""; } };
 const chartBarsOf = tk => { const l = LB[String(tk).toUpperCase()]; if (l && l.bars && l.bars.length > 30) return l.bars; return (HIST && HIST[String(tk).toUpperCase()]) || null; };
 const chartStamp = tk => { const l = LB[String(tk).toUpperCase()]; return histVer + ":" + (l && l.bars ? l.t : 0); };
 async function lbLoad(tk, force) {
