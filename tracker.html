@@ -1281,18 +1281,20 @@ const accRet = x => (isFinite(x) ? '<span class="' + (x > 0 ? "accg" : x < 0 ? "
 const accR = x => (isFinite(x) ? '<span class="' + (x > 0 ? "accg" : x < 0 ? "accb" : "") + '">' + (x > 0 ? "+" : "") + x.toFixed(2) + "R</span>" : "-");
 const accFew = n => (n < 30 ? ' <small title="Fewer than 30 cases: treat as a rough guide only">(few)</small>' : "");
 /* Zone: replay every zone on its own candles. Entry = first return to the proximal line after the zone formed; win = target reached before the distal line is broken. */
+var ZACC_RR = 0; try { ZACC_RR = +localStorage.getItem("znAccRR") || 0; } catch (e) {}
 function znAccuracy(items, rr) {
   const mk = () => ({zones: 0, entered: 0, w: 0, l: 0, open: 0}), G = {}, add = (k, o) => { const g = G[k] = G[k] || mk(); g.zones += 1; if (o.entered) g.entered++; if (o.res === "w") g.w++; else if (o.res === "l") g.l++; else if (o.entered) g.open++; };
   items.forEach(it => {
     const b = it.bars, n = b.length;
     it.zones.forEach(z => {
-      if (!(z.prox > 0 && z.dist > 0 && z.target > 0)) return;
+      if (!(z.prox > 0 && z.dist > 0 && z.target > 0) || !(rr > 0)) return;
       const D = z.type === "D"; let e = -1, res = "";
+      const tgt = D ? z.prox + (z.prox - z.dist) * rr : z.prox - (z.dist - z.prox) * rr;
       for (let j = z.sig + 1; j < n; j++) { if (D ? b[j].low <= z.prox : b[j].high >= z.prox) { e = j; break; } }
       if (e >= 0) {
         if (D ? b[e].low < z.dist : b[e].high > z.dist) res = "l";
         else for (let k = e + 1; k < n; k++) {
-          const st = D ? b[k].low < z.dist : b[k].high > z.dist, tg = D ? b[k].high >= z.target : b[k].low <= z.target;
+          const st = D ? b[k].low < z.dist : b[k].high > z.dist, tg = D ? b[k].high >= tgt : b[k].low <= tgt;
           if (st) { res = "l"; break; } if (tg) { res = "w"; break; }
         }
       }
@@ -1303,12 +1305,12 @@ function znAccuracy(items, rr) {
   return G;
 }
 function znAccHTML(items) {
-  const G = znAccuracy(items, +ZO.rr || 2), keys = ["All zones", "Demand zones", "Supply zones"].filter(k => G[k]).concat(Object.keys(G).filter(k => k.indexOf("tf:") === 0).sort((a, b) => ZN_TFS.findIndex(x => x[0] === a.slice(3)) - ZN_TFS.findIndex(x => x[0] === b.slice(3))));
+  const rr = ZACC_RR || +ZO.rr || 2, G = znAccuracy(items, rr), keys = ["All zones", "Demand zones", "Supply zones"].filter(k => G[k]).concat(Object.keys(G).filter(k => k.indexOf("tf:") === 0).sort((a, b) => ZN_TFS.findIndex(x => x[0] === a.slice(3)) - ZN_TFS.findIndex(x => x[0] === b.slice(3))));
   if (!keys.length) return "";
-  const rr = +ZO.rr || 2;
   const rows = keys.map(k => { const g = G[k], n = g.w + g.l, ex = n ? (g.w * rr - g.l) / n : NaN; return {c: [k.indexOf("tf:") === 0 ? znTfName(k.slice(3)) + " candles" : "<b>" + k + "</b>", g.zones, accPc(g.entered, g.zones), n + accFew(n), '<b>' + accPc(g.w, n) + "</b>", accR(ex), g.open]}; });
-  return accTable("Accuracy of these zones on past data", ["Group", "Zones found", "Price came back", "Finished trades", "Win rate", "Average per trade", "Still open"], rows,
-    "Every zone found on the candles above was replayed, including zones that have since been broken (those are not hidden here). A trade starts when price first returns to the proximal line after the zone formed. It wins if price reaches the target (" + rr + "R) before the distal line breaks, and loses if the distal line breaks first; when one candle touches both, it counts as a loss. Average per trade = (wins x " + rr + " - losses) / trades, in R, before brokerage and slippage. Past results only, not a promise.");
+  const pick = '<div class="charttools" style="border:0;padding:0;margin:14px 0 -8px"><b>Target</b>' + [2, 3, 4, 5].map(v => '<button type="button" class="cbtn" data-znacc="' + v + '" aria-pressed="' + (v === rr) + '">1 : ' + v + "</button>").join("") + "</div>";
+  return pick + accTable("Accuracy of these zones on past data", ["Group", "Zones found", "Price came back", "Finished trades", "Win rate", "Average per trade", "Still open"], rows,
+    "Every zone found on the candles above was replayed, including zones that have since been broken (those are not hidden here). A trade starts when price first returns to the proximal line after the zone formed. It wins if price reaches the target (" + rr + "R, that is " + rr + " times the distance from the proximal to the distal line) before the distal line breaks, and loses if the distal line breaks first; when one candle touches both, it counts as a loss. Average per trade = (wins x " + rr + " - losses) / trades, in R, before brokerage and slippage. Past results only, not a promise.");
 }
 
 /* ===== Bollinger Bands and RSI switches shared by every chart (Intraday, Zone, PEAD Picks, watchlist) ===== */
@@ -2984,6 +2986,11 @@ function znPaintRes() {
   host.innerHTML = h;
   if (cur) znDrawChart(cur.bars, cur.zones, intra);
 }
+document.addEventListener("click", ev => {
+  const b = ev.target && ev.target.closest ? ev.target.closest("[data-znacc]") : null; if (!b) return;
+  ZACC_RR = +b.getAttribute("data-znacc"); try { localStorage.setItem("znAccRR", String(ZACC_RR)); } catch (e) {}
+  try { znPaintRes(); } catch (e) {}
+});
 function znPaint() {
   const sec = document.getElementById("zn"); if (!sec) return;
   if (!sec.dataset.built) { znBuild(sec); sec.dataset.built = "1"; }
