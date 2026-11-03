@@ -1273,10 +1273,47 @@ function colors() {
 const withAlpha = (hex, a) => /^#[0-9a-f]{6}$/i.test(hex) ? hex + a : hex;
 
 /* ===== Accuracy tables shown at the bottom of each screener: what the screener's own rules would have done on past data ===== */
+/* ===== Inline stock chart: opens in a row right under a tapped stock (daily candles, 50 / 200-day averages, Bollinger and RSI switches) ===== */
+var ICH = null; const ICC = {};
+function icBlock(sym) {
+  return '<div class="icpanel" style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px));margin-top:12px"><div class="charttools" style="margin-top:0">' + indBtns() + '</div><div class="icbox" data-sym="' + String(sym).replace(/"/g, "&quot;") + '" style="height:360px;margin-top:10px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div class="icnote note" style="margin:6px 0 0">Loading chart...</div></div>';
+}
+async function icAfter(host) {
+  const box = host && host.querySelector(".icbox");
+  if (ICH) { try { ICH.remove(); } catch (e) {} ICH = null; }
+  if (!box) return;
+  try { const pn = box.closest(".icpanel"), wr = pn && pn.closest(".wrap"); if (wr) pn.style.width = Math.max(300, wr.clientWidth - 24) + "px"; } catch (e) {}
+  const sym = box.dataset.sym, note = box.nextElementSibling, tvLink = ' <a class="tvl" href="' + znTv(sym, "D") + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a>';
+  const say = t => { if (note) note.innerHTML = t; };
+  const LW = window.LightweightCharts; if (!LW) { say("The chart library did not load." + tvLink); return; }
+  let o = ICC[sym];
+  if (!o || Date.now() - o.t > 4 * 60e3) {
+    try {
+      const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF", {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym];
+      if (rows && rows.length > 30) ICC[sym] = o = {t: Date.now(), bars: rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4]}))};
+    } catch (e) {}
+  }
+  if (!box.isConnected) return;   // the row was closed or redrawn meanwhile
+  if (!o || !o.bars) { say("Could not load the chart from your Worker." + tvLink); return; }
+  const c = colors(), bars = o.bars;
+  box.innerHTML = "";
+  const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true});
+  candle.setData(bars);
+  try { indAttach(chart, candle, bars, {base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+  const sma = n => { const out = []; let sum = 0; bars.forEach((b, i) => { sum += b.close; if (i >= n) sum -= bars[i - n].close; if (i >= n - 1) out.push({time: b.time, value: sum / n}); }); return out; };
+  [[50, "#2563eb"], [200, "#c026d3"]].forEach(m => { const d = sma(m[0]); if (d.length) chart.addLineSeries({color: m[1], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false}).setData(d); });
+  try { const last = bars[bars.length - 1].time, d = new Date(last + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: last}); } catch (e) { chart.timeScale().fitContent(); }
+  ICH = chart;
+  say("Daily candles from your Cloudflare Worker, last bar " + bars[bars.length - 1].time + ". Blue = 50-day, purple = 200-day average." + tvLink);
+}
+var ACC_OPEN = {};
+document.addEventListener("toggle", ev => { const t = ev.target; if (t && t.classList && t.classList.contains("accd")) ACC_OPEN[t.dataset.acc] = t.open; }, true);
 function accTable(title, heads, rows, note) {
   const pc = (w, n) => (n ? Math.round(100 * w / n) + "%" : "-");
-  return '<h3 class="tch" style="margin-top:18px">' + title + '</h3><div class="card"><div class="wrap"><table class="acctbl"><thead><tr>' + heads.map((h, i) => "<th" + (i ? ' class="num"' : "") + ">" + h + "</th>").join("") + "</tr></thead><tbody>" +
-    rows.map(r => '<tr class="' + (r.base ? "base" : "") + '">' + r.c.map((c, i) => "<td" + (i ? ' class="num"' : "") + ">" + c + "</td>").join("") + "</tr>").join("") + '</tbody></table></div><p class="note" style="margin-bottom:0">' + note + "</p></div>";
+  const key = String(title).replace(/<[^>]*>/g, "").replace(/"/g, "&quot;");
+  return '<details class="accd" data-acc="' + key + '" style="margin-top:18px"' + (ACC_OPEN[key] ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: ' + title + ' <span class="note">(tap to open)</span></summary><div class="card"><div class="wrap"><table class="acctbl"><thead><tr>' + heads.map((h, i) => "<th" + (i ? ' class="num"' : "") + ">" + h + "</th>").join("") + "</tr></thead><tbody>" +
+    rows.map(r => '<tr class="' + (r.base ? "base" : "") + '">' + r.c.map((c, i) => "<td" + (i ? ' class="num"' : "") + ">" + c + "</td>").join("") + "</tr>").join("") + '</tbody></table></div><p class="note" style="margin-bottom:0">' + note + "</p></div></details>";
 }
 const accPc = (w, n) => (n ? Math.round(100 * w / n) + "%" : "-");
 const accRet = x => (isFinite(x) ? '<span class="' + (x > 0 ? "accg" : x < 0 ? "accb" : "") + '">' + (x > 0 ? "+" : "") + (x * 100).toFixed(1) + "%</span>" : "-");
@@ -2726,7 +2763,7 @@ let ZO = null; try { ZO = JSON.parse(localStorage.getItem("znOpt") || "null"); }
 ZO = znMerge(ZN_DEF, ZO);
 ["atrLen", "maxBase", "maxLeg", "prox", "tick", "maxGap", "minP", "maxP", "minMc", "rr", "bufPct"].forEach(k => { ZO[k] = ZN_DEF[k]; });
 if (![0, 2, 5, 10].includes(+ZO.near)) ZO.near = 0;
-let ZSEL = null, ZTFSEL = "D", ZCH = null, ZRANGE = "1Y", ZRANGEI = "150", ZCACHE = {key: "", data: null}, ZVER = 0, ZB = {}, ZSTAT = {}, ZBUSY = false, ZAGAIN = false, ZPT = null, ZSHOWN = 150;
+let ZSEL = null, ZOPEN = null, ZTFSEL = "D", ZCH = null, ZRANGE = "1Y", ZRANGEI = "150", ZCACHE = {key: "", data: null}, ZVER = 0, ZB = {}, ZSTAT = {}, ZBUSY = false, ZAGAIN = false, ZPT = null, ZSHOWN = 150;
 function znSave() { try { localStorage.setItem("znOpt", JSON.stringify(ZO)); } catch (e) {} }
 const znDate = s => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "-" + p[1] + "-" + p[0] : "—"; };
 const znTfName = tf => (ZN_TFS.find(x => x[0] === tf) || [0, tf])[1];
@@ -2858,7 +2895,7 @@ function znBuild(sec) {
     b = t.closest("[data-zntfc]");
     if (b) { ZTFSEL = b.dataset.zntfc; znPaintRes(); return; }
     b = t.closest("[data-zrow]");
-    if (b) { ZSEL = b.dataset.zrow; if (b.dataset.ztf) ZTFSEL = b.dataset.ztf; znPaintRes(); const c = document.getElementById("znchartcard"); if (c && c.scrollIntoView) c.scrollIntoView({behavior: "smooth", block: "start"}); }
+    if (b) { const k = b.dataset.zk || b.dataset.zrow, tf = b.dataset.ztf; if (ZOPEN === k && (!tf || tf === ZTFSEL)) ZOPEN = null; else { ZOPEN = k; ZSEL = b.dataset.zrow; if (tf) ZTFSEL = tf; } znPaintRes(); }
   });
   sec.addEventListener("change", ev => {
     const el = ev.target; if (!el) return;
@@ -2943,6 +2980,19 @@ function znPaintRes() {
     tile("Nearest supply", ns ? fmt(ns.z.prox) : "—", ns ? nm(ns) + " · " + znTfName(ns.it.tf) + " · " + fmt(ns.away, 1) + "% away" : "none") +
     tile("Best confluence", top ? Math.max(top.D.size, top.S.size) + " TF" : "—", top ? esc(top.u.name) + " · " + (top.D.size >= top.S.size ? "demand" : "supply") + " zones within " + CN + "%" : "no stock has a zone within " + CN + "% of price") +
     tile("Stocks scanned", stocksWith, "of " + D.uni.length + " · " + D.tfs.map(znTfName).join(", ")) + "</div>";
+  /* the chart opens in a row right under the stock the person tapped, and closes when the row is tapped again */
+  const zoSym = ZOPEN ? String(ZOPEN).split("|")[0] : null;
+  if (zoSym && !items.some(i => i.u.sym === zoSym)) ZOPEN = null;
+  const zOn = ZOPEN ? String(ZOPEN).split("|")[0] : null;
+  const avail = zOn ? D.tfs.filter(tf => items.some(i => i.u.sym === zOn && i.tf === tf)) : [];
+  if (zOn) { ZSEL = zOn; if (avail.indexOf(ZTFSEL) < 0) ZTFSEL = avail.indexOf("D") >= 0 ? "D" : avail[0]; }
+  const cur = zOn ? items.find(i => i.u.sym === zOn && i.tf === ZTFSEL) : null, intra = znIntra(ZTFSEL);
+  const rngs = intra ? [["60", "60 bars"], ["150", "150 bars"], ["300", "300 bars"], ["All", "All"]] : [["3M", "3M"], ["6M", "6M"], ["1Y", "1Y"], ["2Y", "2Y"], ["All", "All"]], rcur = intra ? ZRANGEI : ZRANGE;
+  const nmOf = s => (D.uni.find(u => u.sym === s) || {name: s}).name;
+  const chartRow = cols => '<tr class="det"><td colspan="' + cols + '"><div class="zpanel" style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px))"><div class="card chartcard" id="znchartcard" style="margin:0"><div class="charttools"><b>' + esc(nmOf(zOn)) + '</b><span class="csep"></span>' +
+    avail.map(tf => '<button type="button" class="cbtn" data-zntfc="' + tf + '" aria-pressed="' + (tf === ZTFSEL) + '">' + znTfName(tf) + "</button>").join("") +
+    '<span class="csep"></span>' + rngs.map(r => '<button type="button" class="cbtn" data-znrange="' + r[0] + '" aria-pressed="' + (r[0] === rcur) + '">' + r[1] + "</button>").join("") +
+    '<span class="csep"></span>' + indBtns() + '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(zOn || "").replace(/[&-]/g, "_")) + '&interval=' + ZTFSEL + '" target="_blank" rel="noopener">Open on TradingView</a></div></div></div></td></tr>';
   if (!all.length) h += '<div class="card empty">No zones match the current filters. Try switching a filter off, or tick Mitigated under Show.</div>';
   else if (ZO.view === "mtf") {
     /* one row per stock, one column per timeframe: newest active demand and supply zone, like the indicator's MTF dashboard */
@@ -2952,41 +3002,32 @@ function znPaintRes() {
     const rows = Object.keys(by).map(k => { const r = by[k], cf = conf[k]; r.nD = cf ? cf.D.size : 0; r.nS = cf ? cf.S.size : 0; r.best = cf ? cf.best : 1e9; return r; }).sort((a, b) => Math.max(b.nD, b.nS) - Math.max(a.nD, a.nS) || a.best - b.best);
     h += '<div class="wrap"><table class="znm"><thead><tr><th>Stock</th><th class="num">Price</th>' + D.tfs.map(tf => "<th>" + znTfName(tf) + "</th>").join("") + '<th class="num" title="Timeframes with an active zone within ' + CN + '% of price">Near TFs</th></tr></thead><tbody>';
     rows.slice(0, ZSHOWN).forEach(r => {
-      h += '<tr data-zrow="' + esc(r.u.sym) + '"><td><b>' + esc(r.u.name) + '</b>' + znTvA(r.u.sym, "D") + '</td><td class="num">' + fmt(pxOf[r.u.sym]) + "</td>" + D.tfs.map(tf => {
+      h += '<tr data-zrow="' + esc(r.u.sym) + '" style="cursor:pointer"><td><b>' + esc(r.u.name) + '</b>' + znTvA(r.u.sym, "D") + '</td><td class="num">' + fmt(pxOf[r.u.sym]) + "</td>" + D.tfs.map(tf => {
         const c = r.tf[tf] || {}, cell = (x, cls) => x ? '<div class="zc ' + cls + '" data-zrow="' + esc(r.u.sym) + '" data-ztf="' + tf + '"><b>' + (cls === "g" ? "D " : "S ") + fmt(x.z.prox) + '</b> <small>' + x.z.pat + " &middot; " + Math.round(x.z.prob) + "% &middot; " + fmt(x.away, 1) + "%</small></div>" : "";
         return "<td>" + (cell(c.D, "g") + cell(c.S, "r") || '<span class="note">—</span>') + "</td>";
       }).join("") + '<td class="num">' + (r.nD ? '<span class="chip g">' + r.nD + " D</span> " : "") + (r.nS ? '<span class="chip r">' + r.nS + " S</span>" : "") + (!r.nD && !r.nS ? "—" : "") + "</td></tr>";
+      if (zOn === r.u.sym) h += chartRow(3 + D.tfs.length);
     });
     h += "</tbody></table></div>" + (rows.length > ZSHOWN ? '<p><button type="button" class="cbtn" data-znmore="1">Show more (' + (rows.length - ZSHOWN) + " left)</button></p>" : "") +
-      '<p class="note">Each cell is the newest active zone on that timeframe: proximal price, pattern, score and how far the live price is from it. Near TFs counts the timeframes with an active zone within ' + CN + '% of the price. Tap a cell to chart that stock and timeframe.</p>';
+      '<p class="note">Each cell is the newest active zone on that timeframe: proximal price, pattern, score and how far the live price is from it. Near TFs counts the timeframes with an active zone within ' + CN + '% of the price. Tap a cell to open that stock\'s chart on that timeframe right below the row; tap the row again to close it.</p>';
   } else {
     all.sort((a, b) => { const am = !znActive(a.z), bm = !znActive(b.z); if (am !== bm) return am ? 1 : -1; return (isFinite(a.away) ? Math.abs(a.away) : 1e9) - (isFinite(b.away) ? Math.abs(b.away) : 1e9); });
     h += '<div class="wrap"><table><thead><tr><th>Stock</th><th>TF</th><th>Zone</th><th>Pattern</th><th class="num">Proximal</th><th class="num">Distal</th><th class="num">Target</th><th class="num">Away %</th><th class="num">Prob</th><th>Formed</th><th>Status</th></tr></thead><tbody>';
+    let zPlaced = false;
     all.slice(0, ZSHOWN).forEach(x => {
-      const z = x.z, chipT = z.type === "D" ? '<span class="chip g">&#9650; Demand</span>' : '<span class="chip r">&#9660; Supply</span>';
+      const z = x.z, zk = x.it.u.sym + "|" + x.it.tf + "|" + z.type + "|" + z.sig, chipT = z.type === "D" ? '<span class="chip g">&#9650; Demand</span>' : '<span class="chip r">&#9660; Supply</span>';
       const chipS = z.status === "fresh" ? '<span class="chip g">Fresh</span>' : z.status === "respected" ? '<span class="chip w">Respected</span>' : '<span class="chip n">Mitigated</span>';
-      h += '<tr data-zrow="' + esc(x.it.u.sym) + '" data-ztf="' + x.it.tf + '"><td><b>' + nm(x) + '</b>' + znTvA(x.it.u.sym, x.it.tf) + '</td><td><span class="chip n">' + znTfName(x.it.tf) + "</span></td><td>" + chipT + "</td><td>" + z.pat + '</td><td class="num">' + fmt(z.prox) + '</td><td class="num">' + fmt(z.dist) + '</td><td class="num">' + fmt(z.target) + '</td><td class="num"' + (isFinite(x.away) && x.away < 0 ? ' style="color:var(--warn);font-weight:600"' : "") + ">" + (isFinite(x.away) ? fmt(x.away, 1) + "%" : "—") + '</td><td class="num">' + Math.round(z.prob) + "%</td><td>" + znFmtT(z.formTime) + "</td><td>" + chipS + "</td></tr>";
+      h += '<tr data-zrow="' + esc(x.it.u.sym) + '" data-zk="' + esc(zk) + '" data-ztf="' + x.it.tf + '" style="cursor:pointer"><td><b>' + nm(x) + '</b>' + znTvA(x.it.u.sym, x.it.tf) + '</td><td><span class="chip n">' + znTfName(x.it.tf) + "</span></td><td>" + chipT + "</td><td>" + z.pat + '</td><td class="num">' + fmt(z.prox) + '</td><td class="num">' + fmt(z.dist) + '</td><td class="num">' + fmt(z.target) + '</td><td class="num"' + (isFinite(x.away) && x.away < 0 ? ' style="color:var(--warn);font-weight:600"' : "") + ">" + (isFinite(x.away) ? fmt(x.away, 1) + "%" : "—") + '</td><td class="num">' + Math.round(z.prob) + "%</td><td>" + znFmtT(z.formTime) + "</td><td>" + chipS + "</td></tr>";
+      if (zOn && !zPlaced && (ZOPEN === zk || (ZOPEN === x.it.u.sym && x.it.tf === ZTFSEL))) { zPlaced = true; h += chartRow(11); }
     });
     h += "</tbody></table></div>" + (all.length > ZSHOWN ? '<p><button type="button" class="cbtn" data-znmore="1">Show more (' + (all.length - ZSHOWN) + " left)</button></p>" : "") +
-      '<p class="note">Away % is how far the live price is from the proximal line (negative: price is already beyond it). Prob is the indicator\'s score for the zone (base candles, leg-out strength, trend). Tap a row to draw its stock and timeframe below.</p>';
+      '<p class="note">Away % is how far the live price is from the proximal line (negative: price is already beyond it). Prob is the indicator\'s score for the zone (base candles, leg-out strength, trend). Tap a row to open its chart right below it; tap the row again to close it.</p>';
   }
-  /* chart for the chosen stock and timeframe */
-  const syms = []; items.forEach(i => { if (syms.indexOf(i.u.sym) < 0) syms.push(i.u.sym); });
-  const cnt = s => items.filter(i => i.u.sym === s).reduce((a, i) => a + i.zones.filter(z => znShown(z) && znActive(z)).length, 0);
-  if (!ZSEL || syms.indexOf(ZSEL) < 0) ZSEL = (top && top.u.sym) || (nd && nd.it.u.sym) || (ns && ns.it.u.sym) || syms[0];
-  const avail = D.tfs.filter(tf => items.some(i => i.u.sym === ZSEL && i.tf === tf));
-  if (avail.indexOf(ZTFSEL) < 0) ZTFSEL = avail.indexOf("D") >= 0 ? "D" : avail[0];
-  const cur = items.find(i => i.u.sym === ZSEL && i.tf === ZTFSEL), intra = znIntra(ZTFSEL);
-  const rngs = intra ? [["60", "60 bars"], ["150", "150 bars"], ["300", "300 bars"], ["All", "All"]] : [["3M", "3M"], ["6M", "6M"], ["1Y", "1Y"], ["2Y", "2Y"], ["All", "All"]], rcur = intra ? ZRANGEI : ZRANGE;
-  const nmOf = s => (D.uni.find(u => u.sym === s) || {name: s}).name;
-  h += '<h2>Chart</h2><div class="card chartcard" id="znchartcard"><div class="charttools"><select id="znsel" aria-label="Stock" style="font:inherit;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)">' +
-    syms.map(s => '<option value="' + esc(s) + '"' + (s === ZSEL ? " selected" : "") + ">" + esc(nmOf(s)) + " (" + cnt(s) + ")</option>").join("") + "</select>" +
-    '<span class="csep"></span>' + avail.map(tf => '<button type="button" class="cbtn" data-zntfc="' + tf + '" aria-pressed="' + (tf === ZTFSEL) + '">' + znTfName(tf) + "</button>").join("") +
-    '<span class="csep"></span>' + rngs.map(r => '<button type="button" class="cbtn" data-znrange="' + r[0] + '" aria-pressed="' + (r[0] === rcur) + '">' + r[1] + "</button>").join("") +
-    '<span class="csep"></span>' + indBtns() + '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(ZSEL || "").replace(/[&-]/g, "_")) + '&interval=' + ZTFSEL + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
   try { h += znAccHTML(items); } catch (e) {}
   host.innerHTML = h;
-  if (cur) znDrawChart(cur.bars, cur.zones, intra);
+  try { const zp = host.querySelector(".zpanel"), wr = zp && zp.closest(".wrap"); if (wr) zp.style.width = Math.max(300, wr.clientWidth - 24) + "px"; } catch (e) {}   // keep the chart inside the visible part of a wide table
+  if (cur && document.getElementById("znbox")) znDrawChart(cur.bars, cur.zones, intra);
+  else if (ZCH) { try { ZCH.chart.remove(); } catch (e) {} ZCH = null; }
 }
 document.addEventListener("click", ev => {
   const b = ev.target && ev.target.closest ? ev.target.closest("[data-znacc]") : null; if (!b) return;
@@ -3521,13 +3562,14 @@ const tcApi = (function () {
       h += '<tr class="row" data-sym="' + esc(r.sym) + '" style="cursor:pointer"><td>' + (i + 1) + "</td><td><b>" + esc(r.sym) + "</b>" + znTvA(r.sym) + "</td><td>" + esc(r.sec || "—") + "</td><td>" + probCell(r.S) + '</td><td class="num">' + r.S.w + "/" + r.S.n + '</td><td class="num">' + ret(r.S.avg) + '</td><td class="num">' + ret(r.S.med) + '</td><td class="num">' + ret(r.S.worst) + "</td><td>" + (mOk ? '<span style="color:' + pcol(r.M.prob) + '"><b>' + r.M.w + "/" + r.M.n + "</b></span> " + ret(r.M.avg) : "—") + '</td><td><span class="tcg" style="background:' + c[1] + '">' + c[0] + '</span></td><td class="num">' + r.yrs.toFixed(1) + "</td></tr>";
       if (o) h += '<tr class="det"><td colspan="11"><div class="note" style="margin:0 0 6px;max-width:none">' + (nm ? "Whole of " + nmName : "Return from " + dTxt(today).replace(/ \d{4}$/, "") + " to " + dTxt(end).replace(/ \d{4}$/, "")) + ", year by year:</div>" +
         r.A.win.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") + "</div>" +
-        (!nm && r.A.mon.length ? '<div class="note" style="margin:8px 0 6px;max-width:none">Whole of ' + MON[+today.slice(5, 7) - 1] + ", year by year:</div>" + r.A.mon.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") : "") + "</td></tr>";
+        (!nm && r.A.mon.length ? '<div class="note" style="margin:8px 0 6px;max-width:none">Whole of ' + MON[+today.slice(5, 7) - 1] + ", year by year:</div>" + r.A.mon.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") : "") + icBlock(r.sym) + "</td></tr>";
     });
     h += "</tbody></table></div>" + (stocks.length > SHOWN ? '<p><button type="button" class="cbtn" id="tcMore">Show 40 more (' + (stocks.length - SHOWN) + " left)</button></p>" : "");
     h += '<p class="note"><b>How to read this.</b> Probability is the share of past years in which the stock closed higher over this same date window, nudged toward 50% when there are few years (wins + 1) / (years + 2), so 8 up years out of 8 reads as 90%, not 100%. A sector is the equal-weighted basket of its stocks, so it also carries the whole market\'s seasonal tilt. "This month" is the whole current calendar month, like the Pine seasonality table. Click a stock to see every year. Only stocks with at least ' + O.min + " years of history are ranked. A calendar pattern is a tilt in the odds that has held in the past, not a signal on its own. General information, not buy or sell advice.</p>";
     try { h += accHTML(V, R.secs); } catch (e) {}
     if (SECCH) { try { SECCH.remove(); } catch (e) {} SECCH = null; }
     host.innerHTML = h;
+    try { icAfter(host); } catch (e) {}
     if (SECSEL) { try { drawSec(); } catch (e) {} }
   }
   function paint() { build(); view(); }
