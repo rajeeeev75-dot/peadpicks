@@ -692,6 +692,32 @@ document.addEventListener("click", ev => {
   setTimeout(() => { const h = document.getElementById("ixchart"); if (h && h.scrollIntoView) h.scrollIntoView({behavior: "smooth", block: "start"}); }, 50);
 });
 setInterval(() => { try { if (IX_SEL && typeof current !== "undefined" && current === "ix" && !document.hidden && IX_SEL.tf !== "D") ixChartDraw(); } catch (e) {} }, 60 * 1000);
+/* ===== RESULTS WATCHLIST (F&O stocks with results today or on the next trading day, with buy/sell signals from Trade ideas and OI spurts) ===== */
+function resultWatchHTML(M, oiBy) {
+  let h = '<h2 class="hb hbn">&#128197; Results watchlist: F&amp;O stocks reporting today or next trading day</h2>';
+  if (M.earnings === undefined) return h + '<div class="card"><p class="note" style="margin:0">Needs the updated Worker (it supplies result dates).</p></div>';
+  const IST = {timeZone: "Asia/Kolkata"}, todayK = new Date().toLocaleDateString("en-CA", IST);
+  let nx = new Date(Date.now() + 864e5); for (let i = 0; i < 4 && [0, 6].indexOf(new Date(nx.toLocaleDateString("en-CA", IST) + "T12:00:00+05:30").getDay()) >= 0; i++) nx = new Date(nx.getTime() + 864e5);
+  const nextK = nx.toLocaleDateString("en-CA", IST), fno = new Set(typeof ZN_FNO !== "undefined" ? ZN_FNO : []);
+  const ev = (M.earnings || []).filter(x => fno.has(String(x.s).toUpperCase()) && (x.d === todayK || (x.d > todayK && x.d <= nextK)));
+  if (!ev.length) return h + '<div class="card"><p class="note" style="margin:0">No F&amp;O company has a result listed for today or the next trading day (' + esc(nextK) + "). NSE lists board meetings only a few days ahead.</p></div>";
+  const px = {}; (M.stocks || []).forEach(x => { px[String(x.s).toUpperCase()] = x; });
+  const ideaOf = {}; if (IDEAS_LAST) [[IDEAS_LAST.L, 1], [IDEAS_LAST.S, -1]].forEach(a => (a[0] || []).forEach(x => { ideaOf[String(x.s).toUpperCase()] = {d: a[1], x}; }));
+  const rows = ev.map(e => {
+    const sym = String(e.s).toUpperCase(), q = px[sym], r = oiBy[sym], i = ideaOf[sym];
+    let L = 0, S = 0; const why = [];
+    if (i) { if (i.d === 1) L++; else S++; why.push("Trade idea " + (i.d === 1 ? "long" : "short") + " " + i.x.sc + "/10"); }
+    if (r && +r.chg > 0 && q) { const up = +q.pct >= 0; if (up) L++; else S++; why.push((up ? "Long" : "Short") + " build-up, OI " + pct(+r.pct, 0)); }
+    const side = L > S ? 1 : S > L ? -1 : 0, mixed = L && S;
+    return {sym, n: e.n, d: e.d, q, side, mixed, why, n2: L + S, lv: i && i.x.lv, day: e.d === todayK ? 0 : 1};
+  }).sort((a, b) => a.day - b.day || Math.abs(b.side) - Math.abs(a.side) || b.n2 - a.n2 || (a.sym < b.sym ? -1 : 1));
+  h += '<div class="card"><div class="wrap"><table class="pptbl"><thead><tr><th>Stock</th><th>Results</th><th class="num">Price</th><th>Signal</th><th>Why</th><th class="num">Trigger</th><th class="num">Stop</th><th class="num">Target</th></tr></thead><tbody>' +
+    rows.map(r => '<tr><td style="white-space:nowrap"><b>' + esc(r.sym) + "</b>" + znTvA(r.sym, "D") + " " + ixBtn(r.sym) + '</td><td>' + (r.day === 0 ? "Today" : "Next session") + '</td><td class="num">' + (r.q ? fmt(+r.q.p) + ' <small style="color:var(--' + (+r.q.pct >= 0 ? "good" : "bad") + ')">' + pct(+r.q.pct, 1) + "</small>" : "-") + "</td><td>" +
+      (r.side === 1 ? '<span class="chip g">BUY</span>' : r.side === -1 ? '<span class="chip r">SELL</span>' : '<span class="chip n">Wait</span>') + (r.mixed ? ' <small title="Trade idea and OI point opposite ways">mixed</small>' : "") + '</td><td style="white-space:normal;min-width:200px"><small>' + (r.why.length ? r.why.map(esc).join("; ") : "No trade idea or OI spurt yet") + '</small></td>' +
+      (r.lv && r.side ? '<td class="num">' + fmt(r.lv.t) + '</td><td class="num">' + fmt(r.lv.st) + '</td><td class="num">' + fmt(r.lv.tg) + "</td>" : '<td class="num">-</td><td class="num">-</td><td class="num">-</td>') + "</tr>").join("") + "</tbody></table></div>" +
+    '<p class="note" style="margin-bottom:0">F&amp;O stocks whose board meeting for results is today or on the next trading day (' + esc(nextK) + "), from NSE's calendar. The calendar gives the date but not the time, so check the exchange filing to see which came after 2 pm. BUY or SELL appears when the Trade ideas screen lists the stock or the OI spurt shows a build-up (price up with OI up is long, price down with OI up is short). First-day result moves are fast and gap-prone: use the chart, keep the stop tight and size small. Trigger, stop and target come from the Trade ideas screen. General information, not advice.</p></div>";
+  return h;
+}
 function ixPaint() {
   const o = document.getElementById("ixbody"); if (!o) return;
   let h = '<div id="ixchart"></div>';
@@ -712,6 +738,7 @@ function ixPaint() {
       '</tbody></table></div><p class="note" style="margin-bottom:0">Stocks the screen ranks as intraday candidates that also show a jump in open interest. OI read: price up with OI up is long build-up, price down with OI up is short build-up, price up with OI down is short covering, price down with OI down is long unwinding. These are data labels, not advice.</p></div>';
   }
   h += ideas + oiHTML();
+  try { h += resultWatchHTML(M, oiBy); } catch (e) { h += '<div class="card"><p class="note">Problem drawing the results watchlist: ' + esc(e && e.message) + '</p></div>'; }
   o.innerHTML = h;
   try { ixChartDraw(); } catch (e) {}
 }
