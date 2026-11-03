@@ -3087,6 +3087,31 @@ const ppApi = (function () {
     el.textContent = META.state === "loading" ? "Loading..." : META.state === "err" ? "Could not load the PEAD data file (" + META.err + ")." : DATA.length + " stocks scored from the data file" + (META.modified ? ", file built " + new Date(META.modified).toLocaleString("en-IN", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata"}) + " IST" : "") + ". Checked " + new Date(META.fetchedAt).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"}) + ".";
   }
   /* results announced in the last few days that the data file has not scored yet */
+
+  /* ---- back-test results written by pead_backtest.py (GitHub Action) next to pead.csv ---- */
+  const PBT_URL = PEAD_CSV_DIRECT.replace(/pead\.csv$/, "pead_backtest.json");
+  let PBT = null, PBT_STATE = "idle";
+  function pbtLoad() {
+    if (PBT_STATE === "loading" || (PBT_STATE === "ok" && Date.now() - PBT.t < 6 * 36e5)) return;
+    PBT_STATE = "loading";
+    fetch(PBT_URL + "?t=" + Math.floor(Date.now() / 6e5), {cache: "no-store"}).then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(j => { PBT = {t: Date.now(), d: j}; PBT_STATE = "ok"; }).catch(e => { PBT_STATE = "none"; })
+      .then(() => { try { if (current === "pp") view(); } catch (e) {} });
+  }
+  function pbtHTML() {
+    pbtLoad();
+    const head = '<h3 class="tch" style="margin-top:18px">Back-test: how past results performed after the announcement</h3>';
+    if (PBT_STATE !== "ok") return head + '<div class="card"><p class="note" style="margin:0">' + (PBT_STATE === "loading" || PBT_STATE === "idle" ? "Loading the back-test..." : "No back-test file yet. Run the PEAD back-test workflow in your GitHub repository (Actions tab); it writes pead_backtest.json next to pead.csv and the table appears here. It continues where it stopped on each run, so run it a few times for a bigger sample.") + "</p></div>";
+    const d = PBT.d, f1 = x => (isFinite(x) ? (x > 0 ? "+" : "") + x.toFixed(1) + "%" : "-"), cl = x => (x > 0 ? "accg" : x < 0 ? "accb" : "");
+    const cell = x => (x && x.n ? '<span class="' + cl(x.mean) + '">' + f1(x.mean) + "</span>" : "-");
+    const rows = d.groups.map(g => {
+      const a = g.h20 || {}, b = g.h60 || {}, n = a.n || 0, edge = n >= 30 && isFinite(a.excess) && isFinite(a.ci) && a.excess - a.ci > 0 ? ["Edge likely", "accg"] : n >= 30 && isFinite(a.excess) && isFinite(a.ci) && a.excess + a.ci < 0 ? ["Worse than Nifty", "accb"] : n < 30 ? ["Too few", ""] : ["Not proven", ""];
+      const combo = /^YOUR COMBO/.test(g.name);
+      return '<tr' + (combo ? ' style="background:color-mix(in srgb,var(--a) 10%,var(--card))"' : "") + "><td>" + (combo ? "<b>" + E(g.name) + "</b>" : E(g.name)) + '</td><td class="num">' + g.events + '</td><td class="num">' + (a.n ? a.win + "%" : "-") + '</td><td class="num">' + cell(a) + '</td><td class="num">' + (isFinite(a.excess) ? '<span class="' + cl(a.excess) + '">' + f1(a.excess) + "</span>" + (isFinite(a.ci) ? ' <small>&plusmn;' + a.ci.toFixed(1) + "</small>" : "") : "-") + '</td><td class="num">' + cell(b) + '</td><td class="num">' + (isFinite(b.excess) ? '<span class="' + cl(b.excess) + '">' + f1(b.excess) + "</span>" : "-") + '</td><td><span class="' + edge[1] + '">' + edge[0] + "</span></td></tr>";
+    }).join("");
+    return head + '<div class="card"><div class="wrap"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Results</th><th class="num">20d up</th><th class="num">20d avg</th><th class="num">20d vs Nifty</th><th class="num">60d avg</th><th class="num">60d vs Nifty</th><th>Verdict</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<p class="note" style="margin-bottom:0">' + d.events.toLocaleString("en-IN") + " past results from " + d.stocks + " stocks, announced " + E(d.from) + " to " + E(d.to) + ". Each return starts at the close of the first session after the result, when the reaction is known, and runs 20 or 60 trading days. 'vs Nifty' is the average gain over the Nifty in the same days, with its rough 95% range after the &plusmn;. A group is marked 'Edge likely' only when it has 30 or more results and its range stays above zero. The SHORT row shows returns as if the stock was sold. " + E(d.note) + " Past results only, not a promise.</p></div>";
+  }
   function pending() {
     let M = null; try { M = MARKET; } catch (e) {}
     const list = (M && M.earnings) || [], have = {};
@@ -3139,6 +3164,7 @@ const ppApi = (function () {
       return r;
     }).join("") : '<tr><td colspan="11" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
     h += '</tbody></table></div><p class="note">Cash-flow quality (10 pts in your Pine indicator) needs 3-year operating cash flow, which the free data feed does not carry, so scores here can be up to 10 points lower than the dashboard. Check the filing before buying.</p>';
+    try { h += pbtHTML(); } catch (e) {}
     host.innerHTML = h; paintStatus();
     try { chartDraw(); } catch (e) {}
   }
