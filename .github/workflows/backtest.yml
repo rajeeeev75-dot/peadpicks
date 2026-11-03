@@ -1,0 +1,27 @@
+name: PEAD back-test
+on:
+  schedule:
+    - cron: "30 22 * * 0"   # Sunday 04:00 IST: keeps adding stocks to the back-test until the whole universe is covered
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: pead-data
+  cancel-in-progress: false
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    env:
+      BUDGET_MIN: "110"
+      BT_MAX: "500"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install yfinance pandas requests
+      - run: python pead_backtest.py
+      - run: |
+          git config user.name "pead-bot"; git config user.email "bot@users.noreply.github.com"
+          git add pead_backtest.json pead_backtest.csv pead_backtest.md backtest_cache.json
+          git diff --staged --quiet || (git commit -m "Update PEAD back-test" && git pull --rebase && git push)
