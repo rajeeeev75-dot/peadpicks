@@ -626,8 +626,10 @@ function oiHTML() {
   const common = all.filter(r => ideaSyms.has(String(r.s).toUpperCase())), top = all.filter(r => !ideaSyms.has(String(r.s).toUpperCase()));
   const rows = common.concat(top.slice(0, Math.max(0, 10 - common.length))), shown = rows;   // stocks that are also trade ideas first, then the biggest spurts up to 10 rows
   const cls = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
-  let h = h2 + '<div class="card"><div class="wrap"><table><thead><tr><th>Symbol</th><th class="num">Open interest</th><th class="num">Previous OI</th><th class="num">Change in OI</th><th class="num">% change in OI</th><th class="num">Volume (contracts)</th><th class="num">Futures value (Rs lakh)</th><th class="num">Option value (Rs lakh)</th><th class="num">Total value (Rs lakh)</th><th class="num">Premium value (Rs lakh)</th><th class="num">Underlying value</th></tr></thead><tbody>' +
-    shown.map(r => "<tr><td style=\"white-space:nowrap\"><b>" + esc(r.s) + "</b>" + znTvA(r.s, "D") + " " + ixBtn(r.s) + (ideaSyms.has(String(r.s).toUpperCase()) ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in Trade ideas">Trade idea</span>' : "") + '</td><td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
+  const pxM = {}; try { ((typeof MARKET !== "undefined" && MARKET && MARKET.stocks) || []).forEach(x => { pxM[String(x.s).toUpperCase()] = x; }); } catch (e) {}
+  const pxCell = r => { const q = pxM[String(r.s).toUpperCase()]; return q && isFinite(+q.p) ? '<td class="num">' + d2(+q.p) + '</td><td class="num" style="' + cls(+q.pct) + '">' + (+q.pct > 0 ? "+" : "") + (+q.pct).toFixed(2) + "%</td>" : '<td class="num">-</td><td class="num">-</td>'; };
+  let h = h2 + '<div class="card"><div class="wrap"><table><thead><tr><th>Symbol</th><th class="num">Price</th><th class="num">% change</th><th class="num">Open interest</th><th class="num">Previous OI</th><th class="num">Change in OI</th><th class="num">% change in OI</th><th class="num">Volume (contracts)</th><th class="num">Futures value (Rs lakh)</th><th class="num">Option value (Rs lakh)</th><th class="num">Total value (Rs lakh)</th><th class="num">Premium value (Rs lakh)</th><th class="num">Underlying value</th></tr></thead><tbody>' +
+    shown.map(r => "<tr><td style=\"white-space:nowrap\"><b>" + esc(r.s) + "</b>" + znTvA(r.s, "D") + " " + ixBtn(r.s) + (ideaSyms.has(String(r.s).toUpperCase()) ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in Trade ideas">Trade idea</span>' : "") + '</td>' + pxCell(r) + '<td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
   return h + '<p class="note">NSE OI spurts (stocks that are also trade ideas first, then the biggest by % change in open interest)' + (OI.asOf ? ", as of " + esc(OI.asOf) : "") + ". Data only, no interpretation.</p></div>";
 }
 async function loadOi() {
@@ -3132,9 +3134,10 @@ const ppApi = (function () {
       .then(j => { PBT = {t: Date.now(), d: j}; PBT_STATE = "ok"; }).catch(e => { PBT_STATE = "none"; })
       .then(() => { try { if (current === "pp") view(); } catch (e) {} });
   }
+  var PBT_OPEN = false;
   function pbtHTML() {
     pbtLoad();
-    const head = '<h3 class="tch" style="margin-top:18px">Back-test: how past results performed after the announcement</h3>';
+    const head = '';
     if (PBT_STATE !== "ok") return head + '<div class="card"><p class="note" style="margin:0">' + (PBT_STATE === "loading" || PBT_STATE === "idle" ? "Loading the back-test..." : "No back-test file yet. Run the PEAD back-test workflow in your GitHub repository (Actions tab); it writes pead_backtest.json next to pead.csv and the table appears here. It continues where it stopped on each run, so run it a few times for a bigger sample.") + "</p></div>";
     const d = PBT.d, f1 = x => (isFinite(x) ? (x > 0 ? "+" : "") + x.toFixed(1) + "%" : "-"), cl = x => (x > 0 ? "accg" : x < 0 ? "accb" : "");
     const cell = x => (x && x.n ? '<span class="' + cl(x.mean) + '">' + f1(x.mean) + "</span>" : "-");
@@ -3158,14 +3161,16 @@ const ppApi = (function () {
     const host = document.getElementById("ppbody"); if (!host || host.dataset.built) return; host.dataset.built = "1";
     host.innerHTML = '<div class="znhead"><div><h2>PEAD PICKS</h2><span>Stocks that just announced quarterly results, ranked by PEAD score</span></div><div class="znpills"><span>Built in</span><span>Cloudflare-cached data</span><span>Screening aid, not advice</span></div></div>' +
       '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Min score <input id="ppMin" type="number" min="0" max="100" style="width:68px" value="' + E(F.min) + '"></label>' +
+      '<label>Result quality <select id="ppQ"><option value="any">Any</option><option value="exc">Excellent only</option><option value="vg">Very good or better</option><option value="good">Good or better</option><option value="weak">Weak or poor only</option></select></label>' +
       '<label>Results within <select id="ppDays"><option value="15">15 days</option><option value="30">30 days</option><option value="60">60 days</option><option value="999">any</option></select></label>' +
       '<label>Min mcap (Rs cr) <input id="ppCap" type="number" style="width:84px" value="' + E(F.cap) + '"></label>' +
       '<label>Fwd P/E method <select id="ppMode"><option value="auto">Auto</option><option value="runrate">Run rate x4</option><option value="pead">Original PEAD</option></select></label>' +
       '<button type="button" class="cbtn" id="ppReload">↻ Reload</button></div><div class="note" id="ppstat" style="margin:8px 0 0"></div></div>' +
       '<div id="ppres"></div>';
-    $e("#ppDays").value = String(F.days); $e("#ppMode").value = F.mode;
+    $e("#ppDays").value = String(F.days); $e("#ppQ").value = F.q || "any"; $e("#ppMode").value = F.mode;
+    host.addEventListener("toggle", ev => { const t = ev.target; if (t && t.classList && t.classList.contains("pbtd")) PBT_OPEN = t.open; }, true);
     host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return;
-      if (t.id === "ppMin") F.min = num(t.value) || 0; else if (t.id === "ppCap") F.cap = num(t.value) || 0; else if (t.id === "ppDays") F.days = +t.value; else if (t.id === "ppMode") F.mode = t.value; else return;
+      if (t.id === "ppMin") F.min = num(t.value) || 0; else if (t.id === "ppCap") F.cap = num(t.value) || 0; else if (t.id === "ppDays") F.days = +t.value; else if (t.id === "ppQ") F.q = t.value; else if (t.id === "ppMode") F.mode = t.value; else return;
       try { localStorage.setItem("ppF", JSON.stringify(F)); } catch (e) {} view(); });
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest || t.closest("a")) return;
@@ -3179,7 +3184,8 @@ const ppApi = (function () {
     if (META.state === "err" && !DATA.length) { host.innerHTML = '<div class="card empty">The PEAD data file could not be loaded (' + E(META.err) + '). Check that ' + E(PEAD_CSV_DIRECT) + ' opens in your browser, and that the GitHub action that writes it has run.</div>'; return; }
     const AM = annMap();
     let rows = DATA.map(s => { const ad = annDate(s, AM); return {s, P: score(s, F.mode), ad, d: ad ? ageOf(ad) : NaN}; }).filter(x => x.P);
-    rows = rows.filter(x => x.P.total >= F.min && (!isFinite(x.d) || x.d <= F.days) && (!(num(x.s.mcap) >= 0) || num(x.s.mcap) >= F.cap));
+    const qOk = x => { const r = String(x.P.rec[0]), q = F.q || "any"; return q === "any" || (q === "exc" ? /EXCELLENT/.test(r) : q === "vg" ? /EXCELLENT|VERY GOOD/.test(r) : q === "good" ? /EXCELLENT|GOOD/.test(r) : /WEAK|POOR/.test(r)); };
+    rows = rows.filter(x => qOk(x) && x.P.total >= F.min && (!isFinite(x.d) || x.d <= F.days) && (!(num(x.s.mcap) >= 0) || num(x.s.mcap) >= F.cap));
     const key = {total: x => x.P.total, fwdPe: x => x.P.fwdPe || 1e9, revY: x => x.P.revY, npY: x => x.P.npY, d: x => x.d, rd: x => x.ad || "", ticker: x => String(x.s.ticker), react: x => { const v = num(x.s.react_pct); return isFinite(v) ? v : -1e9; }};
     rows.sort((a, b) => { const A = key[sortKey](a), B = key[sortKey](b); return (A > B ? 1 : A < B ? -1 : 0) * sortDir; });
     let h = "";
@@ -3198,7 +3204,7 @@ const ppApi = (function () {
       return r;
     }).join("") : '<tr><td colspan="11" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
     h += '</tbody></table></div><p class="note">Cash-flow quality (10 pts in your Pine indicator) needs 3-year operating cash flow, which the free data feed does not carry, so scores here can be up to 10 points lower than the dashboard. Check the filing before buying.</p>';
-    try { h += pbtHTML(); } catch (e) {}
+    try { h += '<details class="pbtd" style="margin-top:18px"' + (PBT_OPEN ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how past results performed after the announcement (tap to open)</summary>' + pbtHTML() + "</details>"; } catch (e) {}
     host.innerHTML = h; paintStatus();
     try { chartDraw(); } catch (e) {}
   }
@@ -3933,6 +3939,77 @@ const cbApi = (function () {
     return out;
   }
 
+
+  /* ---------- forward test: the page saves each day's combo list, later checks what happened, and reports by month ---------- */
+  const LOGK = "cbLog2"; let LOG = {}, FM = "all", FRR = 2, FB = {}, FBUSY = false, lastSave = "";
+  try { LOG = JSON.parse(localStorage.getItem(LOGK) || "{}") || {}; } catch (e) {}
+  try { FRR = +localStorage.getItem("cbFrr") || 2; } catch (e) {}
+  function istNow() { const p = {}; new Intl.DateTimeFormat("en-CA", {timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, weekday: "short"}).formatToParts(new Date()).forEach(x => { p[x.type] = x.value; }); return {d: p.year + "-" + p.month + "-" + p.day, h: (+p.hour % 24) * 60 + +p.minute, wd: p.weekday}; }
+  function logSnap(rows) {
+    const t = istNow(); if (t.wd === "Sat" || t.wd === "Sun" || t.h < 9 * 60 + 20) return;
+    if (LOG[t.d] && t.h > 16 * 60) return;
+    const rr = rows.filter(r => r.score >= 3 && r.q && isFinite(+r.q.p)).slice(0, 40); if (!rr.length) return;
+    const snap = rr.map(r => ({s: r.sym, d: r.side, sc: r.score, p: +r.q.p, k: Object.keys(r.has).filter(k => r.has[k]).join(","), pd: r.pead ? Math.round(r.pead.total) : null}));
+    const js = t.d + JSON.stringify(snap); if (js === lastSave) return; lastSave = js;
+    LOG[t.d] = snap; const ks = Object.keys(LOG).sort(); while (ks.length > 500) delete LOG[ks.shift()];
+    try { localStorage.setItem(LOGK, JSON.stringify(LOG)); } catch (e) {}
+  }
+  function outcome(e, date, bars) {
+    const i0 = bars.findIndex(b => b.time > date); if (i0 < 0) return {st: "wait"};
+    const H = [], Lw = [], C = []; for (let i = 0; i < i0; i++) { H.push(bars[i].high); Lw.push(bars[i].low); C.push(bars[i].close); }
+    if (C.length < 20) return {st: "nodata"};
+    const atr = znAtr(H, Lw, C, 14).ATR[C.length - 1]; if (!(atr > 0)) return {st: "nodata"};
+    const sd = e.d, risk = 1.5 * atr, stop = e.p - sd * risk, tgt = e.p + sd * risk * FRR;
+    for (let i = i0; i < Math.min(bars.length, i0 + 20); i++) {
+      const b = bars[i], hs = sd === 1 ? b.low <= stop : b.high >= stop, ht = sd === 1 ? b.high >= tgt : b.low <= tgt;
+      if (hs) return {st: "loss", r: -1, days: i - i0 + 1, stop, tgt};
+      if (ht) return {st: "win", r: FRR, days: i - i0 + 1, stop, tgt};
+    }
+    const n = Math.min(bars.length, i0 + 20), last = bars[n - 1], r = sd * (last.close - e.p) / risk;
+    return n - i0 >= 20 ? {st: "time", r, days: 20, stop, tgt} : {st: "open", r, days: n - i0, stop, tgt};
+  }
+  async function fwdFetch() {
+    if (FBUSY || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return; FBUSY = true;
+    try {
+      const need = new Set(); Object.keys(LOG).forEach(d => LOG[d].forEach(e => { const o = FB[e.s]; if (!o || Date.now() - o.t > 30 * 60e3) need.add(e.s); }));
+      const arr = Array.from(need);
+      for (let i = 0; i < arr.length; i += 12) {
+        const b = arr.slice(i, i + 12);
+        try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(b.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json(); b.forEach(sym => { const rows = j && j.bars && j.bars[sym]; FB[sym] = {t: Date.now(), bars: rows && rows.length ? rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4]})) : []}; }); } catch (e) {}
+      }
+    } finally { FBUSY = false; }
+    fwdPaint();
+  }
+  function fwdRows() {
+    const out = []; Object.keys(LOG).sort().forEach(d => LOG[d].forEach(e => { const o = FB[e.s], res = o ? outcome(e, d, o.bars) : {st: "wait"}; out.push(Object.assign({date: d, month: d.slice(0, 7)}, e, res)); })); return out;
+  }
+  function fwdPaint() {
+    const host = $e("#cbfwd"); if (!host) return;
+    const all = fwdRows(), months = Array.from(new Set(all.map(r => r.month))).sort().reverse();
+    if (FM !== "all" && months.indexOf(FM) < 0) FM = "all";
+    const stat = rs => { const cl = rs.filter(r => r.st === "win" || r.st === "loss" || r.st === "time"), w = cl.filter(r => r.r > 0).length, tot = cl.reduce((s, r) => s + r.r, 0); return {n: rs.length, c: cl.length, w, avg: cl.length ? tot / cl.length : NaN, tot: cl.length ? tot : NaN, open: rs.filter(r => r.st === "open" || r.st === "wait").length}; };
+    const line = (name, rs) => { const t = stat(rs); return {c: [name, t.n, t.c + accFew(t.c), t.c ? "<b>" + accPc(t.w, t.c) + "</b>" : "-", accR(t.avg), accR(t.tot), t.open]}; };
+    const sel = FM === "all" ? all : all.filter(r => r.month === FM);
+    let h = '<h2 class="hb hbn">&#128202; Forward-test report</h2><div class="card">';
+    if (!all.length) { host.innerHTML = h + '<p class="note" style="margin:0">Nothing logged yet. Each weekday, while this page is open between 9:20 am and 4 pm, it saves that day\'s combo list (score 3 or more, up to 40 stocks) in this browser. Open this tab at least once a day, ideally in the afternoon, and the report builds up month by month.</p></div>'; return; }
+    h += '<div class="charttools" style="border:0;padding:0;gap:10px 14px"><b>Month</b><select id="cbfm" style="font:inherit;padding:4px 8px;border-radius:8px;border:1px solid var(--line)">' + '<option value="all"' + (FM === "all" ? " selected" : "") + ">All months</option>" + months.map(m => '<option value="' + m + '"' + (FM === m ? " selected" : "") + ">" + new Date(m + "-15T12:00:00+05:30").toLocaleDateString("en-IN", {month: "long", year: "numeric", timeZone: "Asia/Kolkata"}) + "</option>").join("") + '</select><span class="csep"></span><b>Target</b>' + [1, 2, 3].map(v => '<button type="button" class="cbtn" data-cbfrr="' + v + '" aria-pressed="' + (v === FRR) + '">1 : ' + v + "</button>").join("") + '<span class="csep"></span><button type="button" class="cbtn" id="cbfcsv">Download CSV</button><button type="button" class="cbtn" id="cbfclr">Clear log</button></div>';
+    const hd = ["Group", "Signals", "Finished", "Win rate", "Average per trade", "Total", "Still open"];
+    const bym = months.slice().reverse().map(m => line(new Date(m + "-15T12:00:00+05:30").toLocaleDateString("en-IN", {month: "short", year: "numeric", timeZone: "Asia/Kolkata"}), all.filter(r => r.month === m)));
+    const grp = [line("<b>All in selection</b>", sel), line("Long", sel.filter(r => r.d === 1)), line("Short", sel.filter(r => r.d === -1)), line("Score 3", sel.filter(r => r.sc === 3)), line("Score 4", sel.filter(r => r.sc === 4)), line("Score 5 or more", sel.filter(r => r.sc >= 5)), line("With a PEAD tick", sel.filter(r => /pead/.test(r.k))), line("With a Zone tick", sel.filter(r => /zone/.test(r.k))), line("With a 123 tick", sel.filter(r => /rm/.test(r.k)))];
+    h += "</div>" + accTable("Month by month", hd, bym, "Each signal is the stock at the price it had when the list was saved that day. The stop is 1.5 times the 14-day ATR from that price, the target is " + FRR + " times the stop distance, and the trade is followed on the next daily candles for up to 20 trading days (if both are touched on one candle it counts as a loss; after 20 days it is closed at that day's close). Results are in R (one R is the stop distance), before brokerage and slippage.") +
+      accTable("Breakdown for " + (FM === "all" ? "all months" : FM), hd, grp, "Win rate counts trades finished at the target, the stop or the 20-day close with a profit. Trust a row only when it has 30 or more finished trades. Compare with the Combo score you used: if higher scores do not do better here, the score is not adding value.");
+    const recent = sel.slice().reverse().slice(0, 40);
+    h += '<h3 class="tch" style="margin-top:18px">Latest signals</h3><div class="card"><div class="wrap"><table class="pptbl"><thead><tr><th>Date</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th><th>Screens</th><th>Result</th><th class="num">R</th><th class="num">Days</th></tr></thead><tbody>' +
+      recent.map(r => '<tr><td>' + r.date + '</td><td><b>' + E(r.s) + '</b></td><td><span class="chip ' + (r.d === 1 ? "g" : "r") + '">' + (r.d === 1 ? "Long" : "Short") + '</span></td><td class="num">' + r.sc + '</td><td class="num">' + px2(r.p) + '</td><td><small>' + E(r.k.replace(/,/g, ", ")) + "</small></td><td>" + ({win: "Target hit", loss: "Stop hit", time: "20-day close", open: "Running", wait: "Waiting for next candle", nodata: "No candles"}[r.st] || r.st) + '</td><td class="num">' + (isFinite(r.r) ? accR(r.r) : "-") + '</td><td class="num">' + (r.days || "-") + "</td></tr>").join("") + "</tbody></table></div>" +
+      '<p class="note" style="margin-bottom:0">The log lives in this browser only (it is not shared between your phone and computer), and it only records on days this tab was open. Candles come from your Worker. This is a small-sample test: judge it after at least a month or two. Past results only, not advice.</p></div>';
+    host.innerHTML = h;
+  }
+  function fwdCsv() {
+    const rs = fwdRows(), q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"', lines = [["date", "symbol", "side", "score", "price", "screens", "pead", "result", "r", "days", "stop", "target"].join(",")];
+    rs.forEach(r => lines.push([r.date, r.s, r.d === 1 ? "Long" : "Short", r.sc, r.p, q(r.k), r.pd == null ? "" : r.pd, r.st, isFinite(r.r) ? r.r.toFixed(2) : "", r.days || "", isFinite(r.stop) ? r.stop.toFixed(2) : "", isFinite(r.tgt) ? r.tgt.toFixed(2) : ""].join(",")));
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([lines.join("\n")], {type: "text/csv"})); a.download = "combo_forward_test.csv"; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+
   /* ---------- chart panel ---------- */
   let SEL = null, CH = null, CANDLE = null, LINES = [], PL = [];
   const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
@@ -4022,7 +4099,8 @@ const cbApi = (function () {
   }
   function view() {
     const host = $e("#cbres"); if (!host) return;
-    const R = compute(), rows = R.rows.filter(r => r.score >= F.min && (F.side === "Both" || (F.side === "Long" ? r.side === 1 : r.side === -1)));
+    const R = compute(); try { logSnap(R.rows); } catch (e) {}
+    const rows = R.rows.filter(r => r.score >= F.min && (F.side === "Both" || (F.side === "Long" ? r.side === 1 : r.side === -1)));
     const st = (name, n) => name + (n ? " <b>" + n + "</b>" : " <i>waiting</i>");
     const cnt = k => R.rows.filter(r => r.has[k]).length;
     const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · Market: " + E(R.mb.t);
@@ -4037,22 +4115,27 @@ const cbApi = (function () {
   }
   function build() {
     const host = document.getElementById("cbbody"); if (!host || host.dataset.built) return; host.dataset.built = "1";
-    host.innerHTML = '<div class="znhead"><div><h2>COMBO</h2><span>Stocks where several screens agree on the same side</span></div><div class="znpills"><span>Zone + 123 + OI + Trade ideas</span><span>Season + PEAD + market</span><span>Screening aid, not advice</span></div></div>' +
-      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><b>Side</b>' + ["Both", "Long", "Short"].map(x => '<button type="button" class="cbtn" data-cbs="' + x + '" aria-pressed="' + (F.side === x) + '">' + x + "</button>").join("") + '<span class="csep"></span><b>Minimum score</b>' + [2, 3, 4, 5].map(x => '<button type="button" class="cbtn" data-cbm="' + x + '" aria-pressed="' + (F.min === x) + '">' + x + "+</button>").join("") + '<span class="csep"></span><button type="button" class="cbtn" id="cbReload">&#8635; Refresh sources</button></div><div class="note" id="cbstat" style="margin:8px 0 0"></div></div><div id="cbpanel"></div><div id="cbres"></div>';
+    host.innerHTML = '<div class="znhead"><div><h2>COMBO</h2><span>Stocks where several screens agree on the same side</span></div><div class="znpills"><span>Zone + 123 + OI + Trade ideas</span><span>Season + PEAD + market</span><span>Forward-test log</span></div></div>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><b>Side</b>' + ["Both", "Long", "Short"].map(x => '<button type="button" class="cbtn" data-cbs="' + x + '" aria-pressed="' + (F.side === x) + '">' + x + "</button>").join("") + '<span class="csep"></span><b>Minimum score</b>' + [2, 3, 4, 5].map(x => '<button type="button" class="cbtn" data-cbm="' + x + '" aria-pressed="' + (F.min === x) + '">' + x + "+</button>").join("") + '<span class="csep"></span><button type="button" class="cbtn" id="cbReload">&#8635; Refresh sources</button></div><div class="note" id="cbstat" style="margin:8px 0 0"></div></div><div id="cbpanel"></div><div id="cbres"></div><div id="cbfwd"></div>';
+    host.addEventListener("change", ev => { const t = ev.target; if (t && t.id === "cbfm") { FM = t.value; fwdPaint(); } });
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest) return;
       let b = t.closest("[data-cbplan]"); if (b) { if (SEL) { SEL.plan = +b.dataset.cbplan; const pe = $e("#cbplans"); if (pe) pe.innerHTML = planTable(); drawLines(); } return; }
       b = t.closest("[data-cbtf]"); if (b) { if (SEL) { SEL.tf = b.dataset.cbtf; panelDraw(); } return; }
       if (t.closest("[data-cbclose]")) { SEL = null; panelDraw(); view(); return; }
       if (t.closest("a") || t.closest("[data-ind]")) return;
+      b = t.closest("[data-cbfrr]"); if (b) { FRR = +b.dataset.cbfrr; try { localStorage.setItem("cbFrr", String(FRR)); } catch (e) {} fwdPaint(); return; }
+      if (t.closest("#cbfcsv")) { fwdCsv(); return; }
+      if (t.closest("#cbfclr")) { if (confirm("Delete the whole forward-test log from this browser?")) { LOG = {}; lastSave = ""; try { localStorage.removeItem(LOGK); } catch (e) {} fwdPaint(); } return; }
       b = t.closest("[data-cbs]"); if (b) { F.side = b.dataset.cbs; host.querySelectorAll("[data-cbs]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); save(); view(); return; }
       b = t.closest("[data-cbm]"); if (b) { F.min = +b.dataset.cbm; host.querySelectorAll("[data-cbm]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); save(); view(); return; }
       if (t.closest("#cbReload")) { load(true); view(); return; }
       b = t.closest("[data-cbsym]"); if (b) { const sym = b.dataset.cbsym; SEL = {sym, tf: (SEL && SEL.tf) || "D", plan: 0}; panelDraw(); view(); setTimeout(() => { const h = $e("#cbpanel"); if (h && h.scrollIntoView) h.scrollIntoView({behavior: "smooth", block: "start"}); }, 60); }
     });
   }
-  function open() { build(); view(); if (!last || Date.now() - last > 5 * 60e3) load(false); }
+  function open() { build(); view(); fwdPaint(); fwdFetch(); if (!last || Date.now() - last > 5 * 60e3) load(false); }
   setInterval(() => { try { if (current === "cb" && !document.hidden) view(); } catch (e) {} }, 5000);
+  setInterval(() => { try { if (current === "cb" && !document.hidden) fwdFetch(); } catch (e) {} }, 15 * 60e3);
   setInterval(() => { try { if (SEL && current === "cb" && !document.hidden && SEL.tf !== "D") chartOnly(); } catch (e) {} }, 60 * 1000);
   return {open, view, compute};
 })();
