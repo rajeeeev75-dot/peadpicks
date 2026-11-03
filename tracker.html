@@ -45,8 +45,9 @@ main{max-width:900px;margin:0 auto;padding:0 16px 48px}
 .nrd{margin-left:auto;font-size:.8rem;font-weight:700;color:var(--c1);text-decoration:none}
 .nmore{display:block;margin:8px auto 14px;font:inherit;font-weight:700;padding:9px 22px;border-radius:999px;border:0;color:#fff;cursor:pointer;background:linear-gradient(120deg,var(--a),var(--b))}
 .ac-r{background:#ffcdd2;color:#b71c1c}.ac-g{background:#c8e6c9;color:#1b5e20}.ac-o{background:#ffe0b2;color:#e65100}.ac-b{background:#bbdefb;color:#0d47a1}.ac-c{background:#b2ebf2;color:#006064}.ac-n{background:#eceff1;color:#37474f}.acn{border-radius:6px;padding:2px 8px;display:inline-block}.nwi{padding:12px 0;border-bottom:1px solid var(--line,#e5e7eb)}.nwi:last-child{border-bottom:0}.nwm{font-size:.8rem;opacity:.75}.nwt{font-weight:700;margin:3px 0}.nwt a{color:inherit;text-decoration:none}.nwt a:hover{text-decoration:underline}.nwx{font-size:.9rem;margin:4px 0}.nwf{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.nwf button{font:inherit;font-size:.85rem;padding:6px 12px;border-radius:999px;border:1px solid #c9c4e6;background:var(--card);color:var(--ink);cursor:pointer}.nwf button[aria-pressed="true"]{background:linear-gradient(120deg,var(--a),var(--b));color:#fff;border-color:transparent}
-.tabs{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:-34px -16px 6px;padding:6px 16px 12px;position:sticky;top:0;z-index:30;transition:background .2s,box-shadow .2s}.tabs::-webkit-scrollbar{display:none}.tabs.stuck{background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 14px rgba(0,0,0,.12)}
+.tabs{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;scrollbar-color:rgba(100,100,120,.55) transparent;margin:-34px -16px 6px;padding:6px 16px 12px;position:sticky;top:0;z-index:30;transition:background .2s,box-shadow .2s;cursor:grab}.tabs.drag{cursor:grabbing;user-select:none}.tabs::-webkit-scrollbar{height:9px}.tabs::-webkit-scrollbar-thumb{background:rgba(100,100,120,.5);border-radius:6px}.tabs::-webkit-scrollbar-thumb:hover{background:rgba(100,100,120,.8)}.tabs::-webkit-scrollbar-track{background:transparent}.tabs.stuck{background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 14px rgba(0,0,0,.12)}
 .tabs button{font:inherit;font-weight:600;padding:10px 16px;border:2px solid transparent;border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer;box-shadow:var(--shadow);white-space:nowrap;flex:0 0 auto;transition:transform .12s}.tabs button:hover{transform:translateY(-2px)}
+.acctbl{width:100%;border-collapse:collapse;font-size:.92rem}.acctbl th,.acctbl td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}.acctbl th{font-size:.78rem;color:var(--mute);font-weight:700}.acctbl .num{text-align:right}.acctbl tr.base td{color:var(--mute);font-style:italic}.accg{color:var(--good);font-weight:700}.accb{color:var(--bad);font-weight:700}
 .tabs button[aria-selected="true"]{color:#fff;background:linear-gradient(120deg,var(--a),var(--b))}
 .tabs button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
 .ppwrap{display:flex;flex-direction:column;gap:8px}
@@ -224,7 +225,7 @@ const HISTORY_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxnPpS
 const NEWS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxnPpSg1pL49TVLeLj00vJpnzcjRdTqW3TW1ooB0YkZlDpLUJteWmZw5YMhTJme8tPwQkT3gkXWn5S/pub?gid=1893505221&single=true&output=csv";
 // Paste the address of your Cloudflare Worker (worker.js) between the quotes. It feeds the "Market today" section on the Overview tab. Not a Google Sheet.
 // Paste the published CSV link of your Symbols tab here (daily smileys typed by you: Date, Up/Down, Symbol). Leave empty to use only the built-in history.
-const SYMBOLS_CSV_URL = "";
+const SYMBOLS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSxnPpSg1pL49TVLeLj00vJpnzcjRdTqW3TW1ooB0YkZlDpLUJteWmZw5YMhTJme8tPwQkT3gkXWn5S/pub?gid=466269915&single=true&output=csv";
 const MARKET_API_URL = "https://market-feed.rajeeeev75.workers.dev";
 const MARKET_REFRESH_MS = 2 * 60 * 1000;
 const REFRESH_MS = 5 * 60 * 1000;
@@ -1241,6 +1242,47 @@ function colors() {
   return {bg: v("--card") || "#ffffff", txt: v("--mute") || "#5f5b7a", grid: v("--line") || "#e0dcf5", up: v("--good") || "#16a34a", dn: v("--bad") || "#dc2626", ink: v("--ink") || "#1e1b3a"};
 }
 const withAlpha = (hex, a) => /^#[0-9a-f]{6}$/i.test(hex) ? hex + a : hex;
+
+/* ===== Accuracy tables shown at the bottom of each screener: what the screener's own rules would have done on past data ===== */
+function accTable(title, heads, rows, note) {
+  const pc = (w, n) => (n ? Math.round(100 * w / n) + "%" : "-");
+  return '<h3 class="tch" style="margin-top:18px">' + title + '</h3><div class="card"><div class="wrap"><table class="acctbl"><thead><tr>' + heads.map((h, i) => "<th" + (i ? ' class="num"' : "") + ">" + h + "</th>").join("") + "</tr></thead><tbody>" +
+    rows.map(r => '<tr class="' + (r.base ? "base" : "") + '">' + r.c.map((c, i) => "<td" + (i ? ' class="num"' : "") + ">" + c + "</td>").join("") + "</tr>").join("") + '</tbody></table></div><p class="note" style="margin-bottom:0">' + note + "</p></div>";
+}
+const accPc = (w, n) => (n ? Math.round(100 * w / n) + "%" : "-");
+const accRet = x => (isFinite(x) ? '<span class="' + (x > 0 ? "accg" : x < 0 ? "accb" : "") + '">' + (x > 0 ? "+" : "") + (x * 100).toFixed(1) + "%</span>" : "-");
+const accR = x => (isFinite(x) ? '<span class="' + (x > 0 ? "accg" : x < 0 ? "accb" : "") + '">' + (x > 0 ? "+" : "") + x.toFixed(2) + "R</span>" : "-");
+const accFew = n => (n < 30 ? ' <small title="Fewer than 30 cases: treat as a rough guide only">(few)</small>' : "");
+/* Zone: replay every zone on its own candles. Entry = first return to the proximal line after the zone formed; win = target reached before the distal line is broken. */
+function znAccuracy(items, rr) {
+  const mk = () => ({zones: 0, entered: 0, w: 0, l: 0, open: 0}), G = {}, add = (k, o) => { const g = G[k] = G[k] || mk(); g.zones += 1; if (o.entered) g.entered++; if (o.res === "w") g.w++; else if (o.res === "l") g.l++; else if (o.entered) g.open++; };
+  items.forEach(it => {
+    const b = it.bars, n = b.length;
+    it.zones.forEach(z => {
+      if (!(z.prox > 0 && z.dist > 0 && z.target > 0)) return;
+      const D = z.type === "D"; let e = -1, res = "";
+      for (let j = z.sig + 1; j < n; j++) { if (D ? b[j].low <= z.prox : b[j].high >= z.prox) { e = j; break; } }
+      if (e >= 0) {
+        if (D ? b[e].low < z.dist : b[e].high > z.dist) res = "l";
+        else for (let k = e + 1; k < n; k++) {
+          const st = D ? b[k].low < z.dist : b[k].high > z.dist, tg = D ? b[k].high >= z.target : b[k].low <= z.target;
+          if (st) { res = "l"; break; } if (tg) { res = "w"; break; }
+        }
+      }
+      const o = {entered: e >= 0, res};
+      add("All zones", o); add(D ? "Demand zones" : "Supply zones", o); add("tf:" + it.tf, o);
+    });
+  });
+  return G;
+}
+function znAccHTML(items) {
+  const G = znAccuracy(items, +ZO.rr || 2), keys = ["All zones", "Demand zones", "Supply zones"].filter(k => G[k]).concat(Object.keys(G).filter(k => k.indexOf("tf:") === 0).sort((a, b) => ZN_TFS.findIndex(x => x[0] === a.slice(3)) - ZN_TFS.findIndex(x => x[0] === b.slice(3))));
+  if (!keys.length) return "";
+  const rr = +ZO.rr || 2;
+  const rows = keys.map(k => { const g = G[k], n = g.w + g.l, ex = n ? (g.w * rr - g.l) / n : NaN; return {c: [k.indexOf("tf:") === 0 ? znTfName(k.slice(3)) + " candles" : "<b>" + k + "</b>", g.zones, accPc(g.entered, g.zones), n + accFew(n), '<b>' + accPc(g.w, n) + "</b>", accR(ex), g.open]}; });
+  return accTable("Accuracy of these zones on past data", ["Group", "Zones found", "Price came back", "Finished trades", "Win rate", "Average per trade", "Still open"], rows,
+    "Every zone found on the candles above was replayed, including zones that have since been broken (those are not hidden here). A trade starts when price first returns to the proximal line after the zone formed. It wins if price reaches the target (" + rr + "R) before the distal line breaks, and loses if the distal line breaks first; when one candle touches both, it counts as a loss. Average per trade = (wins x " + rr + " - losses) / trades, in R, before brokerage and slippage. Past results only, not a promise.");
+}
 
 /* ===== Bollinger Bands and RSI switches shared by every chart (Intraday, Zone, PEAD Picks, watchlist) ===== */
 var IND = {bb: false, rsi: false}; try { Object.assign(IND, JSON.parse(localStorage.getItem("indOn") || "{}")); } catch (e) {}
@@ -2911,6 +2953,7 @@ function znPaintRes() {
     '<span class="csep"></span>' + avail.map(tf => '<button type="button" class="cbtn" data-zntfc="' + tf + '" aria-pressed="' + (tf === ZTFSEL) + '">' + znTfName(tf) + "</button>").join("") +
     '<span class="csep"></span>' + rngs.map(r => '<button type="button" class="cbtn" data-znrange="' + r[0] + '" aria-pressed="' + (r[0] === rcur) + '">' + r[1] + "</button>").join("") +
     '<span class="csep"></span>' + indBtns() + '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(ZSEL || "").replace(/[&-]/g, "_")) + '&interval=' + ZTFSEL + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
+  try { h += znAccHTML(items); } catch (e) {}
   host.innerHTML = h;
   if (cur) znDrawChart(cur.bars, cur.zones, intra);
 }
@@ -3144,7 +3187,7 @@ const ppPaint = () => ppApi.open();
 /* ===== TIME CYCLE TAB: calendar-cycle scan. Same-date seasonality across past years + equinox/solstice phase (ported from the "Equinox Levels & Seasonality" Pine indicator idea) ===== */
 const TC_SECTOR_EXTRA = {AMBER: "Consumption", BDL: "Defence", BLUESTARCO: "Consumption", DALBHARAT: "Infra", EXIDEIND: "Auto", HFCL: "Telecom", HUDCO: "Fin Services", IGL: "Oil & Gas", IIFL: "Fin Services", INDHOTEL: "Consumption", IRCTC: "Consumption", LTIM: "IT", NCC: "Infra", NUVAMA: "Fin Services", PGEL: "Consumption", PIIND: "Chemicals", PPLPHARMA: "Pharma", SOLARINDS: "Defence", SRF: "Chemicals", SWIGGY: "Consumption", SYNGENE: "Pharma", TATAMOTORS: "Auto", TATATECH: "IT", TITAGARH: "Infra", TORNTPOWER: "Energy", UNITDSPR: "Consumption", UPL: "Chemicals"};
 const TC_TURNS = [[3, 21, "Spring equinox"], [6, 21, "Summer solstice"], [9, 21, "Autumn equinox"], [12, 21, "Winter solstice"]];
-const TC_HZ = [[7, "1 week"], [14, "2 weeks"], [30, "1 month"], [0, "To next cycle turn"]];
+const TC_HZ = [[7, "1 week"], [14, "2 weeks"], [30, "1 month"], [-1, "Next month"], [0, "To next cycle turn"]];
 const tcApi = (function () {
   const DAY = 864e5, TTL = 6 * 36e5, p2 = n => String(n).padStart(2, "0");
   const $e = s => document.querySelector(s);
@@ -3221,10 +3264,12 @@ const tcApi = (function () {
   /* ---- the calendar statistics ---- */
   function lastLE(arr, iso) { let lo = 0, hi = arr.length - 1, r = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (arr[m][0] <= iso) { r = m; lo = m + 1; } else hi = m - 1; } return r; }
   /* win: the return from today's calendar date to H days later, in every past year. mon: the return of the current calendar month, in every past year. */
-  function analyse(arr, today, H) {
+  function analyse(arr, today, H, nm) {
     const curY = +today.slice(0, 4), m = +today.slice(5, 7), y0 = +arr[0][0].slice(0, 4); let md = today.slice(5); if (md === "02-29") md = "02-28";
-    const win = [], mon = [];
-    for (let y = y0; y < curY; y++) {
+    const win = [], mon = [], nxt = [], yEnd = nm && nm < m ? curY : curY - 1;
+    for (let y = y0; y <= yEnd; y++) {
+      if (nm) { const s2 = new Date(Date.UTC(y, nm - 1, 0)).toISOString().slice(0, 10), e2 = new Date(Date.UTC(y, nm, 0)).toISOString().slice(0, 10), i3 = lastLE(arr, s2), j3 = lastLE(arr, e2); if (i3 >= 0 && j3 > i3 && gap(arr[i3][0], s2) <= 7 && gap(arr[j3][0], e2) <= 7) nxt.push({y, r: arr[j3][1] / arr[i3][1] - 1}); }
+      if (y >= curY) continue;
       const a = y + "-" + md, i = lastLE(arr, a);
       if (i >= 0 && gap(arr[i][0], a) <= 6) {
         const t = addDays(a, H), j = lastLE(arr, t);
@@ -3233,7 +3278,7 @@ const tcApi = (function () {
       const s = new Date(Date.UTC(y, m - 1, 0)).toISOString().slice(0, 10), e = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10), i2 = lastLE(arr, s), j2 = lastLE(arr, e);
       if (i2 >= 0 && j2 > i2 && gap(arr[i2][0], s) <= 7 && gap(arr[j2][0], e) <= 7) mon.push({y, r: arr[j2][1] / arr[i2][1] - 1});
     }
-    return {win, mon};
+    return {win: nm ? nxt : win, mon};
   }
   /* probability = share of past years that closed higher, nudged toward 50% when there are few years: (wins + 1) / (years + 2) */
   function summar(list) {
@@ -3241,11 +3286,11 @@ const tcApi = (function () {
     return {n, w, prob: n ? (w + 1) / (n + 2) * 100 : NaN, avg: n ? list.reduce((s, x) => s + x.r, 0) / n : NaN,
       med: n ? (n % 2 ? rs[(n - 1) / 2] : (rs[n / 2 - 1] + rs[n / 2]) / 2) : NaN, worst: n ? rs[0] : NaN, best: n ? rs[n - 1] : NaN};
   }
-  function scan(today, H) {
+  function scan(today, H, nm) {
     const uni = znUniverse(), rows = [];
     uni.forEach(u => {
       const b = B[u.sym]; if (!b || b.d.length < 60) return;
-      const A = analyse(b.d, today, H), yrs = gap(b.d[0][0], b.d[b.d.length - 1][0]) / 365.25;
+      const A = analyse(b.d, today, H, nm), yrs = gap(b.d[0][0], b.d[b.d.length - 1][0]) / 365.25;
       rows.push({sym: u.sym, name: u.name, sec: secOf(u.sym), A, S: summar(A.win), M: summar(A.mon), yrs});
     });
     const valid = rows.filter(r => r.S.n >= O.min);
@@ -3268,6 +3313,87 @@ const tcApi = (function () {
   const probCell = S => isFinite(S.prob) ? '<b style="color:' + pcol(S.prob) + '">' + S.prob.toFixed(0) + '%</b> <span class="tcbar"><i style="width:' + Math.max(3, S.prob).toFixed(0) + "%;background:" + pcol(S.prob) + '"></i></span>' : "—";
   const bySt = dir => (a, b) => dir * ((b.S.prob - a.S.prob) || (b.S.avg - a.S.avg));
 
+
+  /* ---- sector chart: equal-weighted basket of the sector's stocks (the same basket the table ranks), plus the NSE index on TradingView ---- */
+  const TC_SEC_TV = {"Auto": "CNXAUTO", "IT": "CNXIT", "Pharma": "CNXPHARMA", "FMCG": "CNXFMCG", "Metal": "CNXMETAL", "Realty": "CNXREALTY", "Energy": "CNXENERGY", "Infra": "CNXINFRA", "PSU Bank": "CNXPSUBANK", "Pvt Bank": "NIFTYPVTBANK", "Fin Services": "CNXFINANCE", "Healthcare": "NIFTY_HEALTHCARE", "Oil & Gas": "CNXOILGAS", "Defence": "NIFTY_IND_DEFENCE", "Consumption": "CNXCONSUM", "Media": "CNXMEDIA", "Services": "CNXSERVICE"};
+  let SECSEL = null, SECRNG = "1Y", SECLAST = [], SECCH = null;
+  function basketOf(members) {
+    const sumR = {}, cnt = {};
+    members.forEach(m => { const d = (B[m.sym] || {}).d; if (!d) return; for (let i = 1; i < d.length; i++) { const r = d[i][1] / d[i - 1][1] - 1; if (!isFinite(r) || Math.abs(r) > 0.5) continue; const t = d[i][0]; sumR[t] = (sumR[t] || 0) + r; cnt[t] = (cnt[t] || 0) + 1; } });
+    const ts = Object.keys(sumR).sort(), out = []; let v = 100;
+    ts.forEach(t => { if (cnt[t] < Math.max(2, Math.ceil(members.length / 3))) return; v *= 1 + sumR[t] / cnt[t]; out.push({time: t, value: +v.toFixed(3)}); });
+    return out;
+  }
+  function secPanel() {
+    const sc = SECLAST.find(x => x.name === SECSEL); if (!sc) return "";
+    const tvs = TC_SEC_TV[sc.name];
+    return '<div class="card" id="tcsecpanel" style="scroll-margin-top:70px"><div class="charttools"><b>' + esc(sc.name) + '</b><span class="note" style="margin:0">equal-weighted basket of ' + sc.count + ' stocks</span><span class="csep"></span>' +
+      ["6M", "1Y", "3Y", "All"].map(r => '<button type="button" class="cbtn" data-tcrng="' + r + '" aria-pressed="' + (r === SECRNG) + '">' + r + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span>' +
+      (tvs ? '<a class="tvl" href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(tvs) + '" target="_blank" rel="noopener">Open index on TradingView &#8599;</a>' : '<span class="note" style="margin:0">No NSE index for this group</span>') +
+      ' <button type="button" class="cbtn" data-tcsecx="1">Close chart</button></div>' +
+      '<div id="tcsecbox" style="height:380px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div>' +
+      '<div class="note" id="tcsecnote" style="margin:6px 0 0">Daily candles of the sector basket, rebased to 100: each day is the average of the stocks&#39; open, high, low and close moves (equal weight). Use Bollinger and RSI above to judge strength. It follows the sector closely but is not the official NSE index' + (tvs ? ", which opens on TradingView" : "") + ". Members: " +
+      sc.members.map(m => esc(m.sym) + znTvA(m.sym, "D")).join(", ") + ".</div></div>";
+  }
+  const SECB = {};   // daily open/high/low/close per stock, from the Worker (5 years), used for the sector candles
+  async function secBars(syms) {
+    const need = syms.filter(x => !SECB[x] || Date.now() - SECB[x].t > 10 * 60e3), chunks = [];
+    for (let i = 0; i < need.length; i += 12) chunks.push(need.slice(i, i + 12));
+    await Promise.all(chunks.map(async ch => {
+      try {
+        const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json();
+        Object.keys(j.bars || {}).forEach(sy => { SECB[sy] = {t: Date.now(), d: (j.bars[sy] || []).map(x => ({time: String(x[0]).slice(0, 10), o: +x[1], h: +x[2], l: +x[3], c: +x[4]})).filter(x => x.c > 0 && x.o > 0 && x.h > 0 && x.l > 0)}; });
+      } catch (e) {}
+    }));
+  }
+  /* equal-weighted sector candle: each day's open, high, low and close are the average of the stocks' moves against their own previous close */
+  function basketCandles(members) {
+    const acc = {};
+    members.forEach(m => { const d = (SECB[m.sym] || {}).d; if (!d) return; for (let i = 1; i < d.length; i++) { const pc = d[i - 1].c, x = d[i], ro = x.o / pc - 1, rh = x.h / pc - 1, rl = x.l / pc - 1, rc = x.c / pc - 1; if (![ro, rh, rl, rc].every(isFinite) || Math.abs(rc) > 0.5 || Math.abs(rh) > 0.6 || Math.abs(rl) > 0.6) continue; const a = acc[x.time] = acc[x.time] || {o: 0, h: 0, l: 0, c: 0, n: 0}; a.o += ro; a.h += rh; a.l += rl; a.c += rc; a.n++; } });
+    const need = Math.max(2, Math.ceil(members.length / 3)), out = []; let v = 100;
+    Object.keys(acc).sort().forEach(t => { const a = acc[t]; if (a.n < need) return; const o = v * (1 + a.o / a.n), c = v * (1 + a.c / a.n), h = Math.max(v * (1 + a.h / a.n), o, c), l = Math.min(v * (1 + a.l / a.n), o, c); out.push({time: t, open: +o.toFixed(3), high: +h.toFixed(3), low: +l.toFixed(3), close: +c.toFixed(3)}); v = c; });
+    return out;
+  }
+  let secTok = 0;
+  async function drawSec() {
+    if (SECCH) { try { SECCH.remove(); } catch (e) {} SECCH = null; }
+    const box = $e("#tcsecbox"); if (!box) return;
+    const sc = SECLAST.find(x => x.name === SECSEL), LW = window.LightweightCharts, tok = ++secTok, nm = SECSEL;
+    if (!sc || !LW) { box.innerHTML = '<div class="chartempty">The chart library did not load. Use the TradingView link.</div>'; return; }
+    box.innerHTML = '<div class="chartempty">Loading ' + esc(sc.name) + ' candles...</div>';
+    let real = true;
+    try { await secBars(sc.members.map(m => m.sym)); } catch (e) {}
+    if (tok !== secTok || SECSEL !== nm || !$e("#tcsecbox")) return;
+    let data = basketCandles(sc.members);
+    if (data.length < 30) {   // Worker candles unavailable: fall back to closes only, so the candle body is the day's move
+      real = false; const cl = basketOf(sc.members); data = cl.map((x, i) => { const o = i ? cl[i - 1].value : x.value; return {time: x.time, open: o, high: Math.max(o, x.value), low: Math.min(o, x.value), close: x.value}; });
+    }
+    if (data.length < 30) { box.innerHTML = '<div class="chartempty">Not enough price history for this sector yet.</div>'; return; }
+    box.innerHTML = "";
+    const c = colors(), chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true});
+    candle.setData(data);
+    try { indAttach(chart, candle, data, {base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+    const last = data[data.length - 1].time;
+    try { if (SECRNG === "All") chart.timeScale().fitContent(); else chart.timeScale().setVisibleRange({from: shiftDate(last, {"6M": 6, "1Y": 12, "3Y": 36}[SECRNG] || 12), to: last}); } catch (e) { chart.timeScale().fitContent(); }
+    SECCH = chart;
+    const nt = $e("#tcsecnote"); if (nt && !real) nt.insertAdjacentHTML("afterbegin", "<b>Candles could not be loaded from the Worker, so each candle is built from closing prices only.</b> ");
+  }
+
+  /* Walk-forward check: for each past year, make the call using only the years before it, then compare with what that year did */
+  function wfStats(lists, minPrior) {
+    const B0 = {all: {n: 0, up: 0, sum: 0}}, defs = [["Strong up (70%+ and positive average)", s => s.prob >= 70 && s.avg > 0, 1], ["Up bias (58-70%)", s => s.prob >= 58 && s.prob < 70 && s.avg > 0, 1], ["Down bias (42% or less and negative average)", s => s.prob <= 42 && s.avg < 0, -1]];
+    const out = defs.map(d => ({name: d[0], f: d[1], dir: d[2], n: 0, hit: 0, sum: 0}));
+    lists.forEach(L => { for (let k = minPrior; k < L.length; k++) { const S = summar(L.slice(0, k)), a = L[k].r; B0.all.n++; if (a > 0) B0.all.up++; B0.all.sum += a; out.forEach(o => { if (o.f(S)) { o.n++; if (o.dir * a > 0) o.hit++; o.sum += a; } }); } });
+    return {rows: out, base: B0.all};
+  }
+  function accHTML(V, secs) {
+    const mp = Math.max(3, O.min - 1), sl = V.map(r => r.A.win.slice().sort((a, b) => a.y - b.y)), sc = secs.map(x => { const byY = {}; x.members.forEach(r => r.A.win.forEach(w => { (byY[w.y] = byY[w.y] || []).push(w.r); })); return Object.keys(byY).filter(y => byY[y].length >= 3).map(y => ({y: +y, r: byY[y].reduce((a, b) => a + b, 0) / byY[y].length})).sort((a, b) => a.y - b.y); });
+    const mk = (W, label) => W.rows.map(o => ({c: [label + ": " + o.name, o.n + accFew(o.n), "<b>" + accPc(o.hit, o.n) + "</b>", o.n ? accRet(o.sum / o.n) : "-"]})).concat([{base: 1, c: [label + ": all cases (base rate)", W.base.n, accPc(W.base.up, W.base.n) + " rose", W.base.n ? accRet(W.base.sum / W.base.n) : "-"]}]);
+    const rows = mk(wfStats(sl, mp), "Stocks").concat(mk(wfStats(sc, mp), "Sectors"));
+    return accTable("Accuracy on past years (same window as above)", ["Call the table would have made", "Cases tested", "Call was right", "Average actual move"], rows,
+      "Walk-forward test: for each past year, the call is made using only the years before it, then checked against what that year really did over this same window. A call is right when the stock or sector moved the way it said (up for up calls, down for down calls). Compare with the base-rate row: a call only has value if it beats it. Needs at least " + mp + " earlier years per case. Past results only, not a promise.");
+  }
   function build() {
     const host = document.getElementById("tcbody"); if (!host || host.dataset.built) return; host.dataset.built = "1";
     host.innerHTML = '<div class="znhead"><div><h2>TIME CYCLE</h2><span>Which sector and stock the calendar has favoured from this date in past years</span></div><div class="znpills"><span>Same-date seasonality</span><span>Equinox / solstice phase</span><span>Statistics, not advice</span></div></div>' +
@@ -3283,6 +3409,9 @@ const tcApi = (function () {
       if (t.closest("#tcReload")) { load(true); return; }
       b = t.closest("[data-tcv]"); if (b) { O.view = b.dataset.tcv; save(); view(); return; }
       if (t.closest("#tcMore")) { SHOWN += 40; view(); return; }
+      b = t.closest("[data-tcsec]"); if (b) { SECSEL = b.dataset.tcsec; view(); const pn = $e("#tcsecpanel"); if (pn && pn.scrollIntoView) pn.scrollIntoView({behavior: "smooth", block: "start"}); return; }
+      b = t.closest("[data-tcrng]"); if (b) { SECRNG = b.dataset.tcrng; host.querySelectorAll("[data-tcrng]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawSec(); return; }
+      if (t.closest("[data-tcsecx]")) { SECSEL = null; view(); return; }
       const row = t.closest("[data-sym]"); if (row) { openSym = openSym === row.dataset.sym ? null : row.dataset.sym; view(); }
     });
     host.addEventListener("input", ev => { const t = ev.target; if (t && t.id === "tcMin") { O.min = Math.max(3, Math.min(25, +t.value || 5)); save(); view(); } });
@@ -3295,12 +3424,12 @@ const tcApi = (function () {
   }
   function view() {
     const host = $e("#tcres"); if (!host) return;
-    const today = isoToday(), CK = clock(today), H = O.h > 0 ? O.h : CK.left, end = addDays(today, H);
+    const today = isoToday(), CK = clock(today), H = O.h > 0 ? O.h : CK.left, end = addDays(today, H), tm = +today.slice(5, 7), nm = O.h === -1 ? tm % 12 + 1 : 0, nmName = nm ? MON[nm - 1] : "";
     const ck = $e("#tcclock");
     if (ck) ck.innerHTML = '<div class="tcck"><div><small>Today (India)</small><b>' + dTxt(today) + '</b></div><div><small>Current cycle</small><b>' + esc(CK.prev.n) + " &rarr; " + esc(CK.next.n) + '</b><span>' + dTxt(CK.prev.d) + " to " + dTxt(CK.next.d) + '</span></div>' +
       '<div><small>Cycle progress</small><b>Day ' + CK.done + ' of ' + CK.len + '</b><span class="tcbar wide"><i style="width:' + Math.round(CK.done / CK.len * 100) + '%"></i></span></div><div><small>Next turn</small><b>' + dTxt(CK.next.d) + '</b><span>in ' + CK.left + ' days</span></div>' +
-      '<div><small>Window scanned</small><b>' + dTxt(today).replace(/ \d{4}$/, "") + " &rarr; " + dTxt(end).replace(/ \d{4}$/, "") + '</b><span>' + H + " days, same dates in every past year</span></div></div>";
-    const R = scan(today, H), V = R.valid;
+      '<div><small>Window scanned</small><b>' + (nm ? "Whole of " + nmName : dTxt(today).replace(/ \d{4}$/, "") + " &rarr; " + dTxt(end).replace(/ \d{4}$/, "")) + '</b><span>' + (nm ? "last close of " + MON[(nm + 10) % 12] + " to last close of " + nmName + ", every past year" : H + " days, same dates in every past year") + "</span></div></div>";
+    const R = scan(today, H, nm), V = R.valid;
     status(R.rows.length, V.length);
     if (!R.rows.length) { host.innerHTML = '<div class="card empty">' + (ST.busy ? "Loading daily price history for the scan..." : "No price history to scan yet." + (ST.err ? " (" + esc(ST.err) + ")" : "") + " Press Rescan to try again.") + "</div>"; return; }
     if (V.length < 5) { host.innerHTML = '<div class="flag"><b>Not enough history.</b> Only ' + V.length + " stocks have " + O.min + " or more past years covering this window. The daily history your Worker returns is probably short (about " + (R.rows.reduce((s, r) => s + r.yrs, 0) / R.rows.length).toFixed(1) + " years on average). Lower \"Min years of data\" above, or let the Worker return a longer daily history (5-10+ years).</div>"; return; }
@@ -3309,26 +3438,30 @@ const tcApi = (function () {
     const bs = secs[0], ws = secs.length ? secs[secs.length - 1] : null, bk = V.slice().sort(bySt(1))[0], wk = V.slice().sort(bySt(-1))[0];
     const tile = (lab, title, S, sub, c, link) => '<div class="dtile"><small>' + lab + "</small><b" + (c ? ' style="color:' + c + '"' : "") + ">" + esc(title) + (link ? znTvA(link, "D") : "") + " <i>" + (isFinite(S.prob) ? S.prob.toFixed(0) + "%" : "") + "</i></b><span>" + sub + "</span></div>";
     const sub = (S, extra) => "Up in " + S.w + " of " + S.n + " years &middot; avg " + pct(S.avg * 100, 1) + (extra ? " &middot; " + extra : "");
-    let h = '<div class="dtiles">' +
+    let h = (nm ? '<p class="note" style="margin:0 0 8px"><b>Trending next month: ' + nmName + '.</b> Each sector and stock is ranked by how often it rose over the whole of ' + nmName + ' in past years (previous month\'s last close to ' + nmName + '\'s last close).</p>' : '') + '<div class="dtiles">' +
       (bs ? tile("Best sector", bs.name, bs.S, sub(bs.S, bs.count + " stocks"), pcol(bs.S.prob)) : "") +
       tile("Best stock", bk.sym, bk.S, sub(bk.S, esc(bk.sec || "—")), pcol(bk.S.prob), bk.sym) +
       (ws ? tile("Weakest sector", ws.name, ws.S, sub(ws.S, ws.count + " stocks"), pcol(ws.S.prob)) : "") +
       tile("Weakest stock", wk.sym, wk.S, sub(wk.S, esc(wk.sec || "—")), pcol(wk.S.prob), wk.sym) + "</div>";
     if (bs && bs.lead) h += '<p class="note">Strongest name inside the best sector (' + esc(bs.name) + "): <b>" + esc(bs.lead.sym) + "</b>" + znTvA(bs.lead.sym, "D") + ", up in " + bs.lead.S.w + " of " + bs.lead.S.n + " years (" + bs.lead.S.prob.toFixed(0) + "%), average " + pct(bs.lead.S.avg * 100, 1) + ".</p>";
-    h += '<h3 class="tch">Sectors</h3><div class="wrap"><table class="tctbl"><thead><tr><th>#</th><th>Sector</th><th>Probability</th><th>Up years</th><th class="num">Avg move</th><th class="num">Stocks</th><th class="num">Stocks &ge;60%</th><th>Strongest stock</th></tr></thead><tbody>' +
-      (secs.length ? secs.map((s, i) => "<tr><td>" + (i + 1) + "</td><td><b>" + esc(s.name) + "</b></td><td>" + probCell(s.S) + '</td><td class="num">' + s.S.w + "/" + s.S.n + '</td><td class="num">' + ret(s.S.avg) + '</td><td class="num">' + s.count + '</td><td class="num">' + s.breadth + "</td><td>" + esc(s.lead.sym) + znTvA(s.lead.sym, "D") + " <small>" + s.lead.S.prob.toFixed(0) + "%</small></td></tr>").join("") : '<tr><td colspan="8" class="note">No sector has three or more stocks with enough history.</td></tr>') + "</tbody></table></div>";
+    SECLAST = secs; if (SECSEL && !secs.some(x => x.name === SECSEL)) SECSEL = null;
+    h += (SECSEL ? secPanel() : "") + '<h3 class="tch">Sectors</h3><div class="wrap"><table class="tctbl"><thead><tr><th>#</th><th>Sector</th><th>Probability</th><th>Up years</th><th class="num">Avg move</th><th class="num">Stocks</th><th class="num">Stocks &ge;60%</th><th>Strongest stock</th></tr></thead><tbody>' +
+      (secs.length ? secs.map((s, i) => "<tr><td>" + (i + 1) + '</td><td style="white-space:nowrap"><b>' + esc(s.name) + '</b> <button type="button" class="cbtn" data-tcsec="' + esc(s.name) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button>' + (TC_SEC_TV[s.name] ? ' <a class="tvl" href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(TC_SEC_TV[s.name]) + '" target="_blank" rel="noopener">TV &#8599;</a>' : "") + "</td><td>" + probCell(s.S) + '</td><td class="num">' + s.S.w + "/" + s.S.n + '</td><td class="num">' + ret(s.S.avg) + '</td><td class="num">' + s.count + '</td><td class="num">' + s.breadth + "</td><td>" + esc(s.lead.sym) + znTvA(s.lead.sym, "D") + " <small>" + s.lead.S.prob.toFixed(0) + '%</small></td></tr>').join("") : '<tr><td colspan="8" class="note">No sector has three or more stocks with enough history.</td></tr>') + "</tbody></table></div>";
     h += '<div class="charttools" style="border:0;padding:0;margin:8px 0"><h3 class="tch" style="margin:0 8px 0 0">Stocks</h3><button type="button" class="cbtn" data-tcv="up" aria-pressed="' + up + '">Most likely up</button><button type="button" class="cbtn" data-tcv="dn" aria-pressed="' + !up + '">Most likely down</button></div>';
     h += '<div class="wrap"><table class="tctbl"><thead><tr><th>#</th><th>Stock</th><th>Sector</th><th>Probability</th><th>Up years</th><th class="num">Avg move</th><th class="num">Median</th><th class="num">Worst</th><th>This month</th><th>View</th><th class="num">Years</th></tr></thead><tbody>';
     stocks.slice(0, SHOWN).forEach((r, i) => {
       const c = callOf(r.S), o = openSym === r.sym, mOk = r.M.n >= 3;
       h += '<tr class="row" data-sym="' + esc(r.sym) + '" style="cursor:pointer"><td>' + (i + 1) + "</td><td><b>" + esc(r.sym) + "</b>" + znTvA(r.sym) + "</td><td>" + esc(r.sec || "—") + "</td><td>" + probCell(r.S) + '</td><td class="num">' + r.S.w + "/" + r.S.n + '</td><td class="num">' + ret(r.S.avg) + '</td><td class="num">' + ret(r.S.med) + '</td><td class="num">' + ret(r.S.worst) + "</td><td>" + (mOk ? '<span style="color:' + pcol(r.M.prob) + '"><b>' + r.M.w + "/" + r.M.n + "</b></span> " + ret(r.M.avg) : "—") + '</td><td><span class="tcg" style="background:' + c[1] + '">' + c[0] + '</span></td><td class="num">' + r.yrs.toFixed(1) + "</td></tr>";
-      if (o) h += '<tr class="det"><td colspan="11"><div class="note" style="margin:0 0 6px;max-width:none">Return from ' + dTxt(today).replace(/ \d{4}$/, "") + " to " + dTxt(end).replace(/ \d{4}$/, "") + ", year by year:</div>" +
+      if (o) h += '<tr class="det"><td colspan="11"><div class="note" style="margin:0 0 6px;max-width:none">' + (nm ? "Whole of " + nmName : "Return from " + dTxt(today).replace(/ \d{4}$/, "") + " to " + dTxt(end).replace(/ \d{4}$/, "")) + ", year by year:</div>" +
         r.A.win.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") + "</div>" +
-        (r.A.mon.length ? '<div class="note" style="margin:8px 0 6px;max-width:none">Whole of ' + MON[+today.slice(5, 7) - 1] + ", year by year:</div>" + r.A.mon.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") : "") + "</td></tr>";
+        (!nm && r.A.mon.length ? '<div class="note" style="margin:8px 0 6px;max-width:none">Whole of ' + MON[+today.slice(5, 7) - 1] + ", year by year:</div>" + r.A.mon.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") : "") + "</td></tr>";
     });
     h += "</tbody></table></div>" + (stocks.length > SHOWN ? '<p><button type="button" class="cbtn" id="tcMore">Show 40 more (' + (stocks.length - SHOWN) + " left)</button></p>" : "");
     h += '<p class="note"><b>How to read this.</b> Probability is the share of past years in which the stock closed higher over this same date window, nudged toward 50% when there are few years (wins + 1) / (years + 2), so 8 up years out of 8 reads as 90%, not 100%. A sector is the equal-weighted basket of its stocks, so it also carries the whole market\'s seasonal tilt. "This month" is the whole current calendar month, like the Pine seasonality table. Click a stock to see every year. Only stocks with at least ' + O.min + " years of history are ranked. A calendar pattern is a tilt in the odds that has held in the past, not a signal on its own. General information, not buy or sell advice.</p>";
+    try { h += accHTML(V, R.secs); } catch (e) {}
+    if (SECCH) { try { SECCH.remove(); } catch (e) {} SECCH = null; }
     host.innerHTML = h;
+    if (SECSEL) { try { drawSec(); } catch (e) {} }
   }
   function paint() { build(); view(); }
   function open() { build(); paint(); if (!busy && (!Object.keys(B).length || Date.now() - ST.t > TTL)) load(false); }
@@ -3637,7 +3770,18 @@ const rmApi = (function () {
     });
     h += "</tbody></table></div>" + (rows.length > SHOWN ? '<p><button type="button" class="cbtn" id="rmMore">Show 60 more (' + (rows.length - SHOWN) + " left)</button></p>" : "");
     h += '<p class="note"><b>How this works.</b> Each stock is run through the same rules as the 1-2-3 Reversal Map in your Pine script: swing pivots (2 bars left and right), a bullish 1-2-3 is low, high, higher low (bearish is the mirror), with leg size, hold and retrace checked against ATR 14. The high or low at point 2 is the neckline. A close beyond the neckline (plus 0.05 ATR) is the break, and a pullback into the 0.30 ATR pocket that holds is the retest. Quality is the same 0-100 score. A BUY or SELL signal needs the chosen trigger and the minimum quality. Entry is the signal close, the stop sits 0.15 ATR beyond point 3, T1 is 1R and T2 is the measured move (or 2R). Break Proof is how often past breaks reached 1 ATR before failing. Trade log replays every signal as one trade at a time, exiting at stop (assumed first if both are touched), target, day end or 15:15 on intraday charts, shown in R. Only closed candles are used. General information, not buy or sell advice.</p>';
+    try { h += accHTML(R); } catch (e) {}
     host.innerHTML = h;
+  }
+
+  /* Accuracy of the 1-2-3 signals: the indicator's own trade log (entry on the signal bar, stop under the 3rd point, exit at the chosen target) over all stocks scanned */
+  function accHTML(R) {
+    const T = [], op = {1: 0, "-1": 0}; R.forEach(x => { (x.r.trades || []).forEach(t => T.push(t)); if (x.r.open) op[x.r.open.dir]++; });
+    if (!T.length) return "";
+    const grp = (name, a) => { const n = a.length, w = a.filter(t => t.R > 0).length, sum = a.reduce((s, t) => s + t.R, 0), tg = a.filter(t => t.why === "target").length, st = a.filter(t => t.why === "stop").length; return {c: [name, n + accFew(n), "<b>" + accPc(w, n) + "</b>", accR(n ? sum / n : NaN), accR(sum), accPc(tg, n), accPc(st, n), accPc(n - tg - st, n)]}; };
+    const rows = [grp("<b>All signals</b>", T), grp("Buy (bullish 1-2-3)", T.filter(t => t.dir === 1)), grp("Sell (bearish 1-2-3)", T.filter(t => t.dir === -1))];
+    return accTable("Accuracy of these signals on past candles", ["Group", "Finished trades", "Win rate", "Average per trade", "Total", "Hit target", "Hit stop", "Closed otherwise"], rows,
+      "Every past 1-2-3 signal on the " + ((RM_TFS.find(t => t[0] === O.tf) || [0, O.tf])[1]) + " candles of the stocks scanned was followed to its exit with the indicator's own rules: entry on the signal bar, stop beyond the third point, exit at " + (O.target === "T2" ? "T2 (measured move / 2R)" : "T1 (1R)") + ", or at day end on intraday charts. Trades still open are not counted (" + (op[1] + op[-1]) + " open now). Results are in R (1R = the risk of the trade), before brokerage and slippage. Past results only, not a promise.");
   }
   function paint() { build(); view(); }
   function open() { build(); paint(); const S = ST[O.tf]; if (!busy && (!S || !S.t || Date.now() - S.t > (ZN_TTL[O.tf] || 6e5))) load(false); }
@@ -3711,6 +3855,15 @@ function render(stocks) {
   const rows = stocks.map(s0 => applyLive(s0)).map((s, i) => { const c = calc(s), id = "s" + i; return {s, c, id, A: alerts(s, c, getPos(s.ticker))}; });
   lastRows = rows;
   const tabs = $("#tabs"), views = $("#views");
+  /* mouse support for the tab strip: wheel scrolls sideways, and the strip can be dragged */
+  try {
+    tabs.addEventListener("wheel", ev => { if (tabs.scrollWidth <= tabs.clientWidth) return; const d = Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY; if (!d) return; tabs.scrollLeft += d; ev.preventDefault(); }, {passive: false});
+    let dx = null, sl = 0, moved = false;
+    tabs.addEventListener("pointerdown", ev => { if (ev.pointerType !== "mouse" || ev.button !== 0) return; dx = ev.clientX; sl = tabs.scrollLeft; moved = false; });
+    window.addEventListener("pointermove", ev => { if (dx === null) return; const m = ev.clientX - dx; if (!moved && Math.abs(m) > 6) { moved = true; tabs.classList.add("drag"); } if (moved) tabs.scrollLeft = sl - m; });
+    window.addEventListener("pointerup", () => { if (dx === null) return; dx = null; tabs.classList.remove("drag"); });
+    tabs.addEventListener("click", ev => { if (moved) { ev.stopPropagation(); ev.preventDefault(); moved = false; } }, true);
+  } catch (e) {}
   if (!rows.length) { tabs.innerHTML = ""; views.innerHTML = '<div class="card empty">No stocks found. Check that your sheet has a header row and at least one stock.</div>'; return; }
   tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + rows.map((r, i) => {
     const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>";
