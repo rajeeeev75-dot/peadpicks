@@ -3180,7 +3180,8 @@ const ppApi = (function () {
   function paint() { build(); paintStatus(); view(); }
   function open() { build(); paint(); if (META.state !== "ok" || Date.now() - META.fetchedAt > 3 * 60 * 1000) load(false); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "pp" && !document.hidden) load(false); } catch (e) {} }, 3 * 60 * 1000);
-  return {open, load, pending, score, parseCSV, reactOf};
+  function list() { const AM = annMap(), out = []; DATA.forEach(s => { const P = score(s, F.mode); if (!P) return; const ad = annDate(s, AM); out.push({sym: symOfTk(s.ticker), total: P.total, rec: String(P.rec[0]), react: num(s.react_pct), d: ad ? ageOf(ad) : NaN}); }); return out; }
+  return {open, load, pending, score, parseCSV, reactOf, list};
 })();
 const ppPaint = () => ppApi.open();
 
@@ -3466,7 +3467,8 @@ const tcApi = (function () {
   function paint() { build(); view(); }
   function open() { build(); paint(); if (!busy && (!Object.keys(B).length || Date.now() - ST.t > TTL)) load(false); }
   setInterval(() => { try { if (current === "tc" && !document.hidden && !busy && Date.now() - ST.t > TTL) load(false); } catch (e) {} }, 10 * 60 * 1000);
-  return {open, load, analyse, summar, scan, clock};
+  function season(H) { const R = scan(isoToday(), H, 0), m = {}, sm = {}; R.valid.forEach(r => { m[r.sym] = {prob: r.S.prob, avg: r.S.avg, n: r.S.n, sec: r.sec}; }); R.secs.forEach(x => { sm[x.name] = x.S; }); return {m, sm}; }
+  return {open, load, analyse, summar, scan, clock, season};
 })();
 const tcPaint = () => tcApi.open();
 
@@ -3786,9 +3788,106 @@ const rmApi = (function () {
   function paint() { build(); view(); }
   function open() { build(); paint(); const S = ST[O.tf]; if (!busy && (!S || !S.t || Date.now() - S.t > (ZN_TTL[O.tf] || 6e5))) load(false); }
   setInterval(() => { try { if (current === "rm" && !document.hidden && !busy) { const S = ST[O.tf]; if (!S || !S.t || Date.now() - S.t > (ZN_TTL[O.tf] || 6e5)) load(false); } } catch (e) {} }, 60 * 1000);
-  return {open, load, view};
+  function signals() { const m = {}; results().forEach(x => { const f = freshOf(x); if (f) m[x.sym] = {dir: f.dir, kind: f.kind, age: x.r.n - 1 - f.i, st: "fresh"}; else if (x.r.aDir !== 0 && !x.r.broken) m[x.sym] = {dir: x.r.aDir, st: "armed"}; }); return {m, tf: (RM_TFS.find(t => t[0] === O.tf) || [0, O.tf])[1]}; }
+  return {open, load, view, signals};
 })();
 const rmPaint = () => rmApi.open();
+
+/* ===== COMBO TAB: one list that scores every stock by how many of the screens agree on the same side ===== */
+const cbApi = (function () {
+  const $e = s => document.querySelector(s), E = esc;
+  let F = {side: "Both", min: 3};
+  try { const sv = JSON.parse(localStorage.getItem("cbF") || "null"); if (sv) F = Object.assign(F, sv); } catch (e) {}
+  const save = () => { try { localStorage.setItem("cbF", JSON.stringify(F)); } catch (e) {} };
+  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD result and reaction", "PEAD"], ["mkt", "Market direction agrees", "Mkt"]];
+  let PT = null, last = 0;
+  function marketBias() {
+    let M = null; try { M = MARKET; } catch (e) {} if (!M) return {d: 0, t: "no market data yet"};
+    const n = (M.indices || []).find(x => String(x.name).toUpperCase() === "NIFTY 50"), pc = n ? +n.pct : NaN, b = M.nifty50 || {};
+    const adv = +b.adv || 0, dec = +b.dec || 0;
+    if (isFinite(pc) && pc >= 0.3 && adv > dec) return {d: 1, t: "Nifty " + pct(pc, 2) + ", more stocks up than down"};
+    if (isFinite(pc) && pc <= -0.3 && dec > adv) return {d: -1, t: "Nifty " + pct(pc, 2) + ", more stocks down than up"};
+    return {d: 0, t: "Nifty " + (isFinite(pc) ? pct(pc, 2) : "n/a") + ", direction not clear"};
+  }
+  function compute() {
+    const M = (typeof MARKET !== "undefined") ? MARKET : null, px = {}; ((M && M.stocks) || []).forEach(x => { px[String(x.s).toUpperCase()] = x; });
+    const by = {}, get = sym => by[sym] = by[sym] || {sym, L: {}, S: {}, why: {L: [], S: []}};
+    const give = (sym, side, key, txt) => { const r = get(sym), k = side === 1 ? "L" : "S"; if (!r[k][key]) { r[k][key] = 1; r.why[k].push(txt); } };
+    /* Trade ideas */
+    if (IDEAS_LAST) [[IDEAS_LAST.L, 1], [IDEAS_LAST.S, -1]].forEach(a => (a[0] || []).forEach(x => give(String(x.s).toUpperCase(), a[1], "idea", "Trade idea score " + x.sc + "/10")));
+    /* OI spurts: price up with OI up = long build-up, price down with OI up = short build-up */
+    ((OI && OI.rows) || []).forEach(r => { const sym = String(r.s).toUpperCase(), q = px[sym]; if (!q || !(+r.chg > 0)) return; give(sym, +q.pct >= 0 ? 1 : -1, "oi", (+q.pct >= 0 ? "Long" : "Short") + " build-up, OI " + pct(+r.pct, 0)); });
+    /* Zone: an active zone within 3% of the price, with the number of timeframes */
+    try {
+      const D = znData(), near = {};
+      D.items.forEach(it => it.zones.forEach(z => { if (!znActive(z)) return; const a = znAway(z, it.px); if (!isFinite(a) || Math.abs(a) > 3) return; const k = it.u.sym + "|" + z.type, o = near[k] = near[k] || {sym: it.u.sym, t: z.type, tfs: new Set(), best: 1e9}; o.tfs.add(znTfName(it.tf)); o.best = Math.min(o.best, Math.abs(a)); }));
+      Object.keys(near).forEach(k => { const o = near[k]; give(String(o.sym).toUpperCase(), o.t === "D" ? 1 : -1, "zone", (o.t === "D" ? "Demand" : "Supply") + " zone within " + o.best.toFixed(1) + "% (" + Array.from(o.tfs).join(", ") + ")"); });
+    } catch (e) {}
+    /* 123 reversal map, on the timeframe chosen in the 123 tab */
+    let rmTf = "";
+    try { const g = rmApi.signals(); rmTf = g.tf; Object.keys(g.m).forEach(sym => { const x = g.m[sym]; give(sym, x.dir, "rm", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 " + (x.st === "fresh" ? x.kind.toLowerCase() + " " + x.age + " bars ago" : "armed") + " (" + g.tf + ")"); }); } catch (e) {}
+    /* seasonality over the next two weeks */
+    try { const sn = tcApi.season(14); Object.keys(sn.m).forEach(sym => { const x = sn.m[sym]; if (x.prob >= 60 && x.avg > 0) give(sym, 1, "tc", "Rose in " + Math.round(x.prob) + "% of past years over the next 2 weeks"); else if (x.prob <= 40 && x.avg < 0) give(sym, -1, "tc", "Fell in " + Math.round(100 - x.prob) + "% of past years over the next 2 weeks"); }); } catch (e) {}
+    /* PEAD: results in the last 30 days, with the market's reaction */
+    try { ppApi.list().forEach(x => { if (!(x.d <= 30) || !isFinite(x.react)) return; if (/EXCELLENT|VERY GOOD/i.test(x.rec) && x.react >= 0) give(x.sym, 1, "pead", x.rec.toLowerCase() + ", market reaction " + pct(x.react, 1)); else if (/POOR/i.test(x.rec) && x.react < 0) give(x.sym, -1, "pead", x.rec.toLowerCase() + ", market reaction " + pct(x.react, 1)); }); } catch (e) {}
+    const mb = marketBias(), rows = [];
+    Object.keys(by).forEach(sym => {
+      const r = by[sym], nL = Object.keys(r.L).length, nS = Object.keys(r.S).length; if (!nL && !nS) return;
+      const side = nL > nS ? 1 : nS > nL ? -1 : 0; if (!side) return;
+      const k = side === 1 ? "L" : "S", has = Object.assign({}, r[k]); if (mb.d === side) has.mkt = 1;
+      const base = Object.keys(r[k]).length, score = base + (has.mkt ? 1 : 0);
+      rows.push({sym, side, has, score, base, why: r.why[k], opp: side === 1 ? nS : nL, q: px[sym]});
+    });
+    rows.sort((a, b) => b.score - a.score || b.base - a.base || (a.sym < b.sym ? -1 : 1));
+    return {rows, mb, rmTf};
+  }
+  function schedule() { if (PT) return; PT = setTimeout(() => { PT = null; try { if (current === "cb") view(); } catch (e) {} }, 700); }
+  function load(force) {
+    try { znLoad(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {}
+    last = Date.now();
+  }
+  const GUIDE = '<h3 class="tch" style="margin-top:18px">How to use this screen to improve accuracy</h3><div class="card"><ol style="margin:0;padding-left:20px;line-height:1.55">' +
+    '<li><b>More agreement means a stronger setup.</b> The score counts how many independent screens point to the same side. Start with 4 or more out of 7. A single screen alone is the weakest signal.</li>' +
+    '<li><b>Trade with the market.</b> The Market point is given only when Nifty and the number of rising stocks agree with the side. Shorts on a strong day and longs on a weak day lose more often, so be choosier then.</li>' +
+    '<li><b>Use Zone for the level, not only the signal.</b> Wait for price to reach the zone and show a reaction candle (a rejection wick or a strong close back from the zone) before entering. Put the stop just beyond the zone\'s far edge.</li>' +
+    '<li><b>Check the higher timeframe.</b> Open the chart and turn on Bollinger and RSI. A long is stronger when the Daily trend is up and RSI is rising from near 50 and not stretched above the upper band. A short is the mirror.</li>' +
+    '<li><b>Prefer fresh over old.</b> A 123 signal 1-2 bars old, an OI build-up today, and a PEAD reaction in the last few days are all stronger than old ones. The Season point is only a tilt and should never be the reason alone.</li>' +
+    '<li><b>Set the stop before the trade, then size it.</b> Risk a small fixed share of capital (for example 0.5-1%) per trade so a run of losses cannot hurt you. A 50% win rate with winners twice the size of losers still makes money, and a high win rate with big losers does not.</li>' +
+    '<li><b>Skip trades where the reward is under about 1.5 times the risk,</b> and remember brokerage and slippage reduce every result.</li>' +
+    '<li><b>Use the accuracy tables.</b> Zone, 123 and Time Cycle show how their own rules did on past data. Trust a screen only where its table has at least 30 cases and beats its base rate, and tighten its filters (higher 123 quality, fresher zones) only if the table improves on every timeframe, not just one.</li>' +
+    '<li><b>Review weekly.</b> If a screen\'s win rate or average R falls, trade it less until it recovers. Keep a note of why you took each trade so you can see which combinations really work for you.</li></ol>' +
+    '<p class="note" style="margin-bottom:0">This combined score has not been back-tested as a whole: past data cannot recreate what each live screen said on an earlier day. Treat it as a way to find candidates faster, not as a signal, and confirm each one on the chart. General information, not buy or sell advice.</p></div>';
+  function view() {
+    const host = $e("#cbres"); if (!host) return;
+    const R = compute(), rows = R.rows.filter(r => r.score >= F.min && (F.side === "Both" || (F.side === "Long" ? r.side === 1 : r.side === -1)));
+    const st = (name, n) => name + (n ? " <b>" + n + "</b>" : " <i>waiting</i>");
+    const cnt = k => R.rows.filter(r => r.has[k]).length;
+    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · Market: " + E(R.mb.t);
+    let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th>' + SRC.map(x => '<th title="' + E(x[1]) + '" style="text-align:center">' + E(x[2]) + "</th>").join("") + '</tr></thead><tbody>';
+    h += rows.length ? rows.slice(0, 80).map((r, i) => {
+      const q = r.q, chg = q ? +q.pct : NaN;
+      return "<tr><td>" + (i + 1) + '</td><td style="min-width:230px;max-width:340px"><b>' + E(r.sym) + "</b>" + znTvA(r.sym, "D") + '<div class="note" style="margin:2px 0 0;font-size:.76rem;line-height:1.3">' + r.why.map(E).join("; ") + '</div></td><td><span class="chip ' + (r.side === 1 ? "g" : "r") + '">' + (r.side === 1 ? "Long" : "Short") + "</span>" + (r.opp ? ' <small title="Some screens point the other way">mixed</small>' : "") + '</td><td class="num"><b>' + r.score + "</b> / 7</td><td class=\"num\">" + (q ? fmt(+q.p) + ' <small class="' + (chg >= 0 ? "accg" : "accb") + '">' + (chg >= 0 ? "+" : "") + chg.toFixed(1) + "%</small>" : "-") + "</td>" +
+        SRC.map(x => '<td style="text-align:center">' + (r.has[x[0]] ? '<span class="accg">&#10003;</span>' : '<span class="note" style="margin:0">&middot;</span>') + "</td>").join("") + "</tr>";
+    }).join("") : '<tr><td colspan="' + (5 + SRC.length) + '" class="note">No stock has ' + F.min + " or more screens agreeing yet. The other screens may still be loading (see the line above), or lower the minimum score.</td></tr>";
+    host.innerHTML = '<div class="wrap" style="display:none"></div>' + h + "</tbody></table></div>" +
+      '<p class="note">A tick means that screen currently points to the same side as the row. Score = ticks out of 7. Trade ideas and OI come from the Intraday tab, Zone from the Zone tab (active zone within 3% of price), 123 from the 123 tab on its selected timeframe and settings, Season from Time Cycle (next 2 weeks, 60%+ or 40% or less), PEAD from results in the last 30 days with a known reaction.</p>' + GUIDE;
+  }
+  function build() {
+    const host = document.getElementById("cbbody"); if (!host || host.dataset.built) return; host.dataset.built = "1";
+    host.innerHTML = '<div class="znhead"><div><h2>COMBO</h2><span>Stocks where several screens agree on the same side</span></div><div class="znpills"><span>Zone + 123 + OI + Trade ideas</span><span>Season + PEAD + market</span><span>Screening aid, not advice</span></div></div>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><b>Side</b>' + ["Both", "Long", "Short"].map(x => '<button type="button" class="cbtn" data-cbs="' + x + '" aria-pressed="' + (F.side === x) + '">' + x + "</button>").join("") + '<span class="csep"></span><b>Minimum score</b>' + [2, 3, 4, 5].map(x => '<button type="button" class="cbtn" data-cbm="' + x + '" aria-pressed="' + (F.min === x) + '">' + x + "+</button>").join("") + '<span class="csep"></span><button type="button" class="cbtn" id="cbReload">&#8635; Refresh sources</button></div><div class="note" id="cbstat" style="margin:8px 0 0"></div></div><div id="cbres"></div>';
+    host.addEventListener("click", ev => {
+      const t = ev.target; if (!t || !t.closest || t.closest("a")) return;
+      let b = t.closest("[data-cbs]"); if (b) { F.side = b.dataset.cbs; host.querySelectorAll("[data-cbs]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); save(); view(); return; }
+      b = t.closest("[data-cbm]"); if (b) { F.min = +b.dataset.cbm; host.querySelectorAll("[data-cbm]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); save(); view(); return; }
+      if (t.closest("#cbReload")) { load(true); view(); }
+    });
+  }
+  function open() { build(); view(); if (!last || Date.now() - last > 5 * 60e3) load(false); }
+  setInterval(() => { try { if (current === "cb" && !document.hidden) view(); } catch (e) {} }, 5000);
+  return {open, view, compute};
+})();
+const cbPaint = () => cbApi.open();
 
 /* ===== APP ===== */
 let current = "ov", lastRows = [];
@@ -3803,6 +3902,7 @@ function show(id) {
   if (id === "zn") { try { znPaint(); } catch (e) {} }
   if (id === "tc") { try { tcPaint(); } catch (e) {} }
   if (id === "rm") { try { rmPaint(); } catch (e) {} }
+  if (id === "cb") { try { cbPaint(); } catch (e) {} }
   ensureChart(sec);
   if (sec) { const cs = getComputedStyle(sec); document.documentElement.style.setProperty("--a", cs.getPropertyValue("--a")); document.documentElement.style.setProperty("--b", cs.getPropertyValue("--b")); }
 }
@@ -3867,7 +3967,7 @@ function render(stocks) {
   if (!rows.length) { tabs.innerHTML = ""; views.innerHTML = '<div class="card empty">No stocks found. Check that your sheet has a header row and at least one stock.</div>'; return; }
   tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + rows.map((r, i) => {
     const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>";
-  }).join("") + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD Picks</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button>';
+  }).join("") + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD Picks</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button>';
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
   const emptyCard = views.querySelector(".card.empty"); if (emptyCard) emptyCard.remove();
   let ov = document.getElementById("ov");
@@ -3893,6 +3993,10 @@ function render(stocks) {
   if (!document.getElementById("tc")) {
     const tc = document.createElement("section"); tc.className = "stock"; tc.id = "tc"; tc.style.cssText = "--a:#4f46e5;--b:#06b6d4";
     tc.innerHTML = '<div id="tcbody"></div>'; views.appendChild(tc);
+  }
+  if (!document.getElementById("cb")) {
+    const cb = document.createElement("section"); cb.className = "stock"; cb.id = "cb"; cb.style.cssText = "--a:#be123c;--b:#f59e0b";
+    cb.innerHTML = '<div id="cbbody"></div>'; views.appendChild(cb);
   }
   if (!document.getElementById("rm")) {
     const rm = document.createElement("section"); rm.className = "stock"; rm.id = "rm"; rm.style.cssText = "--a:#7c3aed;--b:#db2777";
@@ -3926,7 +4030,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
