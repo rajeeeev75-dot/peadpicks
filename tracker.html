@@ -45,10 +45,13 @@ main{max-width:900px;margin:0 auto;padding:0 16px 48px}
 .nrd{margin-left:auto;font-size:.8rem;font-weight:700;color:var(--c1);text-decoration:none}
 .nmore{display:block;margin:8px auto 14px;font:inherit;font-weight:700;padding:9px 22px;border-radius:999px;border:0;color:#fff;cursor:pointer;background:linear-gradient(120deg,var(--a),var(--b))}
 .ac-r{background:#ffcdd2;color:#b71c1c}.ac-g{background:#c8e6c9;color:#1b5e20}.ac-o{background:#ffe0b2;color:#e65100}.ac-b{background:#bbdefb;color:#0d47a1}.ac-c{background:#b2ebf2;color:#006064}.ac-n{background:#eceff1;color:#37474f}.acn{border-radius:6px;padding:2px 8px;display:inline-block}.nwi{padding:12px 0;border-bottom:1px solid var(--line,#e5e7eb)}.nwi:last-child{border-bottom:0}.nwm{font-size:.8rem;opacity:.75}.nwt{font-weight:700;margin:3px 0}.nwt a{color:inherit;text-decoration:none}.nwt a:hover{text-decoration:underline}.nwx{font-size:.9rem;margin:4px 0}.nwf{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.nwf button{font:inherit;font-size:.85rem;padding:6px 12px;border-radius:999px;border:1px solid #c9c4e6;background:var(--card);color:var(--ink);cursor:pointer}.nwf button[aria-pressed="true"]{background:linear-gradient(120deg,var(--a),var(--b));color:#fff;border-color:transparent}
+.dockrow>td{padding:8px 4px !important;background:transparent !important;white-space:normal !important}.dockrow:hover{background:transparent !important}td:has(>[data-ixchart])>b:first-child,td>b[data-tcsec]{cursor:pointer}
 .tabs{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;scrollbar-color:rgba(100,100,120,.55) transparent;margin:-34px -16px 6px;padding:6px 16px 12px;position:sticky;top:0;z-index:30;transition:background .2s,box-shadow .2s;cursor:grab}.tabs.drag{cursor:grabbing;user-select:none}.tabs::-webkit-scrollbar{height:9px}.tabs::-webkit-scrollbar-thumb{background:rgba(100,100,120,.5);border-radius:6px}.tabs::-webkit-scrollbar-thumb:hover{background:rgba(100,100,120,.8)}.tabs::-webkit-scrollbar-track{background:transparent}.tabs.stuck{background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 14px rgba(0,0,0,.12)}
 .tabs button{font:inherit;font-weight:600;padding:10px 16px;border:2px solid transparent;border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer;box-shadow:var(--shadow);white-space:nowrap;flex:0 0 auto;transition:transform .12s}.tabs button:hover{transform:translateY(-2px)}
 .acctbl{width:100%;border-collapse:collapse;font-size:.92rem}.acctbl th,.acctbl td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}.acctbl th{font-size:.78rem;color:#fff !important;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,.25)}.acctbl .num{text-align:right}.acctbl tr.base td{color:var(--mute);font-style:italic}.accg{color:var(--good);font-weight:700}.accb{color:var(--bad);font-weight:700}
 .tabs button[aria-selected="true"]{color:#fff;background:linear-gradient(120deg,var(--a),var(--b))}
+.side{margin:0 0 10px}.side details{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:6px 12px}.side summary{cursor:pointer;font-weight:700;padding:6px 2px}.side .sl{display:flex;flex-wrap:wrap;gap:6px;padding:6px 0 8px}.side button{font:inherit;font-weight:600;font-size:.88rem;padding:7px 11px;border:2px solid transparent;border-radius:9px;background:var(--bg);color:var(--ink);cursor:pointer;text-align:left}.side button:hover{transform:translateX(2px)}.side button[aria-selected="true"]{color:#fff;background:linear-gradient(120deg,var(--a),var(--b))}.side .sh{font-size:.72rem;color:var(--mute);margin:0 0 4px}
+@media(min-width:1000px){main{max-width:1180px}.shell{display:grid;grid-template-columns:178px minmax(0,1fr);gap:18px;align-items:start}.side{position:sticky;top:78px;max-height:calc(100vh - 96px);overflow:auto;margin:0}.side summary{pointer-events:none;list-style:none}.side summary::-webkit-details-marker{display:none}.side .sl{flex-direction:column;flex-wrap:nowrap}.side button{width:100%}.mc{min-width:0}}
 .tabs button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
 .ppwrap{display:flex;flex-direction:column;gap:8px}
 .ppwrap .pptop{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;font-size:.86rem;color:var(--mute)}
@@ -205,6 +208,7 @@ footer{margin-top:28px;color:var(--mute);font-size:.86rem;border-top:1px solid v
 </div></header>
 <main>
 <div class="tabs" role="tablist" aria-label="Stocks" id="tabs"></div>
+<div class="shell"><aside class="side" id="side" aria-label="Watchlist"></aside><div class="mc">
 <div class="bar-status">
 <span class="mk shut" id="mkstat"><i></i>Market</span><span class="mode" id="mode">Loading...</span>
 <span id="loaded"></span><span id="liveinfo"></span>
@@ -214,6 +218,7 @@ footer{margin-top:28px;color:var(--mute);font-size:.86rem;border-top:1px solid v
 <footer>
 Prices come from Google Finance through your sheet and can be delayed by up to about 20 minutes. Stories, levels and targets are the notes you saved in the sheet, with the date shown on each stock. Check exchange filings before acting. Charts are drawn from the daily price history in your sheet. Headlines come from Google News through your sheet. Sector figures are worked out from the sector index on the History tab. Market breadth, sector moves and top movers on the Overview come from NSE through your own Worker and can be delayed. Your entry price, quantity and stop are stored only in this browser.
 </footer>
+</div></div>
 </main>
 <script>
 /* ===== SETTINGS ===== */
@@ -686,12 +691,27 @@ async function ixChartDraw() {
   IX_CH = chart;
   say((intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + (lv ? " Dashed lines: " + side + " trigger, stop and target from the Trade ideas screen." : "") + " Scroll or zoom on the chart.");
 }
+const ixList = sym => Array.from(document.querySelectorAll("#ixbody [data-ixchart]")).filter(x => x.getAttribute("data-ixchart") === sym && !x.closest(".dockrow"));
+function ixDock() {
+  const host = document.getElementById("ixchart"); if (!host) return;
+  const old = document.querySelector("#ixbody .dockrow"), body = document.getElementById("ixbody");
+  const top = () => { if (old) old.remove(); if (body && host.parentElement !== body) body.insertBefore(host, body.firstChild); };
+  if (!IX_SEL) { top(); return; }
+  const list = ixList(IX_SEL.sym), btn = list[IX_SEL.occ || 0] || list[0], tr = btn && btn.closest("tr");
+  if (!tr) { top(); return; }
+  if (old && old.previousElementSibling === tr) return;
+  const dr = document.createElement("tr"), td = document.createElement("td"); dr.className = "dockrow"; td.colSpan = 30; td.appendChild(host); dr.appendChild(td); tr.after(dr); if (old) old.remove();
+}
 document.addEventListener("click", ev => {
-  const t = ev.target && ev.target.closest ? ev.target.closest("[data-ixchart],[data-ixtf],[data-ixclose]") : null; if (!t) return;
-  if (t.hasAttribute("data-ixclose")) { IX_SEL = null; ixChartDraw(); return; }
+  let t = ev.target && ev.target.closest ? ev.target.closest("[data-ixchart],[data-ixtf],[data-ixclose]") : null;
+  if (!t && ev.target && ev.target.closest) { const bb = ev.target.closest("td > b:first-child"); if (bb && bb.parentElement) t = bb.parentElement.querySelector("[data-ixchart]"); }
+  if (!t) return;
+  if (t.hasAttribute("data-ixclose")) { IX_SEL = null; ixChartDraw(); ixDock(); return; }
   if (t.hasAttribute("data-ixtf")) { if (IX_SEL) { IX_SEL.tf = t.getAttribute("data-ixtf"); ixChartDraw(); } return; }
-  IX_SEL = {sym: t.getAttribute("data-ixchart"), tf: (IX_SEL && IX_SEL.tf) || "15"}; ixChartDraw();
-  setTimeout(() => { const h = document.getElementById("ixchart"); if (h && h.scrollIntoView) h.scrollIntoView({behavior: "smooth", block: "start"}); }, 50);
+  const sym = t.getAttribute("data-ixchart"), occ = Math.max(0, ixList(sym).indexOf(t));
+  if (IX_SEL && IX_SEL.sym === sym && (IX_SEL.occ || 0) === occ) { IX_SEL = null; ixChartDraw(); ixDock(); return; }
+  IX_SEL = {sym, tf: (IX_SEL && IX_SEL.tf) || "15", occ}; ixChartDraw(); ixDock();
+  setTimeout(() => { const h = document.getElementById("ixchart"); if (h && h.scrollIntoView) h.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 50);
 });
 setInterval(() => { try { if (IX_SEL && typeof current !== "undefined" && current === "ix" && !document.hidden && IX_SEL.tf !== "D") ixChartDraw(); } catch (e) {} }, 60 * 1000);
 /* ===== RESULTS WATCHLIST (F&O stocks with results today or on the next trading day, with buy/sell signals from Trade ideas and OI spurts) ===== */
@@ -741,7 +761,9 @@ function ixPaint() {
   }
   h += ideas + oiHTML();
   try { h += resultWatchHTML(M, oiBy); } catch (e) { h += '<div class="card"><p class="note">Problem drawing the results watchlist: ' + esc(e && e.message) + '</p></div>'; }
+  const keepIx = IX_SEL ? document.getElementById("ixchart") : null; if (keepIx) keepIx.remove();
   o.innerHTML = h;
+  if (keepIx) { const fr = document.getElementById("ixchart"); if (fr) fr.replaceWith(keepIx); try { ixDock(); } catch (e) {} }
   try { ixChartDraw(); } catch (e) {}
 }
 async function loadFiiDii() {
@@ -1273,47 +1295,13 @@ function colors() {
 const withAlpha = (hex, a) => /^#[0-9a-f]{6}$/i.test(hex) ? hex + a : hex;
 
 /* ===== Accuracy tables shown at the bottom of each screener: what the screener's own rules would have done on past data ===== */
-/* ===== Inline stock chart: opens in a row right under a tapped stock (daily candles, 50 / 200-day averages, Bollinger and RSI switches) ===== */
-var ICH = null; const ICC = {};
-function icBlock(sym) {
-  return '<div class="icpanel" style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px));margin-top:12px"><div class="charttools" style="margin-top:0">' + indBtns() + '</div><div class="icbox" data-sym="' + String(sym).replace(/"/g, "&quot;") + '" style="height:360px;margin-top:10px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div class="icnote note" style="margin:6px 0 0">Loading chart...</div></div>';
-}
-async function icAfter(host) {
-  const box = host && host.querySelector(".icbox");
-  if (ICH) { try { ICH.remove(); } catch (e) {} ICH = null; }
-  if (!box) return;
-  try { const pn = box.closest(".icpanel"), wr = pn && pn.closest(".wrap"); if (wr) pn.style.width = Math.max(300, wr.clientWidth - 24) + "px"; } catch (e) {}
-  const sym = box.dataset.sym, note = box.nextElementSibling, tvLink = ' <a class="tvl" href="' + znTv(sym, "D") + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a>';
-  const say = t => { if (note) note.innerHTML = t; };
-  const LW = window.LightweightCharts; if (!LW) { say("The chart library did not load." + tvLink); return; }
-  let o = ICC[sym];
-  if (!o || Date.now() - o.t > 4 * 60e3) {
-    try {
-      const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF", {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym];
-      if (rows && rows.length > 30) ICC[sym] = o = {t: Date.now(), bars: rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4]}))};
-    } catch (e) {}
-  }
-  if (!box.isConnected) return;   // the row was closed or redrawn meanwhile
-  if (!o || !o.bars) { say("Could not load the chart from your Worker." + tvLink); return; }
-  const c = colors(), bars = o.bars;
-  box.innerHTML = "";
-  const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
-  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true});
-  candle.setData(bars);
-  try { indAttach(chart, candle, bars, {base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
-  const sma = n => { const out = []; let sum = 0; bars.forEach((b, i) => { sum += b.close; if (i >= n) sum -= bars[i - n].close; if (i >= n - 1) out.push({time: b.time, value: sum / n}); }); return out; };
-  [[50, "#2563eb"], [200, "#c026d3"]].forEach(m => { const d = sma(m[0]); if (d.length) chart.addLineSeries({color: m[1], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false}).setData(d); });
-  try { const last = bars[bars.length - 1].time, d = new Date(last + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: last}); } catch (e) { chart.timeScale().fitContent(); }
-  ICH = chart;
-  say("Daily candles from your Cloudflare Worker, last bar " + bars[bars.length - 1].time + ". Blue = 50-day, purple = 200-day average." + tvLink);
-}
 var ACC_OPEN = {};
-document.addEventListener("toggle", ev => { const t = ev.target; if (t && t.classList && t.classList.contains("accd")) ACC_OPEN[t.dataset.acc] = t.open; }, true);
+function accWrap(k, t, inner) { return inner ? '<details class="accd" data-accd="' + k + '" style="margin-top:18px"' + (ACC_OPEN[k] ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">' + t + " (tap to open)</summary>" + inner + "</details>" : ""; }
+document.addEventListener("toggle", ev => { const t = ev.target; if (t && t.getAttribute && t.getAttribute("data-accd")) ACC_OPEN[t.getAttribute("data-accd")] = t.open; }, true);
 function accTable(title, heads, rows, note) {
   const pc = (w, n) => (n ? Math.round(100 * w / n) + "%" : "-");
-  const key = String(title).replace(/<[^>]*>/g, "").replace(/"/g, "&quot;");
-  return '<details class="accd" data-acc="' + key + '" style="margin-top:18px"' + (ACC_OPEN[key] ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: ' + title + ' <span class="note">(tap to open)</span></summary><div class="card"><div class="wrap"><table class="acctbl"><thead><tr>' + heads.map((h, i) => "<th" + (i ? ' class="num"' : "") + ">" + h + "</th>").join("") + "</tr></thead><tbody>" +
-    rows.map(r => '<tr class="' + (r.base ? "base" : "") + '">' + r.c.map((c, i) => "<td" + (i ? ' class="num"' : "") + ">" + c + "</td>").join("") + "</tr>").join("") + '</tbody></table></div><p class="note" style="margin-bottom:0">' + note + "</p></div></details>";
+  return '<h3 class="tch" style="margin-top:18px">' + title + '</h3><div class="card"><div class="wrap"><table class="acctbl"><thead><tr>' + heads.map((h, i) => "<th" + (i ? ' class="num"' : "") + ">" + h + "</th>").join("") + "</tr></thead><tbody>" +
+    rows.map(r => '<tr class="' + (r.base ? "base" : "") + '">' + r.c.map((c, i) => "<td" + (i ? ' class="num"' : "") + ">" + c + "</td>").join("") + "</tr>").join("") + '</tbody></table></div><p class="note" style="margin-bottom:0">' + note + "</p></div>";
 }
 const accPc = (w, n) => (n ? Math.round(100 * w / n) + "%" : "-");
 const accRet = x => (isFinite(x) ? '<span class="' + (x > 0 ? "accg" : x < 0 ? "accb" : "") + '">' + (x > 0 ? "+" : "") + (x * 100).toFixed(1) + "%</span>" : "-");
@@ -2895,7 +2883,7 @@ function znBuild(sec) {
     b = t.closest("[data-zntfc]");
     if (b) { ZTFSEL = b.dataset.zntfc; znPaintRes(); return; }
     b = t.closest("[data-zrow]");
-    if (b) { const k = b.dataset.zk || b.dataset.zrow, tf = b.dataset.ztf; if (ZOPEN === k && (!tf || tf === ZTFSEL)) ZOPEN = null; else { ZOPEN = k; ZSEL = b.dataset.zrow; if (tf) ZTFSEL = tf; } znPaintRes(); }
+    if (b) { const key = b.dataset.zrow + "|" + (b.dataset.ztf || ""); if (ZOPEN === key) ZOPEN = null; else { ZOPEN = key; ZSEL = b.dataset.zrow; if (b.dataset.ztf) ZTFSEL = b.dataset.ztf; } znPaintRes(); }
   });
   sec.addEventListener("change", ev => {
     const el = ev.target; if (!el) return;
@@ -2980,19 +2968,6 @@ function znPaintRes() {
     tile("Nearest supply", ns ? fmt(ns.z.prox) : "—", ns ? nm(ns) + " · " + znTfName(ns.it.tf) + " · " + fmt(ns.away, 1) + "% away" : "none") +
     tile("Best confluence", top ? Math.max(top.D.size, top.S.size) + " TF" : "—", top ? esc(top.u.name) + " · " + (top.D.size >= top.S.size ? "demand" : "supply") + " zones within " + CN + "%" : "no stock has a zone within " + CN + "% of price") +
     tile("Stocks scanned", stocksWith, "of " + D.uni.length + " · " + D.tfs.map(znTfName).join(", ")) + "</div>";
-  /* the chart opens in a row right under the stock the person tapped, and closes when the row is tapped again */
-  const zoSym = ZOPEN ? String(ZOPEN).split("|")[0] : null;
-  if (zoSym && !items.some(i => i.u.sym === zoSym)) ZOPEN = null;
-  const zOn = ZOPEN ? String(ZOPEN).split("|")[0] : null;
-  const avail = zOn ? D.tfs.filter(tf => items.some(i => i.u.sym === zOn && i.tf === tf)) : [];
-  if (zOn) { ZSEL = zOn; if (avail.indexOf(ZTFSEL) < 0) ZTFSEL = avail.indexOf("D") >= 0 ? "D" : avail[0]; }
-  const cur = zOn ? items.find(i => i.u.sym === zOn && i.tf === ZTFSEL) : null, intra = znIntra(ZTFSEL);
-  const rngs = intra ? [["60", "60 bars"], ["150", "150 bars"], ["300", "300 bars"], ["All", "All"]] : [["3M", "3M"], ["6M", "6M"], ["1Y", "1Y"], ["2Y", "2Y"], ["All", "All"]], rcur = intra ? ZRANGEI : ZRANGE;
-  const nmOf = s => (D.uni.find(u => u.sym === s) || {name: s}).name;
-  const chartRow = cols => '<tr class="det"><td colspan="' + cols + '"><div class="zpanel" style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px))"><div class="card chartcard" id="znchartcard" style="margin:0"><div class="charttools"><b>' + esc(nmOf(zOn)) + '</b><span class="csep"></span>' +
-    avail.map(tf => '<button type="button" class="cbtn" data-zntfc="' + tf + '" aria-pressed="' + (tf === ZTFSEL) + '">' + znTfName(tf) + "</button>").join("") +
-    '<span class="csep"></span>' + rngs.map(r => '<button type="button" class="cbtn" data-znrange="' + r[0] + '" aria-pressed="' + (r[0] === rcur) + '">' + r[1] + "</button>").join("") +
-    '<span class="csep"></span>' + indBtns() + '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(zOn || "").replace(/[&-]/g, "_")) + '&interval=' + ZTFSEL + '" target="_blank" rel="noopener">Open on TradingView</a></div></div></div></td></tr>';
   if (!all.length) h += '<div class="card empty">No zones match the current filters. Try switching a filter off, or tick Mitigated under Show.</div>';
   else if (ZO.view === "mtf") {
     /* one row per stock, one column per timeframe: newest active demand and supply zone, like the indicator's MTF dashboard */
@@ -3002,32 +2977,46 @@ function znPaintRes() {
     const rows = Object.keys(by).map(k => { const r = by[k], cf = conf[k]; r.nD = cf ? cf.D.size : 0; r.nS = cf ? cf.S.size : 0; r.best = cf ? cf.best : 1e9; return r; }).sort((a, b) => Math.max(b.nD, b.nS) - Math.max(a.nD, a.nS) || a.best - b.best);
     h += '<div class="wrap"><table class="znm"><thead><tr><th>Stock</th><th class="num">Price</th>' + D.tfs.map(tf => "<th>" + znTfName(tf) + "</th>").join("") + '<th class="num" title="Timeframes with an active zone within ' + CN + '% of price">Near TFs</th></tr></thead><tbody>';
     rows.slice(0, ZSHOWN).forEach(r => {
-      h += '<tr data-zrow="' + esc(r.u.sym) + '" style="cursor:pointer"><td><b>' + esc(r.u.name) + '</b>' + znTvA(r.u.sym, "D") + '</td><td class="num">' + fmt(pxOf[r.u.sym]) + "</td>" + D.tfs.map(tf => {
+      h += '<tr data-zrow="' + esc(r.u.sym) + '"><td><b>' + esc(r.u.name) + '</b>' + znTvA(r.u.sym, "D") + '</td><td class="num">' + fmt(pxOf[r.u.sym]) + "</td>" + D.tfs.map(tf => {
         const c = r.tf[tf] || {}, cell = (x, cls) => x ? '<div class="zc ' + cls + '" data-zrow="' + esc(r.u.sym) + '" data-ztf="' + tf + '"><b>' + (cls === "g" ? "D " : "S ") + fmt(x.z.prox) + '</b> <small>' + x.z.pat + " &middot; " + Math.round(x.z.prob) + "% &middot; " + fmt(x.away, 1) + "%</small></div>" : "";
         return "<td>" + (cell(c.D, "g") + cell(c.S, "r") || '<span class="note">—</span>') + "</td>";
       }).join("") + '<td class="num">' + (r.nD ? '<span class="chip g">' + r.nD + " D</span> " : "") + (r.nS ? '<span class="chip r">' + r.nS + " S</span>" : "") + (!r.nD && !r.nS ? "—" : "") + "</td></tr>";
-      if (zOn === r.u.sym) h += chartRow(3 + D.tfs.length);
     });
     h += "</tbody></table></div>" + (rows.length > ZSHOWN ? '<p><button type="button" class="cbtn" data-znmore="1">Show more (' + (rows.length - ZSHOWN) + " left)</button></p>" : "") +
-      '<p class="note">Each cell is the newest active zone on that timeframe: proximal price, pattern, score and how far the live price is from it. Near TFs counts the timeframes with an active zone within ' + CN + '% of the price. Tap a cell to open that stock\'s chart on that timeframe right below the row; tap the row again to close it.</p>';
+      '<p class="note">Each cell is the newest active zone on that timeframe: proximal price, pattern, score and how far the live price is from it. Near TFs counts the timeframes with an active zone within ' + CN + '% of the price. Tap a cell to chart that stock and timeframe.</p>';
   } else {
     all.sort((a, b) => { const am = !znActive(a.z), bm = !znActive(b.z); if (am !== bm) return am ? 1 : -1; return (isFinite(a.away) ? Math.abs(a.away) : 1e9) - (isFinite(b.away) ? Math.abs(b.away) : 1e9); });
     h += '<div class="wrap"><table><thead><tr><th>Stock</th><th>TF</th><th>Zone</th><th>Pattern</th><th class="num">Proximal</th><th class="num">Distal</th><th class="num">Target</th><th class="num">Away %</th><th class="num">Prob</th><th>Formed</th><th>Status</th></tr></thead><tbody>';
-    let zPlaced = false;
     all.slice(0, ZSHOWN).forEach(x => {
-      const z = x.z, zk = x.it.u.sym + "|" + x.it.tf + "|" + z.type + "|" + z.sig, chipT = z.type === "D" ? '<span class="chip g">&#9650; Demand</span>' : '<span class="chip r">&#9660; Supply</span>';
+      const z = x.z, chipT = z.type === "D" ? '<span class="chip g">&#9650; Demand</span>' : '<span class="chip r">&#9660; Supply</span>';
       const chipS = z.status === "fresh" ? '<span class="chip g">Fresh</span>' : z.status === "respected" ? '<span class="chip w">Respected</span>' : '<span class="chip n">Mitigated</span>';
-      h += '<tr data-zrow="' + esc(x.it.u.sym) + '" data-zk="' + esc(zk) + '" data-ztf="' + x.it.tf + '" style="cursor:pointer"><td><b>' + nm(x) + '</b>' + znTvA(x.it.u.sym, x.it.tf) + '</td><td><span class="chip n">' + znTfName(x.it.tf) + "</span></td><td>" + chipT + "</td><td>" + z.pat + '</td><td class="num">' + fmt(z.prox) + '</td><td class="num">' + fmt(z.dist) + '</td><td class="num">' + fmt(z.target) + '</td><td class="num"' + (isFinite(x.away) && x.away < 0 ? ' style="color:var(--warn);font-weight:600"' : "") + ">" + (isFinite(x.away) ? fmt(x.away, 1) + "%" : "—") + '</td><td class="num">' + Math.round(z.prob) + "%</td><td>" + znFmtT(z.formTime) + "</td><td>" + chipS + "</td></tr>";
-      if (zOn && !zPlaced && (ZOPEN === zk || (ZOPEN === x.it.u.sym && x.it.tf === ZTFSEL))) { zPlaced = true; h += chartRow(11); }
+      h += '<tr data-zrow="' + esc(x.it.u.sym) + '" data-ztf="' + x.it.tf + '"><td><b>' + nm(x) + '</b>' + znTvA(x.it.u.sym, x.it.tf) + '</td><td><span class="chip n">' + znTfName(x.it.tf) + "</span></td><td>" + chipT + "</td><td>" + z.pat + '</td><td class="num">' + fmt(z.prox) + '</td><td class="num">' + fmt(z.dist) + '</td><td class="num">' + fmt(z.target) + '</td><td class="num"' + (isFinite(x.away) && x.away < 0 ? ' style="color:var(--warn);font-weight:600"' : "") + ">" + (isFinite(x.away) ? fmt(x.away, 1) + "%" : "—") + '</td><td class="num">' + Math.round(z.prob) + "%</td><td>" + znFmtT(z.formTime) + "</td><td>" + chipS + "</td></tr>";
     });
     h += "</tbody></table></div>" + (all.length > ZSHOWN ? '<p><button type="button" class="cbtn" data-znmore="1">Show more (' + (all.length - ZSHOWN) + " left)</button></p>" : "") +
-      '<p class="note">Away % is how far the live price is from the proximal line (negative: price is already beyond it). Prob is the indicator\'s score for the zone (base candles, leg-out strength, trend). Tap a row to open its chart right below it; tap the row again to close it.</p>';
+      '<p class="note">Away % is how far the live price is from the proximal line (negative: price is already beyond it). Prob is the indicator\'s score for the zone (base candles, leg-out strength, trend). Tap a row to open its chart just below it, and tap the row again to close it.</p>';
   }
-  try { h += znAccHTML(items); } catch (e) {}
+  /* chart for the chosen stock and timeframe */
+  const syms = []; items.forEach(i => { if (syms.indexOf(i.u.sym) < 0) syms.push(i.u.sym); });
+  const cnt = s => items.filter(i => i.u.sym === s).reduce((a, i) => a + i.zones.filter(z => znShown(z) && znActive(z)).length, 0);
+  if (ZOPEN && (!ZSEL || syms.indexOf(ZSEL) < 0)) ZSEL = (top && top.u.sym) || (nd && nd.it.u.sym) || (ns && ns.it.u.sym) || syms[0];
+  const avail = D.tfs.filter(tf => items.some(i => i.u.sym === ZSEL && i.tf === tf));
+  if (avail.indexOf(ZTFSEL) < 0) ZTFSEL = avail.indexOf("D") >= 0 ? "D" : avail[0];
+  const cur = items.find(i => i.u.sym === ZSEL && i.tf === ZTFSEL), intra = znIntra(ZTFSEL);
+  const rngs = intra ? [["60", "60 bars"], ["150", "150 bars"], ["300", "300 bars"], ["All", "All"]] : [["3M", "3M"], ["6M", "6M"], ["1Y", "1Y"], ["2Y", "2Y"], ["All", "All"]], rcur = intra ? ZRANGEI : ZRANGE;
+  const nmOf = s => (D.uni.find(u => u.sym === s) || {name: s}).name;
+  let chartH = '<div class="card chartcard" id="znchartcard"><div class="charttools"><select id="znsel" aria-label="Stock" style="font:inherit;padding:4px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)">' +
+    syms.map(s => '<option value="' + esc(s) + '"' + (s === ZSEL ? " selected" : "") + ">" + esc(nmOf(s)) + " (" + cnt(s) + ")</option>").join("") + "</select>" +
+    '<span class="csep"></span>' + avail.map(tf => '<button type="button" class="cbtn" data-zntfc="' + tf + '" aria-pressed="' + (tf === ZTFSEL) + '">' + znTfName(tf) + "</button>").join("") +
+    '<span class="csep"></span>' + rngs.map(r => '<button type="button" class="cbtn" data-znrange="' + r[0] + '" aria-pressed="' + (r[0] === rcur) + '">' + r[1] + "</button>").join("") +
+    '<span class="csep"></span>' + indBtns() + '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(ZSEL || "").replace(/[&-]/g, "_")) + '&interval=' + ZTFSEL + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
+  try { h += accWrap("zn", "Back-test: accuracy of these zones on past data", znAccHTML(items)); } catch (e) {}
   host.innerHTML = h;
-  try { const zp = host.querySelector(".zpanel"), wr = zp && zp.closest(".wrap"); if (wr) zp.style.width = Math.max(300, wr.clientWidth - 24) + "px"; } catch (e) {}   // keep the chart inside the visible part of a wide table
-  if (cur && document.getElementById("znbox")) znDrawChart(cur.bars, cur.zones, intra);
-  else if (ZCH) { try { ZCH.chart.remove(); } catch (e) {} ZCH = null; }
+  if (ZOPEN && chartH) {
+    const tmp = document.createElement("div"); tmp.innerHTML = chartH; const el = tmp.firstElementChild, k = ZOPEN.split("|"); let row = null;
+    host.querySelectorAll("tr[data-zrow]").forEach(tr => { if (!row && tr.dataset.zrow === k[0] && (!k[1] || !tr.dataset.ztf || tr.dataset.ztf === k[1])) row = tr; });
+    if (row) { const dr = document.createElement("tr"), td = document.createElement("td"); dr.className = "dockrow"; td.colSpan = 30; td.appendChild(el); dr.appendChild(td); row.after(dr); } else host.insertBefore(el, host.querySelector(".wrap") ? host.querySelector(".wrap").nextSibling : null);
+  }
+  if (ZOPEN && cur) znDrawChart(cur.bars, cur.zones, intra);
 }
 document.addEventListener("click", ev => {
   const b = ev.target && ev.target.closest ? ev.target.closest("[data-znacc]") : null; if (!b) return;
@@ -3517,7 +3506,7 @@ const tcApi = (function () {
       if (t.closest("#tcReload")) { load(true); return; }
       b = t.closest("[data-tcv]"); if (b) { O.view = b.dataset.tcv; save(); view(); return; }
       if (t.closest("#tcMore")) { SHOWN += 40; view(); return; }
-      b = t.closest("[data-tcsec]"); if (b) { SECSEL = b.dataset.tcsec; view(); const pn = $e("#tcsecpanel"); if (pn && pn.scrollIntoView) pn.scrollIntoView({behavior: "smooth", block: "start"}); return; }
+      b = t.closest("[data-tcsec]"); if (b) { SECSEL = SECSEL === b.dataset.tcsec ? null : b.dataset.tcsec; view(); return; }
       b = t.closest("[data-tcrng]"); if (b) { SECRNG = b.dataset.tcrng; host.querySelectorAll("[data-tcrng]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawSec(); return; }
       if (t.closest("[data-tcsecx]")) { SECSEL = null; view(); return; }
       const row = t.closest("[data-sym]"); if (row) { openSym = openSym === row.dataset.sym ? null : row.dataset.sym; view(); }
@@ -3553,8 +3542,8 @@ const tcApi = (function () {
       tile("Weakest stock", wk.sym, wk.S, sub(wk.S, esc(wk.sec || "—")), pcol(wk.S.prob), wk.sym) + "</div>";
     if (bs && bs.lead) h += '<p class="note">Strongest name inside the best sector (' + esc(bs.name) + "): <b>" + esc(bs.lead.sym) + "</b>" + znTvA(bs.lead.sym, "D") + ", up in " + bs.lead.S.w + " of " + bs.lead.S.n + " years (" + bs.lead.S.prob.toFixed(0) + "%), average " + pct(bs.lead.S.avg * 100, 1) + ".</p>";
     SECLAST = secs; if (SECSEL && !secs.some(x => x.name === SECSEL)) SECSEL = null;
-    h += (SECSEL ? secPanel() : "") + '<h3 class="tch">Sectors</h3><div class="wrap"><table class="tctbl"><thead><tr><th>#</th><th>Sector</th><th>Probability</th><th>Up years</th><th class="num">Avg move</th><th class="num">Stocks</th><th class="num">Stocks &ge;60%</th><th>Strongest stock</th></tr></thead><tbody>' +
-      (secs.length ? secs.map((s, i) => "<tr><td>" + (i + 1) + '</td><td style="white-space:nowrap"><b>' + esc(s.name) + '</b> <button type="button" class="cbtn" data-tcsec="' + esc(s.name) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button>' + (TC_SEC_TV[s.name] ? ' <a class="tvl" href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(TC_SEC_TV[s.name]) + '" target="_blank" rel="noopener">TV &#8599;</a>' : "") + "</td><td>" + probCell(s.S) + '</td><td class="num">' + s.S.w + "/" + s.S.n + '</td><td class="num">' + ret(s.S.avg) + '</td><td class="num">' + s.count + '</td><td class="num">' + s.breadth + "</td><td>" + esc(s.lead.sym) + znTvA(s.lead.sym, "D") + " <small>" + s.lead.S.prob.toFixed(0) + '%</small></td></tr>').join("") : '<tr><td colspan="8" class="note">No sector has three or more stocks with enough history.</td></tr>') + "</tbody></table></div>";
+    h += '<h3 class="tch">Sectors</h3><div class="wrap"><table class="tctbl"><thead><tr><th>#</th><th>Sector</th><th>Probability</th><th>Up years</th><th class="num">Avg move</th><th class="num">Stocks</th><th class="num">Stocks &ge;60%</th><th>Strongest stock</th></tr></thead><tbody>' +
+      (secs.length ? secs.map((s, i) => "<tr><td>" + (i + 1) + '</td><td style="white-space:nowrap"><b data-tcsec="' + esc(s.name) + '">' + esc(s.name) + '</b> <button type="button" class="cbtn" data-tcsec="' + esc(s.name) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button>' + (TC_SEC_TV[s.name] ? ' <a class="tvl" href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(TC_SEC_TV[s.name]) + '" target="_blank" rel="noopener">TV &#8599;</a>' : "") + "</td><td>" + probCell(s.S) + '</td><td class="num">' + s.S.w + "/" + s.S.n + '</td><td class="num">' + ret(s.S.avg) + '</td><td class="num">' + s.count + '</td><td class="num">' + s.breadth + "</td><td>" + esc(s.lead.sym) + znTvA(s.lead.sym, "D") + " <small>" + s.lead.S.prob.toFixed(0) + '%</small></td></tr>' + (s.name === SECSEL ? '<tr class="dockrow"><td colspan="8">' + secPanel() + "</td></tr>" : "")).join("") : '<tr><td colspan="8" class="note">No sector has three or more stocks with enough history.</td></tr>') + "</tbody></table></div>";
     h += '<div class="charttools" style="border:0;padding:0;margin:8px 0"><h3 class="tch" style="margin:0 8px 0 0">Stocks</h3><button type="button" class="cbtn" data-tcv="up" aria-pressed="' + up + '">Most likely up</button><button type="button" class="cbtn" data-tcv="dn" aria-pressed="' + !up + '">Most likely down</button></div>';
     h += '<div class="wrap"><table class="tctbl"><thead><tr><th>#</th><th>Stock</th><th>Sector</th><th>Probability</th><th>Up years</th><th class="num">Avg move</th><th class="num">Median</th><th class="num">Worst</th><th>This month</th><th>View</th><th class="num">Years</th></tr></thead><tbody>';
     stocks.slice(0, SHOWN).forEach((r, i) => {
@@ -3562,14 +3551,13 @@ const tcApi = (function () {
       h += '<tr class="row" data-sym="' + esc(r.sym) + '" style="cursor:pointer"><td>' + (i + 1) + "</td><td><b>" + esc(r.sym) + "</b>" + znTvA(r.sym) + "</td><td>" + esc(r.sec || "—") + "</td><td>" + probCell(r.S) + '</td><td class="num">' + r.S.w + "/" + r.S.n + '</td><td class="num">' + ret(r.S.avg) + '</td><td class="num">' + ret(r.S.med) + '</td><td class="num">' + ret(r.S.worst) + "</td><td>" + (mOk ? '<span style="color:' + pcol(r.M.prob) + '"><b>' + r.M.w + "/" + r.M.n + "</b></span> " + ret(r.M.avg) : "—") + '</td><td><span class="tcg" style="background:' + c[1] + '">' + c[0] + '</span></td><td class="num">' + r.yrs.toFixed(1) + "</td></tr>";
       if (o) h += '<tr class="det"><td colspan="11"><div class="note" style="margin:0 0 6px;max-width:none">' + (nm ? "Whole of " + nmName : "Return from " + dTxt(today).replace(/ \d{4}$/, "") + " to " + dTxt(end).replace(/ \d{4}$/, "")) + ", year by year:</div>" +
         r.A.win.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") + "</div>" +
-        (!nm && r.A.mon.length ? '<div class="note" style="margin:8px 0 6px;max-width:none">Whole of ' + MON[+today.slice(5, 7) - 1] + ", year by year:</div>" + r.A.mon.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") : "") + icBlock(r.sym) + "</td></tr>";
+        (!nm && r.A.mon.length ? '<div class="note" style="margin:8px 0 6px;max-width:none">Whole of ' + MON[+today.slice(5, 7) - 1] + ", year by year:</div>" + r.A.mon.map(x => '<span class="tcy ' + (x.r > 0 ? "u" : "d") + '">' + x.y + " " + pct(x.r * 100, 1) + "</span>").join("") : "") + "</td></tr>";
     });
     h += "</tbody></table></div>" + (stocks.length > SHOWN ? '<p><button type="button" class="cbtn" id="tcMore">Show 40 more (' + (stocks.length - SHOWN) + " left)</button></p>" : "");
     h += '<p class="note"><b>How to read this.</b> Probability is the share of past years in which the stock closed higher over this same date window, nudged toward 50% when there are few years (wins + 1) / (years + 2), so 8 up years out of 8 reads as 90%, not 100%. A sector is the equal-weighted basket of its stocks, so it also carries the whole market\'s seasonal tilt. "This month" is the whole current calendar month, like the Pine seasonality table. Click a stock to see every year. Only stocks with at least ' + O.min + " years of history are ranked. A calendar pattern is a tilt in the odds that has held in the past, not a signal on its own. General information, not buy or sell advice.</p>";
-    try { h += accHTML(V, R.secs); } catch (e) {}
+    try { h += accWrap("tc", "Back-test: accuracy of the Time Cycle calls on past years", accHTML(V, R.secs)); } catch (e) {}
     if (SECCH) { try { SECCH.remove(); } catch (e) {} SECCH = null; }
     host.innerHTML = h;
-    try { icAfter(host); } catch (e) {}
     if (SECSEL) { try { drawSec(); } catch (e) {} }
   }
   function paint() { build(); view(); }
@@ -3880,7 +3868,7 @@ const rmApi = (function () {
     });
     h += "</tbody></table></div>" + (rows.length > SHOWN ? '<p><button type="button" class="cbtn" id="rmMore">Show 60 more (' + (rows.length - SHOWN) + " left)</button></p>" : "");
     h += '<p class="note"><b>How this works.</b> Each stock is run through the same rules as the 1-2-3 Reversal Map in your Pine script: swing pivots (2 bars left and right), a bullish 1-2-3 is low, high, higher low (bearish is the mirror), with leg size, hold and retrace checked against ATR 14. The high or low at point 2 is the neckline. A close beyond the neckline (plus 0.05 ATR) is the break, and a pullback into the 0.30 ATR pocket that holds is the retest. Quality is the same 0-100 score. A BUY or SELL signal needs the chosen trigger and the minimum quality. Entry is the signal close, the stop sits 0.15 ATR beyond point 3, T1 is 1R and T2 is the measured move (or 2R). Break Proof is how often past breaks reached 1 ATR before failing. Trade log replays every signal as one trade at a time, exiting at stop (assumed first if both are touched), target, day end or 15:15 on intraday charts, shown in R. Only closed candles are used. General information, not buy or sell advice.</p>';
-    try { h += accHTML(R); } catch (e) {}
+    try { h += accWrap("rm", "Back-test: accuracy of the 123 signals on past candles", accHTML(R)); } catch (e) {}
     host.innerHTML = h;
   }
 
@@ -4032,8 +4020,8 @@ const cbApi = (function () {
     const stat = rs => { const cl = rs.filter(r => r.st === "win" || r.st === "loss" || r.st === "time"), w = cl.filter(r => r.r > 0).length, tot = cl.reduce((s, r) => s + r.r, 0); return {n: rs.length, c: cl.length, w, avg: cl.length ? tot / cl.length : NaN, tot: cl.length ? tot : NaN, open: rs.filter(r => r.st === "open" || r.st === "wait").length}; };
     const line = (name, rs) => { const t = stat(rs); return {c: [name, t.n, t.c + accFew(t.c), t.c ? "<b>" + accPc(t.w, t.c) + "</b>" : "-", accR(t.avg), accR(t.tot), t.open]}; };
     const sel = FM === "all" ? all : all.filter(r => r.month === FM);
-    let h = '<h2 class="hb hbn">&#128202; Forward-test report</h2><div class="card">';
-    if (!all.length) { host.innerHTML = h + '<p class="note" style="margin:0">Nothing logged yet. Each weekday, while this page is open between 9:20 am and 4 pm, it saves that day\'s combo list (score 3 or more, up to 40 stocks) in this browser. Open this tab at least once a day, ideally in the afternoon, and the report builds up month by month.</p></div>'; return; }
+    let h = '<div class="card">';
+    if (!all.length) { host.innerHTML = accWrap("cbfwd", "Forward-test report: the Combo list followed over time", h + '<p class="note" style="margin:0">Nothing logged yet. Each weekday, while this page is open between 9:20 am and 4 pm, it saves that day\'s combo list (score 3 or more, up to 40 stocks) in this browser. Open this tab at least once a day, ideally in the afternoon, and the report builds up month by month.</p></div>'); return; }
     h += '<div class="charttools" style="border:0;padding:0;gap:10px 14px"><b>Month</b><select id="cbfm" style="font:inherit;padding:4px 8px;border-radius:8px;border:1px solid var(--line)">' + '<option value="all"' + (FM === "all" ? " selected" : "") + ">All months</option>" + months.map(m => '<option value="' + m + '"' + (FM === m ? " selected" : "") + ">" + new Date(m + "-15T12:00:00+05:30").toLocaleDateString("en-IN", {month: "long", year: "numeric", timeZone: "Asia/Kolkata"}) + "</option>").join("") + '</select><span class="csep"></span><b>Target</b>' + [1, 2, 3].map(v => '<button type="button" class="cbtn" data-cbfrr="' + v + '" aria-pressed="' + (v === FRR) + '">1 : ' + v + "</button>").join("") + '<span class="csep"></span><button type="button" class="cbtn" id="cbfcsv">Download CSV</button><button type="button" class="cbtn" id="cbfclr">Clear log</button></div>';
     const hd = ["Group", "Signals", "Finished", "Win rate", "Average per trade", "Total", "Still open"];
     const bym = months.slice().reverse().map(m => line(new Date(m + "-15T12:00:00+05:30").toLocaleDateString("en-IN", {month: "short", year: "numeric", timeZone: "Asia/Kolkata"}), all.filter(r => r.month === m)));
@@ -4044,7 +4032,7 @@ const cbApi = (function () {
     h += '<h3 class="tch" style="margin-top:18px">Latest signals</h3><div class="card"><div class="wrap"><table class="pptbl"><thead><tr><th>Date</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th><th>Screens</th><th>Result</th><th class="num">R</th><th class="num">Days</th></tr></thead><tbody>' +
       recent.map(r => '<tr><td>' + r.date + '</td><td><b>' + E(r.s) + '</b></td><td><span class="chip ' + (r.d === 1 ? "g" : "r") + '">' + (r.d === 1 ? "Long" : "Short") + '</span></td><td class="num">' + r.sc + '</td><td class="num">' + px2(r.p) + '</td><td><small>' + E(r.k.replace(/,/g, ", ")) + "</small></td><td>" + ({win: "Target hit", loss: "Stop hit", time: "20-day close", open: "Running", wait: "Waiting for next candle", nodata: "No candles"}[r.st] || r.st) + '</td><td class="num">' + (isFinite(r.r) ? accR(r.r) : "-") + '</td><td class="num">' + (r.days || "-") + "</td></tr>").join("") + "</tbody></table></div>" +
       '<p class="note" style="margin-bottom:0">The log lives in this browser only (it is not shared between your phone and computer), and it only records on days this tab was open. Candles come from your Worker. This is a small-sample test: judge it after at least a month or two. Past results only, not advice.</p></div>';
-    host.innerHTML = h;
+    host.innerHTML = accWrap("cbfwd", "Forward-test report: the Combo list followed over time", h);
   }
   function fwdCsv() {
     const rs = fwdRows(), q = v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"', lines = [["date", "symbol", "side", "score", "price", "screens", "pead", "result", "r", "days", "stop", "target"].join(",")];
@@ -4053,7 +4041,7 @@ const cbApi = (function () {
   }
 
   /* ---------- chart panel ---------- */
-  let SEL = null, CH = null, CANDLE = null, LINES = [], PL = [];
+  let SEL = null, CH = null, CANDLE = null, LINES = [], PL = [], PN = null;
   const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
   async function barsOf(sym, tf) {
     const key = sym + "|" + tf; let o = IXC[key];
@@ -4102,8 +4090,14 @@ const cbApi = (function () {
     try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = bars[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
     if (note) note.textContent = (intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + " Dashed lines show the entry logic selected below.";
   }
+  function cbDock() {
+    if (!PN) return; const res = $e("#cbres"); if (!res) return;
+    const row = SEL ? Array.from(res.querySelectorAll("tr[data-cbsym]")).find(r => r.dataset.cbsym === SEL.sym) : null;
+    if (row) { const dr = document.createElement("tr"), td = document.createElement("td"); dr.className = "dockrow"; td.colSpan = 30; td.appendChild(PN); dr.appendChild(td); row.after(dr); }
+    else if (PN.parentElement !== res.parentElement) res.before(PN);
+  }
   async function panelDraw() {
-    const host = $e("#cbpanel"); if (!host) return;
+    const host = PN || $e("#cbpanel"); if (!host) return;
     if (CH) { try { CH.remove(); } catch (e) {} CH = null; CANDLE = null; }
     if (!SEL) { host.innerHTML = ""; return; }
     const r = LASTR[SEL.sym]; if (!r) { host.innerHTML = ""; SEL = null; return; }
@@ -4152,13 +4146,15 @@ const cbApi = (function () {
       return '<tr data-cbsym="' + E(r.sym) + '" style="cursor:pointer' + (sel ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:230px;max-width:340px"><b>' + E(r.sym) + "</b>" + znTvA(r.sym, "D") + ' <button type="button" class="cbtn" data-cbchart="' + E(r.sym) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem;line-height:1.3">' + r.why.map(E).join("; ") + '</div></td><td><span class="chip ' + (r.side === 1 ? "g" : "r") + '">' + (r.side === 1 ? "Long" : "Short") + "</span>" + (r.opp ? ' <small title="Some screens point the other way">mixed</small>' : "") + '</td><td class="num"><b>' + r.score + "</b> / 7</td><td class=\"num\">" + (q ? fmt(+q.p) + ' <small class="' + (chg >= 0 ? "accg" : "accb") + '">' + (chg >= 0 ? "+" : "") + chg.toFixed(1) + "%</small>" : "-") + "</td>" +
         SRC.map(x => '<td style="text-align:center;white-space:nowrap">' + cellOf(r, x[0]) + "</td>").join("") + "</tr>";
     }).join("") : '<tr><td colspan="' + (5 + SRC.length) + '" class="note">No stock has ' + F.min + " or more screens agreeing yet. The other screens may still be loading (see the line above), or lower the minimum score.</td></tr>";
+    if (PN && host.contains(PN)) PN.remove();
     host.innerHTML = h + "</tbody></table></div>" +
-      '<p class="note">Tap a row or its Chart button to open the chart, every screen\'s numbers and entry prices. A tick means that screen currently points to the same side as the row; a plain number under PEAD or Season is that stock\'s own PEAD score or seasonal chance when it does not agree. Score = ticks out of 7. Trade ideas and OI come from the Intraday tab, Zone from the Zone tab (active zone within 3% of price), 123 from the 123 tab on its selected timeframe and settings, Season from Time Cycle (next 2 weeks, 60%+ or 40% or less), PEAD from results in the last 30 days with a known reaction.</p>' + GUIDE;
+      '<p class="note">Tap a row or its Chart button to open the chart just below it (tap the row again to close it), every screen\'s numbers and entry prices. A tick means that screen currently points to the same side as the row; a plain number under PEAD or Season is that stock\'s own PEAD score or seasonal chance when it does not agree. Score = ticks out of 7. Trade ideas and OI come from the Intraday tab, Zone from the Zone tab (active zone within 3% of price), 123 from the 123 tab on its selected timeframe and settings, Season from Time Cycle (next 2 weeks, 60%+ or 40% or less), PEAD from results in the last 30 days with a known reaction.</p>' + GUIDE;
+    cbDock();
   }
   function build() {
     const host = document.getElementById("cbbody"); if (!host || host.dataset.built) return; host.dataset.built = "1";
     host.innerHTML = '<div class="znhead"><div><h2>COMBO</h2><span>Stocks where several screens agree on the same side</span></div><div class="znpills"><span>Zone + 123 + OI + Trade ideas</span><span>Season + PEAD + market</span><span>Forward-test log</span></div></div>' +
-      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><b>Side</b>' + ["Both", "Long", "Short"].map(x => '<button type="button" class="cbtn" data-cbs="' + x + '" aria-pressed="' + (F.side === x) + '">' + x + "</button>").join("") + '<span class="csep"></span><b>Minimum score</b>' + [2, 3, 4, 5].map(x => '<button type="button" class="cbtn" data-cbm="' + x + '" aria-pressed="' + (F.min === x) + '">' + x + "+</button>").join("") + '<span class="csep"></span><button type="button" class="cbtn" id="cbReload">&#8635; Refresh sources</button></div><div class="note" id="cbstat" style="margin:8px 0 0"></div></div><div id="cbpanel"></div><div id="cbres"></div><div id="cbfwd"></div>';
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><b>Side</b>' + ["Both", "Long", "Short"].map(x => '<button type="button" class="cbtn" data-cbs="' + x + '" aria-pressed="' + (F.side === x) + '">' + x + "</button>").join("") + '<span class="csep"></span><b>Minimum score</b>' + [2, 3, 4, 5].map(x => '<button type="button" class="cbtn" data-cbm="' + x + '" aria-pressed="' + (F.min === x) + '">' + x + "+</button>").join("") + '<span class="csep"></span><button type="button" class="cbtn" id="cbReload">&#8635; Refresh sources</button></div><div class="note" id="cbstat" style="margin:8px 0 0"></div></div><div id="cbpanel"></div><div id="cbres"></div><div id="cbfwd"></div>'; PN = $e("#cbpanel");
     host.addEventListener("change", ev => { const t = ev.target; if (t && t.id === "cbfm") { FM = t.value; fwdPaint(); } });
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest) return;
@@ -4172,7 +4168,7 @@ const cbApi = (function () {
       b = t.closest("[data-cbs]"); if (b) { F.side = b.dataset.cbs; host.querySelectorAll("[data-cbs]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); save(); view(); return; }
       b = t.closest("[data-cbm]"); if (b) { F.min = +b.dataset.cbm; host.querySelectorAll("[data-cbm]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); save(); view(); return; }
       if (t.closest("#cbReload")) { load(true); view(); return; }
-      b = t.closest("[data-cbsym]"); if (b) { const sym = b.dataset.cbsym; SEL = {sym, tf: (SEL && SEL.tf) || "D", plan: 0}; panelDraw(); view(); setTimeout(() => { const h = $e("#cbpanel"); if (h && h.scrollIntoView) h.scrollIntoView({behavior: "smooth", block: "start"}); }, 60); }
+      b = t.closest("[data-cbsym]"); if (b) { const sym = b.dataset.cbsym; if (SEL && SEL.sym === sym) { SEL = null; panelDraw(); view(); return; } SEL = {sym, tf: (SEL && SEL.tf) || "D", plan: 0}; panelDraw(); view(); setTimeout(() => { if (PN && PN.scrollIntoView) PN.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); }
     });
   }
   function open() { build(); view(); fwdPaint(); fwdFetch(); if (!last || Date.now() - last > 5 * 60e3) load(false); }
@@ -4182,12 +4178,137 @@ const cbApi = (function () {
   return {open, view, compute};
 })();
 const cbPaint = () => cbApi.open();
+/* ===== NIFTY 500 TAB: every Nifty 500 stock with price, change and change %, a change-% filter, TradingView link and an in-page chart that opens just below the stock ===== */
+const n5Api = (function () {
+  const $e = s => document.querySelector(s), E = esc;
+  const LIST = "360ONE|360 ONE WAM Ltd.|Financial Services;ABB|ABB India Ltd.|Capital Goods;ACC|ACC Ltd.|Construction Materials;ACMESOLAR|ACME Solar Holdings Ltd.|Power;AIAENG|AIA Engineering Ltd.|Capital Goods;APLAPOLLO|APL Apollo Tubes Ltd.|Capital Goods;AUBANK|AU Small Finance Bank Ltd.|Financial Services;AWL|AWL Agri Business Ltd.|Fast Moving Consumer Goods;AADHARHFC|Aadhar Housing Finance Ltd.|Financial Services;AARTIIND|Aarti Industries Ltd.|Chemicals;AAVAS|Aavas Financiers Ltd.|Financial Services;ABBOTINDIA|Abbott India Ltd.|Healthcare;ACE|Action Construction Equipment Ltd.|Capital Goods;ACUTAAS|Acutaas Chemicals Ltd.|Healthcare;ADANIENSOL|Adani Energy Solutions Ltd.|Power;ADANIENT|Adani Enterprises Ltd.|Metals & Mining;ADANIGREEN|Adani Green Energy Ltd.|Power;ADANIPORTS|Adani Ports and Special Economic Zone Ltd.|Services;ADANIPOWER|Adani Power Ltd.|Power;ATGL|Adani Total Gas Ltd.|Oil Gas & Consumable Fuels;ABCAPITAL|Aditya Birla Capital Ltd.|Financial Services;ABREL|Aditya Birla Real Estate Ltd.|Realty;ABSLAMC|Aditya Birla Sun Life AMC Ltd.|Financial Services;CPPLUS|Aditya Infotech Ltd.|Capital Goods;AEGISLOG|Aegis Logistics Ltd.|Oil Gas & Consumable Fuels;AEGISVOPAK|Aegis Vopak Terminals Ltd.|Oil Gas & Consumable Fuels;AETHER|Aether Industries Ltd.|Chemicals;AFCONS|Afcons Infrastructure Ltd.|Construction;AFFLE|Affle 3i Ltd.|Information Technology;AJANTPHARM|Ajanta Pharmaceuticals Ltd.|Healthcare;ALKEM|Alkem Laboratories Ltd.|Healthcare;ABDL|Allied Blenders and Distillers Ltd.|Fast Moving Consumer Goods;ARE&M|Amara Raja Energy & Mobility Ltd.|Automobile and Auto Components;AMBER|Amber Enterprises India Ltd.|Consumer Durables;AMBUJACEM|Ambuja Cements Ltd.|Construction Materials;ANANDRATHI|Anand Rathi Wealth Ltd.|Financial Services;ANANTRAJ|Anant Raj Ltd.|Realty;ANGELONE|Angel One Ltd.|Financial Services;ANTHEM|Anthem Biosciences Ltd.|Healthcare;ANURAS|Anupam Rasayan India Ltd.|Chemicals;APARINDS|Apar Industries Ltd.|Capital Goods;APOLLOHOSP|Apollo Hospitals Enterprise Ltd.|Healthcare;APOLLOTYRE|Apollo Tyres Ltd.|Automobile and Auto Components;APTUS|Aptus Value Housing Finance India Ltd.|Financial Services;ASAHIINDIA|Asahi India Glass Ltd.|Automobile and Auto Components;ASHOKLEY|Ashok Leyland Ltd.|Capital Goods;ASIANPAINT|Asian Paints Ltd.|Consumer Durables;ASTERDM|Aster DM Quality Care Ltd.|Healthcare;ASTRAL|Astral Ltd.|Capital Goods;ATHERENERG|Ather Energy Ltd.|Automobile and Auto Components;ATUL|Atul Ltd.|Chemicals;AUROPHARMA|Aurobindo Pharma Ltd.|Healthcare;AIIL|Authum Investment & Infrastructure Ltd.|Financial Services;AVANTIFEED|Avanti Feeds Ltd.|Fast Moving Consumer Goods;DMART|Avenue Supermarts Ltd.|Consumer Services;AXISBANK|Axis Bank Ltd.|Financial Services;AZAD|Azad Engineering Ltd.|Capital Goods;BEML|BEML Ltd.|Capital Goods;BLS|BLS International Services Ltd.|Consumer Services;BSE|BSE Ltd.|Financial Services;BAJAJ-AUTO|Bajaj Auto Ltd.|Automobile and Auto Components;BAJFINANCE|Bajaj Finance Ltd.|Financial Services;BAJAJFINSV|Bajaj Finserv Ltd.|Financial Services;BAJAJHLDNG|Bajaj Holdings & Investment Ltd.|Financial Services;BAJAJHFL|Bajaj Housing Finance Ltd.|Financial Services;BALKRISIND|Balkrishna Industries Ltd.|Automobile and Auto Components;BALRAMCHIN|Balrampur Chini Mills Ltd.|Fast Moving Consumer Goods;BANDHANBNK|Bandhan Bank Ltd.|Financial Services;BANKBARODA|Bank of Baroda|Financial Services;BANKINDIA|Bank of India|Financial Services;MAHABANK|Bank of Maharashtra|Financial Services;BATAINDIA|Bata India Ltd.|Consumer Durables;BELRISE|Belrise Industries Ltd.|Automobile and Auto Components;BERGEPAINT|Berger Paints India Ltd.|Consumer Durables;BHARATCOAL|Bharat Coking Coal Ltd.|Oil Gas & Consumable Fuels;BDL|Bharat Dynamics Ltd.|Capital Goods;BEL|Bharat Electronics Ltd.|Capital Goods;BHARATFORG|Bharat Forge Ltd.|Automobile and Auto Components;BHEL|Bharat Heavy Electricals Ltd.|Capital Goods;BPCL|Bharat Petroleum Corporation Ltd.|Oil Gas & Consumable Fuels;BHARTIARTL|Bharti Airtel Ltd.|Telecommunication;BHARTIHEXA|Bharti Hexacom Ltd.|Telecommunication;GROWW|Billionbrains Garage Ventures Ltd.|Financial Services;BIOCON|Biocon Ltd.|Healthcare;BSOFT|Birlasoft Ltd.|Information Technology;BBOX|Black Box Ltd.|Information Technology;BLUESTARCO|Blue Star Ltd.|Consumer Durables;BOSCHLTD|Bosch Ltd.|Automobile and Auto Components;FIRSTCRY|Brainbees Solutions Ltd.|Consumer Services;BRIGADE|Brigade Enterprises Ltd.|Realty;BRITANNIA|Britannia Industries Ltd.|Fast Moving Consumer Goods;CCL|CCL Products (I) Ltd.|Fast Moving Consumer Goods;CESC|CESC Ltd.|Power;CGPOWER|CG Power and Industrial Solutions Ltd.|Capital Goods;CIEINDIA|CIE Automotive India Ltd.|Automobile and Auto Components;CRISIL|CRISIL Ltd.|Financial Services;CANFINHOME|Can Fin Homes Ltd.|Financial Services;CANBK|Canara Bank|Financial Services;CANHLIFE|Canara HSBC Life Insurance Company Ltd.|Financial Services;CAPLIPOINT|Caplin Point Laboratories Ltd.|Healthcare;CGCL|Capri Global Capital Ltd.|Financial Services;CARBORUNIV|Carborundum Universal Ltd.|Capital Goods;CARTRADE|Cartrade Tech Ltd.|Consumer Services;CASTROLIND|Castrol India Ltd.|Oil Gas & Consumable Fuels;CEATLTD|Ceat Ltd.|Automobile and Auto Components;CEMPRO|Cemindia Projects Ltd.|Construction;CENTRALBK|Central Bank of India|Financial Services;CDSL|Central Depository Services (India) Ltd.|Financial Services;CMPDI|Central Mine Planning & Design Institute Ltd.|Services;CHAMBLFERT|Chambal Fertilizers & Chemicals Ltd.|Chemicals;CHENNPETRO|Chennai Petroleum Corporation Ltd.|Oil Gas & Consumable Fuels;CHOICEIN|Choice International Ltd.|Financial Services;CHOLAHLDNG|Cholamandalam Financial Holdings Ltd.|Financial Services;CHOLAFIN|Cholamandalam Investment and Finance Company Ltd.|Financial Services;CIPLA|Cipla Ltd.|Healthcare;CUB|City Union Bank Ltd.|Financial Services;CLEANMAX|Clean Max Enviro Energy Solutions Ltd.|Power;CLEAN|Clean Science and Technology Ltd.|Chemicals;COALINDIA|Coal India Ltd.|Oil Gas & Consumable Fuels;COCHINSHIP|Cochin Shipyard Ltd.|Capital Goods;COFORGE|Coforge Ltd.|Information Technology;COHANCE|Cohance Lifesciences Ltd.|Healthcare;COLPAL|Colgate Palmolive (India) Ltd.|Fast Moving Consumer Goods;CAMS|Computer Age Management Services Ltd.|Financial Services;CONCORDBIO|Concord Biotech Ltd.|Healthcare;CONCOR|Container Corporation of India Ltd.|Services;COROMANDEL|Coromandel International Ltd.|Chemicals;CRAFTSMAN|Craftsman Automation Ltd.|Automobile and Auto Components;CREDITACC|CreditAccess Grameen Ltd.|Financial Services;CROMPTON|Crompton Greaves Consumer Electricals Ltd.|Consumer Durables;CUMMINSIND|Cummins India Ltd.|Capital Goods;CUPID|Cupid Ltd.|Fast Moving Consumer Goods;CYIENT|Cyient Ltd.|Information Technology;DLF|DLF Ltd.|Realty;DOMS|DOMS Industries Ltd.|Fast Moving Consumer Goods;DABUR|Dabur India Ltd.|Fast Moving Consumer Goods;DALBHARAT|Dalmia Bharat Ltd.|Construction Materials;DATAPATTNS|Data Patterns (India) Ltd.|Capital Goods;DEEPAKFERT|Deepak Fertilisers & Petrochemicals Corp. Ltd.|Chemicals;DEEPAKNTR|Deepak Nitrite Ltd.|Chemicals;DELHIVERY|Delhivery Ltd.|Services;DEVYANI|Devyani International Ltd.|Consumer Services;DIVISLAB|Divi's Laboratories Ltd.|Healthcare;DIXON|Dixon Technologies (India) Ltd.|Consumer Durables;LALPATHLAB|Dr. Lal Path Labs Ltd.|Healthcare;DRREDDY|Dr. Reddy's Laboratories Ltd.|Healthcare;EIDPARRY|E.I.D. Parry (India) Ltd.|Fast Moving Consumer Goods;EIHOTEL|EIH Ltd.|Consumer Services;EICHERMOT|Eicher Motors Ltd.|Automobile and Auto Components;ELECON|Elecon Engineering Co. Ltd.|Capital Goods;ELGIEQUIP|Elgi Equipments Ltd.|Capital Goods;EMAMILTD|Emami Ltd.|Fast Moving Consumer Goods;EMCURE|Emcure Pharmaceuticals Ltd.|Healthcare;EMMVEE|Emmvee Photovoltaic Power Ltd.|Capital Goods;ENDURANCE|Endurance Technologies Ltd.|Automobile and Auto Components;ENGINERSIN|Engineers India Ltd.|Construction;ESCORTS|Escorts Kubota Ltd.|Capital Goods;ETERNAL|Eternal Ltd.|Consumer Services;EXIDEIND|Exide Industries Ltd.|Automobile and Auto Components;NYKAA|FSN E-Commerce Ventures Ltd.|Consumer Services;FEDERALBNK|Federal Bank Ltd.|Financial Services;FACT|Fertilisers and Chemicals Travancore Ltd.|Chemicals;FINCABLES|Finolex Cables Ltd.|Capital Goods;FSL|Firstsource Solutions Ltd.|Services;FIVESTAR|Five-Star Business Finance Ltd.|Financial Services;FORCEMOT|Force Motors Ltd.|Automobile and Auto Components;FORTIS|Fortis Healthcare Ltd.|Healthcare;FRACTAL|Fractal Analytics Ltd.|Information Technology;GAIL|GAIL (India) Ltd.|Oil Gas & Consumable Fuels;GVT&D|GE Vernova T&D India Ltd.|Capital Goods;GMRAIRPORT|GMR Airports Ltd.|Services;GABRIEL|Gabriel India Ltd.|Automobile and Auto Components;GALLANTT|Gallantt Ispat Ltd.|Capital Goods;GRSE|Garden Reach Shipbuilders & Engineers Ltd.|Capital Goods;GICRE|General Insurance Corporation of India|Financial Services;GILLETTE|Gillette India Ltd.|Fast Moving Consumer Goods;GLAND|Gland Pharma Ltd.|Healthcare;GLAXO|Glaxosmithkline Pharmaceuticals Ltd.|Healthcare;GLENMARK|Glenmark Pharmaceuticals Ltd.|Healthcare;MEDANTA|Global Health Ltd.|Healthcare;GPIL|Godawari Power & Ispat Ltd.|Capital Goods;GODFRYPHLP|Godfrey Phillips India Ltd.|Fast Moving Consumer Goods;GODREJCP|Godrej Consumer Products Ltd.|Fast Moving Consumer Goods;GODREJIND|Godrej Industries Ltd.|Diversified;GODREJPROP|Godrej Properties Ltd.|Realty;GRANULES|Granules India Ltd.|Healthcare;GRAPHITE|Graphite India Ltd.|Capital Goods;GRASIM|Grasim Industries Ltd.|Construction Materials;GRAVITA|Gravita India Ltd.|Metals & Mining;GESHIP|Great Eastern Shipping Co. Ltd.|Services;FLUOROCHEM|Gujarat Fluorochemicals Ltd.|Chemicals;GMDCLTD|Gujarat Mineral Development Corporation Ltd.|Metals & Mining;HBLENGINE|HBL Engineering Ltd.|Capital Goods;HCLTECH|HCL Technologies Ltd.|Information Technology;HDBFS|HDB Financial Services Ltd.|Financial Services;HDFCAMC|HDFC Asset Management Company Ltd.|Financial Services;HDFCBANK|HDFC Bank Ltd.|Financial Services;HDFCLIFE|HDFC Life Insurance Company Ltd.|Financial Services;HEGAM|HEG Advanced Materials Ltd.|Capital Goods;HFCL|HFCL Ltd.|Telecommunication;HAVELLS|Havells India Ltd.|Consumer Durables;HEROMOTOCO|Hero MotoCorp Ltd.|Automobile and Auto Components;HEXT|Hexaware Technologies Ltd.|Information Technology;HSCL|Himadri Speciality Chemical Ltd.|Chemicals;HINDALCO|Hindalco Industries Ltd.|Metals & Mining;HAL|Hindustan Aeronautics Ltd.|Capital Goods;HINDCOPPER|Hindustan Copper Ltd.|Metals & Mining;HINDPETRO|Hindustan Petroleum Corporation Ltd.|Oil Gas & Consumable Fuels;HINDUNILVR|Hindustan Unilever Ltd.|Fast Moving Consumer Goods;HINDZINC|Hindustan Zinc Ltd.|Metals & Mining;POWERINDIA|Hitachi Energy India Ltd.|Capital Goods;HOMEFIRST|Home First Finance Company India Ltd.|Financial Services;HONASA|Honasa Consumer Ltd.|Fast Moving Consumer Goods;HONAUT|Honeywell Automation India Ltd.|Capital Goods;HUDCO|Housing & Urban Development Corporation Ltd.|Financial Services;HYUNDAI|Hyundai Motor India Ltd.|Automobile and Auto Components;ICICIBANK|ICICI Bank Ltd.|Financial Services;ICICILIFE|ICICI Life Insurance Ltd.|Financial Services;ICICIGI|ICICI Lombard General Insurance Company Ltd.|Financial Services;ICICIAMC|ICICI Prudential Asset Management Company Ltd.|Financial Services;IDBI|IDBI Bank Ltd.|Financial Services;IDFCFIRSTB|IDFC First Bank Ltd.|Financial Services;IFCI|IFCI Ltd.|Financial Services;IIFL|IIFL Finance Ltd.|Financial Services;INOXINDIA|INOX India Ltd.|Capital Goods;IRB|IRB Infrastructure Developers Ltd.|Construction;IRCON|IRCON International Ltd.|Construction;ITCHOTELS|ITC Hotels Ltd.|Consumer Services;ITC|ITC Ltd.|Fast Moving Consumer Goods;ITI|ITI Ltd.|Telecommunication;INDIACEM|India Cements Ltd.|Construction Materials;INDIAMART|Indiamart Intermesh Ltd.|Consumer Services;INDIANB|Indian Bank|Financial Services;IEX|Indian Energy Exchange Ltd.|Financial Services;INDHOTEL|Indian Hotels Co. Ltd.|Consumer Services;IOC|Indian Oil Corporation Ltd.|Oil Gas & Consumable Fuels;IOB|Indian Overseas Bank|Financial Services;IRCTC|Indian Railway Catering And Tourism Corporation Ltd.|Consumer Services;IRFC|Indian Railway Finance Corporation Ltd.|Financial Services;IREDA|Indian Renewable Energy Development Agency Ltd.|Financial Services;IGL|Indraprastha Gas Ltd.|Oil Gas & Consumable Fuels;INDUSTOWER|Indus Towers Ltd.|Telecommunication;INDUSINDBK|IndusInd Bank Ltd.|Financial Services;NAUKRI|Info Edge (India) Ltd.|Consumer Services;INFY|Infosys Ltd.|Information Technology;INOXWIND|Inox Wind Ltd.|Capital Goods;INTELLECT|Intellect Design Arena Ltd.|Information Technology;INDIGO|InterGlobe Aviation Ltd.|Services;IGIL|International Gemological Institute Ltd.|Services;IKS|Inventurus Knowledge Solutions Ltd.|Information Technology;IPCALAB|Ipca Laboratories Ltd.|Healthcare;JKCEMENT|J.K. Cement Ltd.|Construction Materials;JBMA|JBM Auto Ltd.|Automobile and Auto Components;JKTYRE|JK Tyre & Industries Ltd.|Automobile and Auto Components;JMFINANCIL|JM Financial Ltd.|Financial Services;JSWCEMENT|JSW Cement Ltd.|Construction Materials;JSWENERGY|JSW Energy Ltd.|Power;JSWINFRA|JSW Infrastructure Ltd.|Services;JSWSTEEL|JSW Steel Ltd.|Metals & Mining;JAINREC|Jain Resource Recycling Ltd.|Metals & Mining;JPPOWER|Jaiprakash Power Ventures Ltd.|Power;J&KBANK|Jammu & Kashmir Bank Ltd.|Financial Services;JINDALSAW|Jindal Saw Ltd.|Capital Goods;JSL|Jindal Stainless Ltd.|Metals & Mining;JINDALSTEL|Jindal Steel Ltd.|Metals & Mining;JIOFIN|Jio Financial Services Ltd.|Financial Services;JUBLFOOD|Jubilant Foodworks Ltd.|Consumer Services;JUBLINGREA|Jubilant Ingrevia Ltd.|Chemicals;JWL|Jupiter Wagons Ltd.|Capital Goods;JYOTICNC|Jyoti CNC Automation Ltd.|Capital Goods;KPRMILL|K.P.R. Mill Ltd.|Textiles;KEI|KEI Industries Ltd.|Capital Goods;KPITTECH|KPIT Technologies Ltd.|Information Technology;KSB|KSB Ltd.|Capital Goods;KAJARIACER|Kajaria Ceramics Ltd.|Consumer Durables;KPIL|Kalpataru Projects International Ltd.|Construction;KALYANKJIL|Kalyan Jewellers India Ltd.|Consumer Durables;KARURVYSYA|Karur Vysya Bank Ltd.|Financial Services;KAYNES|Kaynes Technology India Ltd.|Capital Goods;KEC|Kec International Ltd.|Construction;KFINTECH|Kfin Technologies Ltd.|Financial Services;KIRLOSBROS|Kirloskar Brothers Ltd.|Capital Goods;KIRLOSENG|Kirloskar Oil Eng Ltd.|Capital Goods;KOTAKBANK|Kotak Mahindra Bank Ltd.|Financial Services;KIMS|Krishna Institute of Medical Sciences Ltd.|Healthcare;LTF|L&T Finance Ltd.|Financial Services;LTTS|L&T Technology Services Ltd.|Information Technology;LGEINDIA|LG Electronics India Ltd.|Consumer Durables;LICHSGFIN|LIC Housing Finance Ltd.|Financial Services;LTFOODS|LT Foods Ltd.|Fast Moving Consumer Goods;LTM|LTM Ltd.|Information Technology;LT|Larsen & Toubro Ltd.|Construction;LAURUSLABS|Laurus Labs Ltd.|Healthcare;LEMONTREE|Lemon Tree Hotels Ltd.|Consumer Services;LENSKART|Lenskart Solutions Ltd.|Consumer Services;LICI|Life Insurance Corporation of India|Financial Services;LINDEINDIA|Linde India Ltd.|Chemicals;LLOYDSME|Lloyds Metals And Energy Ltd.|Metals & Mining;LODHA|Lodha Developers Ltd.|Realty;LUPIN|Lupin Ltd.|Healthcare;MMTC|MMTC Ltd.|Services;MRF|MRF Ltd.|Automobile and Auto Components;MTARTECH|MTAR Technologies Ltd.|Capital Goods;MGL|Mahanagar Gas Ltd.|Oil Gas & Consumable Fuels;M&MFIN|Mahindra & Mahindra Financial Services Ltd.|Financial Services;M&M|Mahindra & Mahindra Ltd.|Automobile and Auto Components;MANAPPURAM|Manappuram Finance Ltd.|Financial Services;MRPL|Mangalore Refinery & Petrochemicals Ltd.|Oil Gas & Consumable Fuels;MANKIND|Mankind Pharma Ltd.|Healthcare;MARICO|Marico Ltd.|Fast Moving Consumer Goods;MARUTI|Maruti Suzuki India Ltd.|Automobile and Auto Components;MFSL|Max Financial Services Ltd.|Financial Services;MAXHEALTH|Max Healthcare Institute Ltd.|Healthcare;MAZDOCK|Mazagoan Dock Shipbuilders Ltd.|Capital Goods;MEESHO|Meesho Ltd.|Consumer Services;MINDACORP|Minda Corporation Ltd.|Automobile and Auto Components;MSUMI|Motherson Sumi Wiring India Ltd.|Automobile and Auto Components;MOTILALOFS|Motilal Oswal Financial Services Ltd.|Financial Services;MPHASIS|MphasiS Ltd.|Information Technology;MCX|Multi Commodity Exchange of India Ltd.|Financial Services;MUTHOOTFIN|Muthoot Finance Ltd.|Financial Services;NATCOPHARM|NATCO Pharma Ltd.|Healthcare;NBCC|NBCC (India) Ltd.|Construction;NCC|NCC Ltd.|Construction;NHPC|NHPC Ltd.|Power;NLCINDIA|NLC India Ltd.|Power;NMDC|NMDC Ltd.|Metals & Mining;NSLNISP|NMDC Steel Ltd.|Metals & Mining;NTPCGREEN|NTPC Green Energy Ltd.|Power;NTPC|NTPC Ltd.|Power;NH|Narayana Hrudayalaya Ltd.|Healthcare;NATIONALUM|National Aluminium Co. Ltd.|Metals & Mining;NAVA|Nava Ltd.|Power;NAVINFLUOR|Navin Fluorine International Ltd.|Chemicals;NESTLEIND|Nestle India Ltd.|Fast Moving Consumer Goods;NETWEB|Netweb Technologies India Ltd.|Information Technology;NEULANDLAB|Neuland Laboratories Ltd.|Healthcare;NAM-INDIA|Nippon Life India Asset Management Ltd.|Financial Services;NUVAMA|Nuvama Wealth Management Ltd.|Financial Services;NUVOCO|Nuvoco Vistas Corporation Ltd.|Construction Materials;OBEROIRLTY|Oberoi Realty Ltd.|Realty;ONGC|Oil & Natural Gas Corporation Ltd.|Oil Gas & Consumable Fuels;OIL|Oil India Ltd.|Oil Gas & Consumable Fuels;OLAELEC|Ola Electric Mobility Ltd.|Automobile and Auto Components;OLECTRA|Olectra Greentech Ltd.|Automobile and Auto Components;PAYTM|One 97 Communications Ltd.|Financial Services;ONESOURCE|Onesource Specialty Pharma Ltd.|Healthcare;OFSS|Oracle Financial Services Software Ltd.|Information Technology;POLICYBZR|PB Fintech Ltd.|Financial Services;PCBL|PCBL Chemical Ltd.|Chemicals;PGEL|PG Electroplast Ltd.|Consumer Durables;PIIND|PI Industries Ltd.|Chemicals;PNBHOUSING|PNB Housing Finance Ltd.|Financial Services;PTCIL|PTC Industries Ltd.|Capital Goods;PVRINOX|PVR INOX Ltd.|Media Entertainment & Publication;PAGEIND|Page Industries Ltd.|Textiles;PARADEEP|Paradeep Phosphates Ltd.|Chemicals;PATANJALI|Patanjali Foods Ltd.|Fast Moving Consumer Goods;PERSISTENT|Persistent Systems Ltd.|Information Technology;PETRONET|Petronet LNG Ltd.|Oil Gas & Consumable Fuels;PHOENIXLTD|Phoenix Mills Ltd.|Realty;PWL|Physicswallah Ltd.|Consumer Services;PIDILITIND|Pidilite Industries Ltd.|Chemicals;PINELABS|Pine Labs Ltd.|Financial Services;PIRAMALFIN|Piramal Finance Ltd.|Financial Services;PPLPHARMA|Piramal Pharma Ltd.|Healthcare;POLYMED|Poly Medicure Ltd.|Healthcare;POLYCAB|Polycab India Ltd.|Capital Goods;POONAWALLA|Poonawalla Fincorp Ltd.|Financial Services;PFC|Power Finance Corporation Ltd.|Financial Services;POWERGRID|Power Grid Corporation of India Ltd.|Power;PREMIERENE|Premier Energies Ltd.|Capital Goods;PRESTIGE|Prestige Estates Projects Ltd.|Realty;PFOCUS|Prime Focus Ltd.|Media Entertainment & Publication;PRIVISCL|Privi Speciality Chemicals Ltd.|Chemicals;PNB|Punjab National Bank|Financial Services;RRKABEL|R R Kabel Ltd.|Capital Goods;RBLBANK|RBL Bank Ltd.|Financial Services;RECLTD|REC Ltd.|Financial Services;RHIM|RHI MAGNESITA INDIA LTD.|Capital Goods;RITES|RITES Ltd.|Construction;RADICO|Radico Khaitan Ltd|Fast Moving Consumer Goods;RVNL|Rail Vikas Nigam Ltd.|Construction;RAILTEL|Railtel Corporation Of India Ltd.|Telecommunication;RAINBOW|Rainbow Childrens Medicare Ltd.|Healthcare;RKFORGE|Ramkrishna Forgings Ltd.|Automobile and Auto Components;REDINGTON|Redington Ltd.|Services;RELIANCE|Reliance Industries Ltd.|Oil Gas & Consumable Fuels;RPOWER|Reliance Power Ltd.|Power;RUBICON|Rubicon Research Ltd.|Healthcare;SBICARD|SBI Cards and Payment Services Ltd.|Financial Services;SBILIFE|SBI Life Insurance Company Ltd.|Financial Services;SJVN|SJVN Ltd.|Power;SHRIPISTON|SPR Auto Technologies Ltd.|Automobile and Auto Components;SRF|SRF Ltd.|Chemicals;SAGILITY|Sagility Ltd.|Information Technology;SAILIFE|Sai Life Sciences Ltd.|Healthcare;SAMMAANCAP|Sammaan Capital Ltd.|Financial Services;MOTHERSON|Samvardhana Motherson International Ltd.|Automobile and Auto Components;SANSERA|Sansera Engineering Ltd.|Automobile and Auto Components;SARDAEN|Sarda Energy and Minerals Ltd.|Metals & Mining;SCHAEFFLER|Schaeffler India Ltd.|Automobile and Auto Components;SCHNEIDER|Schneider Electric Infrastructure Ltd.|Capital Goods;SCI|Shipping Corporation of India Ltd.|Services;SHREECEM|Shree Cement Ltd.|Construction Materials;SHRIRAMFIN|Shriram Finance Ltd.|Financial Services;SHYAMMETL|Shyam Metalics and Energy Ltd.|Capital Goods;ENRIN|Siemens Energy India Ltd.|Capital Goods;SIEMENS|Siemens Ltd.|Capital Goods;SIGNATURE|Signatureglobal (India) Ltd.|Realty;SOBHA|Sobha Ltd.|Realty;SOLARINDS|Solar Industries India Ltd.|Chemicals;SONACOMS|Sona BLW Precision Forgings Ltd.|Automobile and Auto Components;STARHEALTH|Star Health and Allied Insurance Company Ltd.|Financial Services;SBIN|State Bank of India|Financial Services;SAIL|Steel Authority of India Ltd.|Metals & Mining;STLTECH|Sterlite Technologies Ltd.|Telecommunication;SUMICHEM|Sumitomo Chemical India Ltd.|Chemicals;SUNPHARMA|Sun Pharmaceutical Industries Ltd.|Healthcare;SUNTV|Sun TV Network Ltd.|Media Entertainment & Publication;SUNDARMFIN|Sundaram Finance Ltd.|Financial Services;SUPREMEIND|Supreme Industries Ltd.|Capital Goods;SUZLON|Suzlon Energy Ltd.|Capital Goods;SWANCORP|Swan Corp Ltd.|Chemicals;SWIGGY|Swiggy Ltd.|Consumer Services;SYNGENE|Syngene International Ltd.|Healthcare;SYRMA|Syrma SGS Technology Ltd.|Capital Goods;TBOTEK|TBO Tek Ltd.|Consumer Services;TDPOWERSYS|TD Power Systems Ltd.|Capital Goods;TVSMOTOR|TVS Motor Company Ltd.|Automobile and Auto Components;TATACAP|Tata Capital Ltd.|Financial Services;TATACHEM|Tata Chemicals Ltd.|Chemicals;TATACOMM|Tata Communications Ltd.|Telecommunication;TCS|Tata Consultancy Services Ltd.|Information Technology;TATACONSUM|Tata Consumer Products Ltd.|Fast Moving Consumer Goods;TATAELXSI|Tata Elxsi Ltd.|Information Technology;TATAINVEST|Tata Investment Corporation Ltd.|Financial Services;TMCV|Tata Motors Ltd.|Capital Goods;TMPV|Tata Motors Passenger Vehicles Ltd.|Automobile and Auto Components;TATAPOWER|Tata Power Co. Ltd.|Power;TATASTEEL|Tata Steel Ltd.|Metals & Mining;TATATECH|Tata Technologies Ltd.|Information Technology;TTML|Tata Teleservices (Maharashtra) Ltd.|Telecommunication;TECHM|Tech Mahindra Ltd.|Information Technology;TECHNOE|Techno Electric & Engineering Company Ltd.|Construction;TEGA|Tega Industries Ltd.|Capital Goods;TEJASNET|Tejas Networks Ltd.|Telecommunication;TENNIND|Tenneco Clean Air India Ltd.|Automobile and Auto Components;THANGAMAYL|Thangamayil Jewellery Ltd.|Consumer Durables;NIACL|The New India Assurance Company Ltd.|Financial Services;RAMCOCEM|The Ramco Cements Ltd.|Construction Materials;THERMAX|Thermax Ltd.|Capital Goods;TIMKEN|Timken India Ltd.|Capital Goods;TITAGARH|Titagarh Rail Systems Ltd.|Capital Goods;TITAN|Titan Company Ltd.|Consumer Durables;TORNTPHARM|Torrent Pharmaceuticals Ltd.|Healthcare;TORNTPOWER|Torrent Power Ltd.|Power;TARIL|Transformers And Rectifiers (India) Ltd.|Capital Goods;TRENT|Trent Ltd.|Consumer Services;TRIDENT|Trident Ltd.|Textiles;TRITURBINE|Triveni Turbine Ltd.|Capital Goods;TIINDIA|Tube Investments of India Ltd.|Automobile and Auto Components;UCOBANK|UCO Bank|Financial Services;UNOMINDA|UNO Minda Ltd.|Automobile and Auto Components;UPL|UPL Ltd.|Chemicals;UTIAMC|UTI Asset Management Company Ltd.|Financial Services;ULTRACEMCO|UltraTech Cement Ltd.|Construction Materials;UNIONBANK|Union Bank of India|Financial Services;UBL|United Breweries Ltd.|Fast Moving Consumer Goods;UNITDSPR|United Spirits Ltd.|Fast Moving Consumer Goods;URBANCO|Urban Company Ltd.|Consumer Services;USHAMART|Usha Martin Ltd.|Capital Goods;VTL|Vardhman Textiles Ltd.|Textiles;VBL|Varun Beverages Ltd.|Fast Moving Consumer Goods;VAML|Vedanta Aluminium Metal Ltd.|Metals & Mining;VISL|Vedanta Iron and Steel Ltd.|Metals & Mining;VEDL|Vedanta Ltd.|Metals & Mining;VOGL|Vedanta Oil and Gas Ltd.|Oil Gas & Consumable Fuels;VEDPOWER|Vedanta Power Ltd.|Power;VIJAYA|Vijaya Diagnostic Centre Ltd.|Healthcare;VMM|Vishal Mega Mart Ltd.|Consumer Services;IDEA|Vodafone Idea Ltd.|Telecommunication;VOLTAS|Voltas Ltd.|Consumer Durables;WAAREEENER|Waaree Energies Ltd.|Capital Goods;WELCORP|Welspun Corp Ltd.|Capital Goods;WELSPUNLIV|Welspun Living Ltd.|Textiles;WHIRLPOOL|Whirlpool of India Ltd.|Consumer Durables;WIPRO|Wipro Ltd.|Information Technology;WOCKPHARMA|Wockhardt Ltd.|Healthcare;YESBANK|Yes Bank Ltd.|Financial Services;ZFCVINDIA|ZF Commercial Vehicle Control Systems India Ltd.|Automobile and Auto Components;ZEEL|Zee Entertainment Enterprises Ltd.|Media Entertainment & Publication;ZENTEC|Zen Technologies Ltd.|Capital Goods;ZENSARTECH|Zensar Technolgies Ltd.|Information Technology;ZYDUSLIFE|Zydus Lifesciences Ltd.|Healthcare;ZYDUSWELL|Zydus Wellness Ltd.|Fast Moving Consumer Goods;ECLERX|eClerx Services Ltd.|Services".split(";").map(x => { const a = x.split("|"); return {s: a[0], n: a[1], i: a[2]}; });
+  const IND = Array.from(new Set(LIST.map(x => x.i))).sort();
+  let F = {q: "", ind: "All", min: "", max: "", sort: "pct", dir: -1, shown: 100};
+  try { const sv = JSON.parse(localStorage.getItem("n5F") || "null"); if (sv) F = Object.assign(F, sv, {shown: 100}); } catch (e) {}
+  const save = () => { try { localStorage.setItem("n5F", JSON.stringify(F)); } catch (e) {} };
+  let D = {}, ST = {t: 0, busy: false, err: "", asOf: "", src: ""}, OPEN = null, TF = "D", PN = null, CH = null, built = false;
+  const num = v => { const n = parseFloat(v); return isFinite(n) ? n : NaN; };
+  const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+  const cls = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
+  const sg = (v, d = 2) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) : "-");
+  async function load(force) {
+    if (ST.busy || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
+    if (!force && ST.t && Date.now() - ST.t < 45e3) return;
+    ST.busy = true;
+    const ctl = typeof AbortController !== "undefined" ? new AbortController() : null, killer = setTimeout(() => { if (ctl) ctl.abort(); }, 25000);
+    try {
+      const r = await fetch(MARKET_API_URL + "?nifty500=1", {cache: "no-store", signal: ctl ? ctl.signal : undefined}), j = await r.json().catch(() => null);
+      if (!r.ok || !j || j.error || !Array.isArray(j.rows)) throw new Error((j && j.error) || "HTTP " + r.status);
+      const m = {}; j.rows.forEach(x => { if (x && x.s && isFinite(x.p)) m[String(x.s).toUpperCase()] = x; });
+      D = m; ST.err = ""; ST.asOf = j.asOf || ""; ST.src = "nse"; ST.t = Date.now();
+    } catch (e) { ST.err = e && e.name === "AbortError" ? "no answer after 25 seconds" : String((e && e.message) || e); ST.t = Date.now(); }
+    clearTimeout(killer); ST.busy = false;
+    if (typeof current !== "undefined" && current === "n5") view();
+  }
+  function quote(sym) {
+    const q = D[sym]; if (q) return {p: +q.p, c: isFinite(q.c) ? +q.c : (isFinite(q.prev) ? q.p - q.prev : NaN), pct: isFinite(q.pct) ? +q.pct : NaN, hi52: q.hi52, vol: q.vol};
+    try { const m = ((typeof MARKET !== "undefined" && MARKET && MARKET.stocks) || []).find(x => String(x.s).toUpperCase() === sym); if (m && isFinite(+m.p)) { const pc = +m.pct; return {p: +m.p, c: isFinite(pc) ? +m.p - (+m.p) / (1 + pc / 100) : NaN, pct: pc}; } } catch (e) {}
+    return null;
+  }
+  function rows() {
+    const q = F.q.trim().toUpperCase(), mn = num(F.min), mx = num(F.max);
+    let out = LIST.map(x => Object.assign({}, x, {q: quote(x.s)})).filter(r => {
+      if (q && r.s.indexOf(q) < 0 && r.n.toUpperCase().indexOf(q) < 0) return false;
+      if (F.ind !== "All" && r.i !== F.ind) return false;
+      if (isFinite(mn) || isFinite(mx)) { if (!r.q || !isFinite(r.q.pct)) return false; if (isFinite(mn) && r.q.pct < mn) return false; if (isFinite(mx) && r.q.pct > mx) return false; }
+      return true;
+    });
+    const key = {s: r => r.s, p: r => (r.q ? r.q.p : -1e18), c: r => (r.q && isFinite(r.q.c) ? r.q.c : -1e18), pct: r => (r.q && isFinite(r.q.pct) ? r.q.pct : -1e18), i: r => r.i};
+    const k = key[F.sort] || key.pct;
+    out.sort((a, b) => { const A = k(a), B = k(b); return (A > B ? 1 : A < B ? -1 : 0) * F.dir || (a.s < b.s ? -1 : 1); });
+    return out;
+  }
+  const PRE = [["all", "All", "", ""], ["u5", "Up 5% or more", "5", ""], ["u2", "Up 2% or more", "2", ""], ["up", "Up", "0", ""], ["dn", "Down", "", "0"], ["d2", "Down 2% or more", "", "-2"], ["d5", "Down 5% or more", "", "-5"]];
+  function view() {
+    const host = $e("#n5res"); if (!host) return;
+    const all = rows(), have = all.filter(r => r.q).length;
+    if (PN && host.contains(PN)) PN.remove();
+    const stat = $e("#n5stat");
+    if (stat) stat.innerHTML = all.length + " of " + LIST.length + " stocks shown" + (have < LIST.length ? " &middot; " + have + " with a price" : "") + (ST.asOf ? " &middot; as of " + E(ST.asOf) : "") + (ST.busy ? " &middot; loading..." : "") + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + (/404|400|nifty500|unknown/i.test(ST.err) ? ". Deploy the latest Worker (worker_v37.js)." : "") + "</span>" : "") + (ST.src === "" && have ? " &middot; prices from the market feed (partial)" : "");
+    const th = (k, t, num) => '<th data-n5k="' + k + '"' + (num ? ' class="num"' : "") + ' style="cursor:pointer;white-space:nowrap">' + t + (F.sort === k ? (F.dir > 0 ? " &#9650;" : " &#9660;") : "") + "</th>";
+    let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th>' + th("s", "Stock") + th("i", "Industry") + th("p", "Price", 1) + th("c", "Change", 1) + th("pct", "Change %", 1) + "</tr></thead><tbody>";
+    h += all.length ? all.slice(0, F.shown).map((r, i) => {
+      const q = r.q, op = OPEN === r.s;
+      return '<tr data-n5s="' + E(r.s) + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:200px"><b>' + E(r.s) + "</b>" + znTvA(r.s, "D") + ' <button type="button" class="cbtn" data-n5c="' + E(r.s) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(r.n) + '</div></td><td style="white-space:normal;min-width:120px"><small>' + E(r.i) + "</small></td>" +
+        (q ? '<td class="num">' + f2(q.p) + '</td><td class="num" style="' + cls(q.c) + '">' + sg(q.c) + '</td><td class="num" style="' + cls(q.pct) + '"><b>' + sg(q.pct) + "%</b></td>" : '<td class="num">-</td><td class="num">-</td><td class="num">-</td>') + "</tr>" + (op ? '<tr class="dockrow" data-n5dock="1"><td colspan="6"></td></tr>' : "");
+    }).join("") : '<tr><td colspan="6" class="note">No stock matches these filters' + (have ? "." : " yet. Prices load from your Worker (needs worker_v37.js).") + "</td></tr>";
+    host.innerHTML = h + "</tbody></table></div>" + (all.length > F.shown ? '<p><button type="button" class="cbtn" id="n5more">Show more (' + (all.length - F.shown) + " left)</button></p>" : "") +
+      '<p class="note">Tap a stock (or its Chart button) to open its chart just below it, and tap it again to close. TV opens TradingView. The filter works on today\'s change %. List: Nifty 500 constituents file you supplied; prices from NSE through your Worker, refreshed about every minute while this tab is open. Screening aid, not advice.</p>';
+    const dk = host.querySelector("tr[data-n5dock] td"); if (dk && PN) dk.appendChild(PN);
+  }
+  const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
+  async function bars(sym, tf) {
+    const key = sym + "|" + tf; let o = IXC[key];
+    if (!o || Date.now() - o.t > 45e3) {
+      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + (tf === "D" ? "DF" : tf), {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 5) IXC[key] = o = {t: Date.now(), bars: rows.map(x => ({time: tf === "D" ? String(x[0]).slice(0, 10) : x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; } catch (e) {}
+    }
+    return o && o.bars;
+  }
+  function removeChart() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } }
+  async function drawChart() {
+    if (!OPEN || !PN) return; const sym = OPEN, tf = TF, box = PN.querySelector("#n5box"); if (!box) return;
+    const b = await bars(sym, tf), note = PN.querySelector("#n5note");
+    if (OPEN !== sym || TF !== tf || !PN.querySelector("#n5box")) return;
+    removeChart();
+    const LW = window.LightweightCharts;
+    if (!b || !LW) { if (note) note.textContent = "No chart data for " + sym + " from your Worker" + (LW ? "" : " (chart library missing)") + ". Use the TradingView link."; return; }
+    const c = colors(), intra = tf !== "D";
+    const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+    candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+    try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+    CH = chart; const n = b.length;
+    try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
+    if (note) note.textContent = (intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.");
+  }
+  function panel() {
+    if (!PN) { PN = document.createElement("div"); PN.id = "n5panel"; }
+    removeChart();
+    if (!OPEN) { PN.innerHTML = ""; return; }
+    const r = LIST.find(x => x.s === OPEN) || {s: OPEN, n: "", i: ""}, q = quote(OPEN);
+    PN.innerHTML = '<div class="card"><div class="charttools" style="border:0;padding:0;margin-bottom:6px"><b>' + E(r.s) + "</b> <span class=\"note\" style=\"margin:0\">" + E(r.n) + (q ? " &middot; " + f2(q.p) + " (" + sg(q.pct) + "%)" : "") + '</span></div><div class="charttools">' + TFS.map(t => '<button type="button" class="cbtn" data-n5tf="' + t[0] + '" aria-pressed="' + (t[0] === TF) + '">' + t[1] + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, TF === "D" ? "D" : TF) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-n5x="1">Close</button></div><div id="n5box" style="height:400px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="n5note" class="note" style="margin:6px 0 0">Loading chart...</div></div>';
+  }
+  function build() {
+    const host = document.getElementById("n5body"); if (!host || built) return; built = true;
+    host.innerHTML = '<div class="znhead"><div><h2>NIFTY 500</h2><span>Price, change and change % for every Nifty 500 stock</span></div><div class="znpills"><span>Chart under the stock</span><span>TradingView link</span><span>Filter by change %</span></div></div>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Search <input id="n5q" type="search" placeholder="symbol or name" style="width:150px" value="' + E(F.q) + '"></label>' +
+      '<label>Industry <select id="n5i"><option value="All">All</option>' + IND.map(x => '<option value="' + E(x) + '">' + E(x) + "</option>").join("") + "</select></label>" +
+      '<label>Change % from <input id="n5min" type="number" step="0.1" style="width:70px" value="' + E(F.min) + '"></label><label>to <input id="n5max" type="number" step="0.1" style="width:70px" value="' + E(F.max) + '"></label>' +
+      '<button type="button" class="cbtn" id="n5rl">&#8635; Reload</button></div>' +
+      '<div class="charttools" style="border:0;padding:0;margin-top:8px">' + PRE.map(p => '<button type="button" class="cbtn" data-n5p="' + p[0] + '">' + p[1] + "</button>").join("") + '</div><div class="note" id="n5stat" style="margin:8px 0 0"></div></div><div id="n5res"></div>';
+    $e("#n5i").value = F.ind;
+    host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "n5q") F.q = t.value; else if (t.id === "n5min") F.min = t.value; else if (t.id === "n5max") F.max = t.value; else if (t.id === "n5i") F.ind = t.value; else return; F.shown = 100; save(); view(); });
+    host.addEventListener("click", ev => {
+      const t = ev.target; if (!t || !t.closest) return;
+      let b = t.closest("[data-n5p]"); if (b) { const p = PRE.find(x => x[0] === b.dataset.n5p); F.min = p[2]; F.max = p[3]; F.shown = 100; $e("#n5min").value = F.min; $e("#n5max").value = F.max; save(); view(); return; }
+      if (t.closest("#n5rl")) { load(true); return; }
+      if (t.closest("#n5more")) { F.shown += 100; view(); return; }
+      b = t.closest("[data-n5k]"); if (b) { const k = b.dataset.n5k; F.dir = F.sort === k ? -F.dir : (k === "s" || k === "i" ? 1 : -1); F.sort = k; save(); view(); return; }
+      b = t.closest("[data-n5tf]"); if (b) { TF = b.dataset.n5tf; panel(); drawChart(); return; }
+      if (t.closest("[data-n5x]")) { OPEN = null; panel(); view(); return; }
+      if (t.closest("a") || t.closest("[data-ind]") || t.closest("#n5panel")) return;
+      b = t.closest("[data-n5s]"); if (b) { const s = b.dataset.n5s; OPEN = OPEN === s ? null : s; panel(); view(); if (OPEN) { drawChart(); setTimeout(() => { if (PN && PN.scrollIntoView) PN.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); } }
+    });
+  }
+  function open() { build(); view(); load(false); if (OPEN && PN && !CH) drawChart(); }
+  setInterval(() => { try { if (typeof current !== "undefined" && current === "n5" && !document.hidden) load(true); } catch (e) {} }, 60e3);
+  setInterval(() => { try { if (OPEN && TF !== "D" && typeof current !== "undefined" && current === "n5" && !document.hidden) drawChart(); } catch (e) {} }, 60e3);
+  return {open};
+})();
+const n5Paint = () => n5Api.open();
+
 
 /* ===== APP ===== */
 let current = "ov", lastRows = [];
 function show(id) {
   current = id;
-  document.querySelectorAll("#tabs button").forEach(b => { const on = b.dataset.t === id; b.setAttribute("aria-selected", on ? "true" : "false"); if (on && b.scrollIntoView) { try { const t = document.getElementById("tabs"); t.scrollTo({left: b.offsetLeft - (t.clientWidth - b.offsetWidth) / 2, behavior: "smooth"}); } catch (e) {} } });
+  document.querySelectorAll("#tabs button, #side button").forEach(b => { const on = b.dataset.t === id; b.setAttribute("aria-selected", on ? "true" : "false"); if (on && b.scrollIntoView && b.closest("#tabs")) { try { const t = document.getElementById("tabs"); t.scrollTo({left: b.offsetLeft - (t.clientWidth - b.offsetWidth) / 2, behavior: "smooth"}); } catch (e) {} } });
   document.querySelectorAll("section.stock").forEach(s => s.classList.toggle("on", s.id === id));
   const sec = document.getElementById(id);
   if (id === "nw") { nwPaint(); mnLoad(false); }
@@ -4197,6 +4318,7 @@ function show(id) {
   if (id === "tc") { try { tcPaint(); } catch (e) {} }
   if (id === "rm") { try { rmPaint(); } catch (e) {} }
   if (id === "cb") { try { cbPaint(); } catch (e) {} }
+  if (id === "n5") { try { n5Paint(); } catch (e) {} }
   ensureChart(sec);
   if (sec) { const cs = getComputedStyle(sec); document.documentElement.style.setProperty("--a", cs.getPropertyValue("--a")); document.documentElement.style.setProperty("--b", cs.getPropertyValue("--b")); }
 }
@@ -4259,9 +4381,10 @@ function render(stocks) {
     tabs.addEventListener("click", ev => { if (moved) { ev.stopPropagation(); ev.preventDefault(); moved = false; } }, true);
   } catch (e) {}
   if (!rows.length) { tabs.innerHTML = ""; views.innerHTML = '<div class="card empty">No stocks found. Check that your sheet has a header row and at least one stock.</div>'; return; }
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + rows.map((r, i) => {
-    const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>";
-  }).join("") + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD Picks</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button>';
+  const stockBtns = rows.map((r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; }).join("");
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button><button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD Picks</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
+  const side = document.getElementById("side");
+  if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
   const emptyCard = views.querySelector(".card.empty"); if (emptyCard) emptyCard.remove();
   let ov = document.getElementById("ov");
@@ -4292,6 +4415,10 @@ function render(stocks) {
     const cb = document.createElement("section"); cb.className = "stock"; cb.id = "cb"; cb.style.cssText = "--a:#be123c;--b:#f59e0b";
     cb.innerHTML = '<div id="cbbody"></div>'; views.appendChild(cb);
   }
+  if (!document.getElementById("n5")) {
+    const n5 = document.createElement("section"); n5.className = "stock"; n5.id = "n5"; n5.style.cssText = "--a:#0f766e;--b:#2563eb";
+    n5.innerHTML = '<div id="n5body"></div>'; views.appendChild(n5);
+  }
   if (!document.getElementById("rm")) {
     const rm = document.createElement("section"); rm.className = "stock"; rm.id = "rm"; rm.style.cssText = "--a:#7c3aed;--b:#db2777";
     rm.innerHTML = '<div id="rmbody"></div>'; views.appendChild(rm);
@@ -4316,7 +4443,8 @@ function render(stocks) {
   views.querySelectorAll("section.stock[data-tk]").forEach(n => { if (!keep.has(n)) { const k = n.dataset.tk; if (CH[k]) { try { CH[k].chart.remove(); } catch (e) {} delete CH[k]; } n.remove(); } });
   if (curTk) { const m = rows.find(x => x.s.ticker === curTk); if (m) current = m.id; }
   paintAllNews(); paintAllPead();
-  tabs.querySelectorAll("button").forEach(b => b.addEventListener("click", () => show(b.dataset.t)));
+  document.querySelectorAll("#tabs button, #side button").forEach(b => b.addEventListener("click", () => show(b.dataset.t)));
+  try { const mq = window.matchMedia("(min-width:1000px)"), sd = document.getElementById("sided"); if (sd) { if (mq.matches) sd.open = true; else if (!sd.dataset.init) { sd.open = false; sd.dataset.init = "1"; } if (!window.__sideMq) { window.__sideMq = 1; mq.addEventListener("change", e => { const d = document.getElementById("sided"); if (d) d.open = e.matches; }); } } } catch (e) {}
   views.querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => { show(tr.dataset.go); window.scrollTo({top: 0, behavior: "smooth"}); }));
   views.querySelectorAll(".pos input").forEach(inp => inp.addEventListener("input", () => {
     const t = inp.dataset.t, o = getPos(t); o[inp.dataset.f] = inp.value.trim(); savePos(t, o);
@@ -4324,7 +4452,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "n5" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
