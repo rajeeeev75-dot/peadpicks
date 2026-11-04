@@ -4195,17 +4195,36 @@ const n5Api = (function () {
   const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
   const cls = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
   const sg = (v, d = 2) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) : "-");
+  async function loadChunks() {
+    const order = rows().map(r => r.s), seen = new Set(order); LIST.forEach(x => { if (!seen.has(x.s)) order.push(x.s); });
+    const chunks = []; for (let i = 0; i < order.length; i += 20) chunks.push(order.slice(i, i + 20));
+    ST.done = 0; ST.total = order.length; let ix = 0, fail = 0;
+    const worker = async () => {
+      while (ix < chunks.length) {
+        const ch = chunks[ix++];
+        try {
+          const r = await fetch(MARKET_API_URL + "?quotes=" + encodeURIComponent(ch.join(",")), {cache: "no-store"}), j = await r.json().catch(() => null);
+          if (j && Array.isArray(j.quotes)) j.quotes.forEach(q => { if (q && q.s && isFinite(q.p)) D[String(q.s).toUpperCase()] = {p: +q.p, c: isFinite(q.chg) ? +q.chg : NaN, pct: isFinite(q.pct) ? +q.pct : NaN, prev: q.prev, hi52: q.hi52, lo52: q.lo52}; }); else fail++;
+        } catch (e) { fail++; }
+        ST.done += ch.length;
+        if (typeof current !== "undefined" && current === "n5") view();
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    ST.src = "chunks"; ST.t = Date.now(); ST.err = fail && !Object.keys(D).length ? "no prices came back from the Worker" : "";
+  }
   async function load(force) {
     if (ST.busy || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
     if (!force && ST.t && Date.now() - ST.t < 45e3) return;
     ST.busy = true;
+    if (ST.nobulk && Date.now() - ST.nobulk < 30 * 60e3) { await loadChunks(); ST.busy = false; if (typeof current !== "undefined" && current === "n5") view(); return; }
     const ctl = typeof AbortController !== "undefined" ? new AbortController() : null, killer = setTimeout(() => { if (ctl) ctl.abort(); }, 25000);
     try {
       const r = await fetch(MARKET_API_URL + "?nifty500=1", {cache: "no-store", signal: ctl ? ctl.signal : undefined}), j = await r.json().catch(() => null);
       if (!r.ok || !j || j.error || !Array.isArray(j.rows)) throw new Error((j && j.error) || (r.ok ? "the Worker has no Nifty 500 feed yet" : "HTTP " + r.status));
       const m = {}; j.rows.forEach(x => { if (x && x.s && isFinite(x.p)) m[String(x.s).toUpperCase()] = x; });
       D = m; ST.err = ""; ST.asOf = j.asOf || ""; ST.src = "nse"; ST.t = Date.now();
-    } catch (e) { ST.err = e && e.name === "AbortError" ? "no answer after 25 seconds" : String((e && e.message) || e); ST.t = Date.now(); }
+    } catch (e) { ST.nobulk = Date.now(); clearTimeout(killer); await loadChunks(); ST.busy = false; if (typeof current !== "undefined" && current === "n5") view(); return; }
     clearTimeout(killer); ST.busy = false;
     if (typeof current !== "undefined" && current === "n5") view();
   }
@@ -4233,7 +4252,7 @@ const n5Api = (function () {
     const all = rows(), have = all.filter(r => r.q).length;
     if (PN && host.contains(PN)) PN.remove();
     const stat = $e("#n5stat");
-    if (stat) stat.innerHTML = all.length + " of " + LIST.length + " stocks shown" + (have < LIST.length ? " &middot; " + have + " with a price" : "") + (ST.asOf ? " &middot; as of " + E(ST.asOf) : "") + (ST.busy ? " &middot; loading..." : "") + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + (/404|400|nifty500|unknown|no Nifty 500/i.test(ST.err) ? ". Deploy the latest Worker (worker_v37.js)." : "") + "</span>" : "") + (ST.src === "" && have ? " &middot; prices from the market feed (partial)" : "");
+    if (stat) stat.innerHTML = all.length + " of " + LIST.length + " stocks shown" + (have < LIST.length ? " &middot; " + have + " with a price" : "") + (ST.asOf ? " &middot; as of " + E(ST.asOf) : "") + (ST.busy ? " &middot; loading prices" + (ST.total ? " " + Math.min(ST.done, ST.total) + "/" + ST.total : "...") : "") + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + (/404|400|nifty500|unknown|no Nifty 500/i.test(ST.err) ? ". Deploy the latest Worker (worker_v37.js)." : "") + "</span>" : "") + (ST.src === "" && have ? " &middot; prices from the market feed (partial)" : "");
     const th = (k, t, num) => '<th data-n5k="' + k + '"' + (num ? ' class="num"' : "") + ' style="cursor:pointer;white-space:nowrap">' + t + (F.sort === k ? (F.dir > 0 ? " &#9650;" : " &#9660;") : "") + "</th>";
     let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th>' + th("s", "Stock") + th("i", "Industry") + th("p", "Price", 1) + th("c", "Change", 1) + th("pct", "Change %", 1) + "</tr></thead><tbody>";
     h += all.length ? all.slice(0, F.shown).map((r, i) => {
@@ -4301,7 +4320,7 @@ const n5Api = (function () {
     });
   }
   function open() { build(); view(); load(false); if (OPEN && PN && !CH) drawChart(); }
-  setInterval(() => { try { if (typeof current !== "undefined" && current === "n5" && !document.hidden) load(true); } catch (e) {} }, 60e3);
+  setInterval(() => { try { if (typeof current !== "undefined" && current === "n5" && !document.hidden) load(true); } catch (e) {} }, 120e3);
   setInterval(() => { try { if (OPEN && TF !== "D" && typeof current !== "undefined" && current === "n5" && !document.hidden) drawChart(); } catch (e) {} }, 60e3);
   return {open};
 })();
