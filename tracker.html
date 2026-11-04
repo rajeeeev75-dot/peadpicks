@@ -654,6 +654,9 @@ document.addEventListener("click", ev => { const b = ev.target && ev.target.clos
 /* ----- chart panel of the Intraday tab: click "Chart" next to a stock in Trade ideas or OI spurts (the TradingView link stays) ----- */
 let IX_SEL = null, IX_CH = null; const IXC = {};
 const IX_TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
+var OI_MIN = 10, OI_MOVE = 0.5; try { const o = JSON.parse(localStorage.getItem("oiMin") || "null"); if (o) { OI_MIN = +o.m >= 0 ? +o.m : 10; OI_MOVE = +o.v >= 0 ? +o.v : 0.5; } } catch (e) {}
+const oiStrong = (r, q) => +r.chg > 0 && +r.pct >= OI_MIN && !!q && Math.abs(+q.pct) >= OI_MOVE;
+document.addEventListener("change", ev => { const t = ev.target; if (!t || (t.id !== "oiMinPct" && t.id !== "oiMinMove")) return; if (t.id === "oiMinPct") OI_MIN = Math.max(0, +t.value || 0); else OI_MOVE = Math.max(0, +t.value || 0); try { localStorage.setItem("oiMin", JSON.stringify({m: OI_MIN, v: OI_MOVE})); } catch (e) {} try { ixPaint(); } catch (e) {} try { cbApi.view(); } catch (e) {} });
 const ixBtn = sym => '<button type="button" class="cbtn" data-ixchart="' + esc(sym) + '" style="padding:1px 9px;font-size:.75rem;margin-left:2px" title="Show the chart on this page">&#128200; Chart</button>';
 async function ixChartDraw() {
   const host = document.getElementById("ixchart"); if (!host) return;
@@ -728,15 +731,15 @@ function resultWatchHTML(M, oiBy) {
     const sym = String(e.s).toUpperCase(), q = px[sym], r = oiBy[sym], i = ideaOf[sym];
     let L = 0, S = 0; const why = [];
     if (i) { if (i.d === 1) L++; else S++; why.push("Trade idea " + (i.d === 1 ? "long" : "short") + " " + i.x.sc + "/10"); }
-    if (r && +r.chg > 0 && q) { const up = +q.pct >= 0; if (up) L++; else S++; why.push((up ? "Long" : "Short") + " build-up, OI " + pct(+r.pct, 0)); }
+    if (r && +r.chg > 0 && q && (i || oiStrong(r, q))) { const up = +q.pct >= 0; if (up) L++; else S++; why.push((up ? "Long" : "Short") + " build-up, OI " + pct(+r.pct, 0)); }
     const side = L > S ? 1 : S > L ? -1 : 0, mixed = L && S;
     return {sym, n: e.n, d: e.d, q, side, mixed, why, n2: L + S, lv: i && i.x.lv, day: e.d === todayK ? 0 : 1};
   }).sort((a, b) => a.day - b.day || Math.abs(b.side) - Math.abs(a.side) || b.n2 - a.n2 || (a.sym < b.sym ? -1 : 1));
-  h += '<div class="card"><div class="wrap"><table class="pptbl"><thead><tr><th>Stock</th><th>Results</th><th class="num">Price</th><th>Signal</th><th>Why</th><th class="num">Trigger</th><th class="num">Stop</th><th class="num">Target</th></tr></thead><tbody>' +
+  h += '<div class="card"><div class="charttools" style="border:0;padding:0 0 8px;gap:8px 12px"><span>An OI spurt alone gives a signal only when open interest rose at least</span><input id="oiMinPct" type="number" min="0" step="1" style="width:62px" value="' + OI_MIN + '"><span>% and the price moved at least</span><input id="oiMinMove" type="number" min="0" step="0.1" style="width:62px" value="' + OI_MOVE + '"><span>%. A trade idea needs no minimum.</span></div><div class="wrap"><table class="pptbl"><thead><tr><th>Stock</th><th>Results</th><th class="num">Price</th><th>Signal</th><th>Why</th><th class="num">Trigger</th><th class="num">Stop</th><th class="num">Target</th></tr></thead><tbody>' +
     rows.map(r => '<tr><td style="white-space:nowrap"><b>' + esc(r.sym) + "</b>" + znTvA(r.sym, "D") + " " + ixBtn(r.sym) + '</td><td>' + (r.day === 0 ? "Today" : "Next session") + '</td><td class="num">' + (r.q ? fmt(+r.q.p) + ' <small style="color:var(--' + (+r.q.pct >= 0 ? "good" : "bad") + ')">' + pct(+r.q.pct, 1) + "</small>" : "-") + "</td><td>" +
       (r.side === 1 ? '<span class="chip g">BUY</span>' : r.side === -1 ? '<span class="chip r">SELL</span>' : '<span class="chip n">Wait</span>') + (r.mixed ? ' <small title="Trade idea and OI point opposite ways">mixed</small>' : "") + '</td><td style="white-space:normal;min-width:200px"><small>' + (r.why.length ? r.why.map(esc).join("; ") : "No trade idea or OI spurt yet") + '</small></td>' +
       (r.lv && r.side ? '<td class="num">' + fmt(r.lv.t) + '</td><td class="num">' + fmt(r.lv.st) + '</td><td class="num">' + fmt(r.lv.tg) + "</td>" : '<td class="num">-</td><td class="num">-</td><td class="num">-</td>') + "</tr>").join("") + "</tbody></table></div>" +
-    '<p class="note" style="margin-bottom:0">F&amp;O stocks whose board meeting for results is today or on the next trading day (' + esc(nextK) + "), from NSE's calendar. The calendar gives the date but not the time, so check the exchange filing to see which came after 2 pm. BUY or SELL appears when the Trade ideas screen lists the stock or the OI spurt shows a build-up (price up with OI up is long, price down with OI up is short). First-day result moves are fast and gap-prone: use the chart, keep the stop tight and size small. Trigger, stop and target come from the Trade ideas screen. General information, not advice.</p></div>";
+    '<p class="note" style="margin-bottom:0">F&amp;O stocks whose board meeting for results is today or on the next trading day (' + esc(nextK) + "), from NSE's calendar. The calendar gives the date but not the time, so check the exchange filing to see which came after 2 pm. BUY or SELL appears when the Trade ideas screen lists the stock, or when the OI spurt shows a build-up big enough to pass the minimum above (price up with OI up is long, price down with OI up is short). First-day result moves are fast and gap-prone: use the chart, keep the stop tight and size small. Trigger, stop and target come from the Trade ideas screen. General information, not advice.</p></div>";
   return h;
 }
 function ixPaint() {
@@ -2117,9 +2120,8 @@ function ideasHTML(M, mc, opt) {
   const topSec = rank.slice(0, 3).map(x => x.k), botSec = rank.slice(-3).map(x => x.k);
   const b = M.nifty50 || {}, ratio = +b.dec > 0 ? +b.adv / +b.dec : NaN, flat = !(Math.abs(nPct) >= 0.1);
   const bias = isFinite(nPct) && isFinite(ratio) ? (nPct > 0.1 && ratio >= 1 ? 1 : nPct < -0.1 && ratio <= 1 ? -1 : 0) : 0;
-  const wset = new Set(Object.keys(LIVEQ));
-  const pool = (M.stocks || []).map(x => wset.has(x.s) ? Object.assign({}, x, {w: true}) : x), have = new Set(pool.map(x => x.s));
-  if (Date.now() - LIVE_T < 5 * 60e3) wset.forEach(k => { const q = LIVEQ[k]; if (!have.has(k) && q) pool.push({s: k, p: q.p, pct: q.pct, o: q.o, h: q.h, l: q.l, val: null, w: true}); });
+  const wset = new Set(Object.keys(LIVEQ)); try { (lastStocks || []).forEach(s0 => { const t = symOf(s0.ticker); if (t) wset.add(t); }); } catch (e) {}   // your own watchlist stocks are left out of this screen, you track them already
+  const pool = (M.stocks || []).filter(x => !wset.has(String(x.s).toUpperCase()));
   const stocks = pool.filter(x => x.s && isFinite(+x.p) && isFinite(+x.pct) && (x.val == null || !isFinite(+x.val) || +x.val >= 50));
   const haveOHL = stocks.some(x => isFinite(+x.o) && isFinite(+x.h) && isFinite(+x.l));
   const build = dir => {
@@ -3916,7 +3918,7 @@ const cbApi = (function () {
     const by = {}, get = sym => by[sym] = by[sym] || {sym, L: {}, S: {}, why: {L: [], S: []}, short: {L: {}, S: {}}, det: {L: {}, S: {}}};
     const give = (sym, side, key, txt, short, det) => { const r = get(sym), k = side === 1 ? "L" : "S"; if (!r[k][key]) { r[k][key] = 1; r.why[k].push(txt); r.short[k][key] = short || ""; r.det[k][key] = det || {}; } };
     if (IDEAS_LAST) [[IDEAS_LAST.L, 1], [IDEAS_LAST.S, -1]].forEach(a => (a[0] || []).forEach(x => give(String(x.s).toUpperCase(), a[1], "idea", "Trade idea score " + x.sc + "/10", x.sc + "/10", {x})));
-    ((OI && OI.rows) || []).forEach(r => { const sym = String(r.s).toUpperCase(), q = px[sym]; if (!q || !(+r.chg > 0)) return; const sd = +q.pct >= 0 ? 1 : -1; give(sym, sd, "oi", (sd === 1 ? "Long" : "Short") + " build-up, OI " + pct(+r.pct, 0), sgn(+r.pct, 0), {r, q}); });
+    ((OI && OI.rows) || []).forEach(r => { const sym = String(r.s).toUpperCase(), q = px[sym]; if (!q || !oiStrong(r, q)) return; const sd = +q.pct >= 0 ? 1 : -1; give(sym, sd, "oi", (sd === 1 ? "Long" : "Short") + " build-up, OI " + pct(+r.pct, 0), sgn(+r.pct, 0), {r, q}); });
     try {
       const D = znData(), near = {};
       D.items.forEach(it => it.zones.forEach(z => { if (!znActive(z)) return; const a = znAway(z, it.px); if (!isFinite(a) || Math.abs(a) > 3) return; const k = it.u.sym + "|" + z.type, o = near[k] = near[k] || {sym: it.u.sym, t: z.type, tfs: new Set(), best: 1e9, z: null, tf: "", away: NaN}; o.tfs.add(znTfName(it.tf)); if (Math.abs(a) < o.best) { o.best = Math.abs(a); o.z = z; o.tf = znTfName(it.tf); o.away = a; } }));
