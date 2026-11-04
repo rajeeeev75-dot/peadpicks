@@ -4335,16 +4335,16 @@ const cuApi = (function () {
   let F = {st: "all", min: 55, fno: false, q: "", shown: 80, rr: 2, tf: "A", minw: 0, loose: false, v: 3};
   try { const sv = JSON.parse(localStorage.getItem("cuF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 80}); } catch (e) {}
   if (F.v !== 3) { F.tf = "A"; F.v = 3; }
-  if (!/^[ADWM]$/.test(F.tf)) F.tf = "A";
+  if (!/^[ADWMX]$/.test(F.tf)) F.tf = "A";
   const save = () => { try { localStorage.setItem("cuF", JSON.stringify(F)); } catch (e) {} };
-  const MAXD = {D: 15, W: 4, M: 2}, TFN = {A: "All timeframes", D: "Daily", W: "Weekly", M: "Monthly"}, UNIT = {D: "candles", W: "weeks", M: "months"}, WK = {D: 0.2, W: 1, M: 4.33};
+  const MAXD = {D: 15, W: 4, M: 2}, TFN = {X: "Any timeframe", A: "All timeframes", D: "Daily", W: "Weekly", M: "Monthly"}, UNIT = {D: "candles", W: "weeks", M: "months"}, WK = {D: 0.2, W: 1, M: 4.33};
   /* shape limits per timeframe, counted in candles of that timeframe */
   const PR = {
     D: {minE: 150, liBack: 220, rise: 250, swing: 8, cupMin: 30, cupMax: 200, bgap: 6, rb: 8, hMax: 30, hMin: 2, ma: 200, vL: 50, vS: 20, step: 3, ent: 25, fol: 60},
     W: {minE: 80, liBack: 620, rise: 104, swing: 4, cupMin: 12, cupMax: 520, bgap: 2, rb: 3, hMax: 26, hMin: 2, ma: 40, vL: 10, vS: 4, step: 3, ent: 8, fol: 26},
     M: {minE: 36, liBack: 200, rise: 36, swing: 2, cupMin: 6, cupMax: 170, bgap: 1, rb: 2, hMax: 8, hMin: 1, ma: 10, vL: 12, vS: 4, step: 1, ent: 3, fol: 12}
   };
-  let B = {}, RES = {D: {}, W: {}, M: {}}, ST = {done: 0, total: 0, busy: false, err: "", t: 0}, OPEN = null, CT = null, PN = null, CH = null, built = false, BTS = {}, BTB = {}, PT = null, TRIED = {};
+  let B = {}, RES = {D: {}, W: {}, M: {}}, ST = {done: 0, total: 0, busy: false, err: "", t: 0}, OPEN = null, OPENTF = "", CT = null, PN = null, CH = null, built = false, BTS = {}, BTB = {}, PT = null, TRIED = {};
   const kindOf = w => (w < 13 ? "Short base" : w < 52 ? "Standard base" : w < 156 ? "Long base" : "Multi-year base");
   const fmtW = w => (w >= 52 ? (w / 52).toFixed(1) + " yr" : w >= 17 ? (w / 4.33).toFixed(1) + " mo" : Math.max(1, Math.round(w)) + " wk");
   const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
@@ -4429,7 +4429,7 @@ const cuApi = (function () {
     const out = []; ["M", "W", "D"].forEach(tf => { const r = RES[tf][sym]; if (r && r.score >= 55) out.push('<span class="chip ' + (/^Breakout/.test(r.status) ? "g" : r.status === "Near breakout" ? "w" : "n") + '" title="Cup and handle on ' + TFN[tf] + " candles: " + E(r.status) + ", score " + r.score + ", formed over " + fmtW(r.tweeks) + ", buy above " + f2(r.pivot * 1.001) + '" style="font-size:.68rem;padding:0 6px">C&amp;H ' + tf + " " + r.score + "</span>"); });
     return out.length ? " " + out.join(" ") : "";
   }
-  const BTF = () => (F.tf === "A" ? "D" : F.tf);
+  const BTF = () => (F.tf === "A" || F.tf === "X" ? "D" : F.tf);
   function mergedRes() { const out = {}; Object.keys(B).forEach(sym => { let b = null; ["M", "W", "D"].forEach(k => { const r = RES[k][sym]; if (r && r.score >= F.min && r.tweeks >= F.minw && (!b || r.tweeks > b.tweeks)) b = r; }); if (b) out[sym] = b; }); return out; }
   function universe() { const L = n5Api.list(); const fno = new Set(typeof ZN_FNO !== "undefined" ? ZN_FNO : []); return L.filter(x => !F.fno || fno.has(x.s)); }
   async function load(force) {
@@ -4479,17 +4479,20 @@ const cuApi = (function () {
   function view() {
     const host = $e("#curesult"); if (!host) return;
     if (PN && host.contains(PN)) PN.remove();
-    const ALL = F.tf === "A", tf = F.tf, R = ALL ? mergedRes() : RES[tf], L = universe(), q = F.q.trim().toUpperCase(), have = L.filter(x => R[x.s]);
-    let rows = have.filter(x => R[x.s].score >= F.min && R[x.s].tweeks >= F.minw && (F.st === "all" || (F.st === "brk" && /^Breakout/.test(R[x.s].status)) || (F.st === "near" && R[x.s].status === "Near breakout") || (F.st === "form" && R[x.s].status === "Handle forming")) && (!q || x.s.indexOf(q) >= 0 || x.n.toUpperCase().indexOf(q) >= 0));
+    const ALL = F.tf === "A", ANY = F.tf === "X", MULTI = ALL || ANY, tf = F.tf, L = universe(), q = F.q.trim().toUpperCase(), items = [];
+    if (ANY) L.forEach(x => ["M", "W", "D"].forEach(k => { const r = RES[k][x.s]; if (r) items.push({x, r}); }));
+    else { const R0 = ALL ? mergedRes() : RES[tf]; L.forEach(x => { if (R0[x.s]) items.push({x, r: R0[x.s]}); }); }
+    const have = items;
+    let rows = have.filter(it => { const r = it.r, x = it.x; return r.score >= F.min && r.tweeks >= F.minw && (F.st === "all" || (F.st === "brk" && /^Breakout/.test(r.status)) || (F.st === "near" && r.status === "Near breakout") || (F.st === "form" && r.status === "Handle forming")) && (!q || x.s.indexOf(q) >= 0 || x.n.toUpperCase().indexOf(q) >= 0); });
     const rank = s => (/^Breakout/.test(s) ? 0 : s === "Near breakout" ? 1 : 2);
-    rows.sort((a, b) => rank(R[a.s].status) - rank(R[b.s].status) || (ALL ? R[b.s].tweeks - R[a.s].tweeks : 0) || R[b.s].score - R[a.s].score);
-    const stat = $e("#custat"); if (stat) stat.innerHTML = (ST.busy ? "Loading candles " + Math.min(ST.done, ST.total) + "/" + ST.total + " &middot; " : "") + Object.keys(B).length + " stocks scanned &middot; " + have.length + " with a " + (ALL ? "" : TFN[tf].toLowerCase() + " ") + "cup and handle &middot; " + rows.length + " shown" + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + "</span>" : "");
+    rows.sort((a, b) => rank(a.r.status) - rank(b.r.status) || (MULTI ? b.r.tweeks - a.r.tweeks : 0) || b.r.score - a.r.score);
+    const stat = $e("#custat"); if (stat) stat.innerHTML = (ST.busy ? "Loading candles " + Math.min(ST.done, ST.total) + "/" + ST.total + " &middot; " : "") + Object.keys(B).length + " stocks scanned &middot; " + have.length + (ANY ? " matches (a stock can appear once per timeframe) &middot; " : " with a " + (ALL ? "" : TFN[tf].toLowerCase() + " ") + "cup and handle &middot; ") + rows.length + " shown" + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + "</span>" : "");
     const chip = s => '<span class="chip ' + (/^Breakout/.test(s) ? "g" : s === "Near breakout" ? "w" : "n") + '" style="display:inline-block;white-space:nowrap;line-height:1.3">' + E(s) + "</span>";
     let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th style="min-width:190px">Status</th><th class="num">Score</th><th class="num" title="Time taken to form the pattern, from the left rim to today">Time to form</th><th class="num">Price</th><th class="num">Buy above</th><th class="num">Away %</th><th class="num">Stop</th><th class="num">Target</th><th class="num">R:R</th></tr></thead><tbody>';
-    h += rows.length ? rows.slice(0, F.shown).map((x, i) => {
-      const r = R[x.s], en = r.pivot * 1.001, st = r.stop * 0.999, rr = (r.target - en) / (en - st), op = OPEN === x.s;
-      return '<tr data-cus="' + E(x.s) + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:190px"><b>' + E(x.s) + "</b>" + znTvA(x.s, ALL ? r.tf : tf) + ' <button type="button" class="cbtn" data-cuc="' + E(x.s) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(x.n) + "</div></td><td style=\"white-space:nowrap;vertical-align:middle\">" + chip(r.status) + '</td><td class="num"><b>' + r.score + '</b></td><td class="num">' + fmtW(r.tweeks) + '<div class="note" style="margin:0;font-size:.72rem;white-space:nowrap"><b>' + kindOf(r.tweeks) + '</b>' + (ALL ? " &middot; " + TFN[r.tf] : "") + ' &middot; cup ' + fmtW(r.weeks) + " + handle " + fmtW(r.hweeks) + "</div></td><td class=\"num\">" + f2(r.price) + '</td><td class="num">' + f2(en) + '</td><td class="num">' + (r.away > 0 ? "+" : "") + r.away.toFixed(1) + '%</td><td class="num">' + f2(st) + '</td><td class="num">' + f2(r.target) + '</td><td class="num">' + (isFinite(rr) ? rr.toFixed(1) : "-") + "</td></tr>" + (op ? '<tr class="dockrow" data-cudock="1"><td colspan="11"></td></tr>' : "");
-    }).join("") : '<tr><td colspan="11" class="note">' + (ST.busy ? "Scanning, results appear as candles arrive..." : "No " + (ALL ? "" : TFN[tf].toLowerCase() + " ") + "cup and handle matches these filters right now.") + "</td></tr>";
+    h += rows.length ? rows.slice(0, F.shown).map((it, i) => {
+      const x = it.x, r = it.r, en = r.pivot * 1.001, st = r.stop * 0.999, rr = (r.target - en) / (en - st), op = OPEN === x.s && (!ANY || OPENTF === r.tf);
+      return '<tr data-cus="' + E(x.s) + '" data-cutf="' + r.tf + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:190px"><b>' + E(x.s) + "</b>" + znTvA(x.s, MULTI ? r.tf : tf) + ' <button type="button" class="cbtn" data-cuc="' + E(x.s) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(x.n) + "</div></td><td style=\"white-space:nowrap;vertical-align:middle\">" + chip(r.status) + '</td><td class="num"><b>' + r.score + '</b></td><td class="num">' + fmtW(r.tweeks) + '<div class="note" style="margin:0;font-size:.72rem;white-space:nowrap"><b>' + kindOf(r.tweeks) + '</b>' + (MULTI ? " &middot; " + TFN[r.tf] : "") + ' &middot; cup ' + fmtW(r.weeks) + " + handle " + fmtW(r.hweeks) + "</div></td><td class=\"num\">" + f2(r.price) + '</td><td class="num">' + f2(en) + '</td><td class="num">' + (r.away > 0 ? "+" : "") + r.away.toFixed(1) + '%</td><td class="num">' + f2(st) + '</td><td class="num">' + f2(r.target) + '</td><td class="num">' + (isFinite(rr) ? rr.toFixed(1) : "-") + "</td></tr>" + (op ? '<tr class="dockrow" data-cudock="1"><td colspan="11"></td></tr>' : "");
+    }).join("") : '<tr><td colspan="11" class="note">' + (ST.busy ? "Scanning, results appear as candles arrive..." : "No " + (MULTI ? "" : TFN[tf].toLowerCase() + " ") + "cup and handle matches these filters right now.") + "</td></tr>";
     host.innerHTML = h + "</tbody></table></div>" + (rows.length > F.shown ? '<p><button type="button" class="cbtn" id="cumore">Show more (' + (rows.length - F.shown) + " left)</button></p>" : "") + '<p class="note">Tap a stock to open its chart just below it, and tap again to close. Buy above = pivot (the handle high) plus 0.1%; Stop = handle low minus 0.1%; Target = pivot plus the depth of the cup (the usual measured move). Time to form is the cup plus the handle, from the left rim to the latest candle. Longer cups score higher (up to 10 points) and the Min time to form filter keeps only the long bases, and weekly or monthly cups are slower but carry more weight. A screening aid, not a signal: always check the chart.</p>' +
       '<details class="accd" data-accd="cu" style="margin-top:18px"' + (ACC_OPEN.cu ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how past ' + TFN[BTF()].toLowerCase() + ' cup and handle setups did (tap to open)</summary><div id="cubt">' + btHTML() + "</div></details>";
     const dk = host.querySelector("tr[data-cudock] td"); if (dk && PN) { dk.appendChild(PN); const w = host.querySelector(".wrap"); PN.style.cssText = "position:sticky;left:0;box-sizing:border-box;width:" + Math.max(300, (w ? w.clientWidth : 900) - 4) + "px"; setTimeout(() => { if (CH && PN) { try { CH.timeScale().fitContent(); } catch (e) {} } }, 0); }
@@ -4498,7 +4501,7 @@ const cuApi = (function () {
   function panel() {
     if (!PN) { PN = document.createElement("div"); PN.id = "cupanel"; }
     removeChart(); if (!OPEN) { PN.innerHTML = ""; return; }
-    const pk = F.tf === "A" ? mergedRes()[OPEN] : null, tf = pk ? pk.tf : F.tf, r = RES[tf][OPEN], o = B[OPEN] && B[OPEN].X && B[OPEN].X[tf]; if (!r || !o) { PN.innerHTML = ""; return; }
+    const pk = F.tf === "A" ? mergedRes()[OPEN] : null, tf = F.tf === "X" ? OPENTF : pk ? pk.tf : F.tf, r = RES[tf] && RES[tf][OPEN], o = B[OPEN] && B[OPEN].X && B[OPEN].X[tf]; if (!r || !o) { PN.innerHTML = ""; return; }
     const ct = CT || tf, en = r.pivot * 1.001, st = r.stop * 0.999, wk = Math.round(r.weeks), u = UNIT[tf], line = (a, b) => "<tr><td><b>" + a + "</b></td><td>" + b + "</td></tr>";
     PN.innerHTML = '<div class="card"><table class="acctbl" style="font-size:.86rem"><tbody>' +
       line("Cup (" + TFN[tf].toLowerCase() + ")", "From " + o.A.t[r.li] + " (left rim " + f2(r.rim) + ") down to " + f2(r.bl) + " on " + o.A.t[r.bi] + ", back up to " + f2(r.rh) + " on " + o.A.t[r.ri] + ". Depth " + (r.depth * 100).toFixed(0) + "%, " + r.cupLen + " " + u + " (about " + wk + " weeks). Total time to form the pattern, cup plus handle: <b>" + fmtW(r.tweeks) + "</b> (" + o.A.t[r.li] + " to " + o.A.t[o.A.t.length - 1] + "). Right rim " + ((r.rh / r.rim - 1) * 100).toFixed(1) + "% from the left rim.") +
@@ -4520,7 +4523,7 @@ const cuApi = (function () {
   function build() {
     const host = document.getElementById("cubody"); if (!host || built) return; built = true;
     host.innerHTML = '<div class="znhead"><div><h2>CUP &amp; HANDLE</h2><span>Nifty 500 stocks forming or breaking out of a cup and handle base</span></div><div class="znpills"><span>Daily, weekly, monthly</span><span>Entry, stop, target</span><span>Back-tested</span></div></div>' +
-      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Timeframe <select id="cuTf"><option value="A">All (longest base first)</option><option value="D">Daily</option><option value="W">Weekly</option><option value="M">Monthly</option></select></label><label>Status <select id="cuSt"><option value="all">All</option><option value="brk">Breakout</option><option value="near">Near breakout</option><option value="form">Handle forming</option></select></label>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Timeframe <select id="cuTf"><option value="A">Best per stock (longest base first)</option><option value="X">Any (every timeframe, all matches)</option><option value="D">Daily</option><option value="W">Weekly</option><option value="M">Monthly</option></select></label><label>Status <select id="cuSt"><option value="all">All</option><option value="brk">Breakout</option><option value="near">Near breakout</option><option value="form">Handle forming</option></select></label>' +
       '<label>Min score <input id="cuMin" type="number" min="0" max="100" style="width:64px" value="' + F.min + '"></label><label title="Only show patterns that took at least this many weeks to form">Min time to form <select id="cuW"><option value="0">Any</option><option value="8">8 weeks +</option><option value="13">3 months +</option><option value="26">6 months +</option><option value="52">1 year +</option><option value="156">3 years +</option></select></label><label title="Relaxed accepts looser cups: smaller prior rise, deeper cups and handles, and a right rim further from the left rim">Match <select id="cuL"><option value="0">Strict</option><option value="1">Relaxed</option></select></label><label>Stocks <select id="cuU"><option value="all">Nifty 500</option><option value="fno">F&amp;O only</option></select></label>' +
       '<label>Search <input id="cuQ" type="search" placeholder="symbol or name" style="width:140px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="cuRl">&#8635; Rescan</button></div><div class="note" id="custat" style="margin:8px 0 0"></div></div><div id="curesult"></div>';
     $e("#cuSt").value = F.st; $e("#cuU").value = F.fno ? "fno" : "all"; $e("#cuTf").value = F.tf; $e("#cuW").value = String(F.minw); $e("#cuL").value = F.loose ? "1" : "0";
@@ -4533,7 +4536,7 @@ const cuApi = (function () {
       if (t.closest("[data-cux]")) { OPEN = null; panel(); view(); return; }
       b = t.closest("[data-cuct]"); if (b) { CT = b.dataset.cuct; panel(); return; }
       if (t.closest("a") || t.closest("[data-ind]") || t.closest("#cupanel") || t.closest("summary")) return;
-      b = t.closest("[data-cus]"); if (b) { const s = b.dataset.cus; OPEN = OPEN === s ? null : s; CT = null; panel(); view(); setTimeout(() => { if (OPEN && PN && PN.scrollIntoView) PN.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); }
+      b = t.closest("[data-cus]"); if (b) { const s = b.dataset.cus, k = b.dataset.cutf || "", same = OPEN === s && (F.tf !== "X" || OPENTF === k); OPEN = same ? null : s; OPENTF = k; CT = null; panel(); view(); setTimeout(() => { if (OPEN && PN && PN.scrollIntoView) PN.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); }
     });
   }
   function open() { build(); view(); load(false); backtest(); }
