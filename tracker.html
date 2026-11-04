@@ -4332,14 +4332,14 @@ const n5Paint = () => n5Api.open();
 /* ===== CUP & HANDLE TAB: scans the Nifty 500 on daily, weekly or monthly candles for a cup and handle base that is forming or breaking out, with entry/stop/target, an inline chart and a past-data accuracy table ===== */
 const cuApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
-  let F = {st: "all", min: 55, fno: false, q: "", shown: 80, rr: 2, tf: "D", minw: 0};
+  let F = {st: "all", min: 55, fno: false, q: "", shown: 80, rr: 2, tf: "D", minw: 0, loose: false};
   try { const sv = JSON.parse(localStorage.getItem("cuF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 80}); } catch (e) {}
   if (!/^[DWM]$/.test(F.tf)) F.tf = "D";
   const save = () => { try { localStorage.setItem("cuF", JSON.stringify(F)); } catch (e) {} };
-  const TFN = {D: "Daily", W: "Weekly", M: "Monthly"}, UNIT = {D: "candles", W: "weeks", M: "months"}, WK = {D: 0.2, W: 1, M: 4.33};
+  const MAXD = {D: 15, W: 4, M: 2}, TFN = {D: "Daily", W: "Weekly", M: "Monthly"}, UNIT = {D: "candles", W: "weeks", M: "months"}, WK = {D: 0.2, W: 1, M: 4.33};
   /* shape limits per timeframe, counted in candles of that timeframe */
   const PR = {
-    D: {minE: 150, liBack: 220, rise: 120, swing: 8, cupMin: 30, cupMax: 200, bgap: 6, rb: 8, hMax: 30, hMin: 2, ma: 200, vL: 50, vS: 20, step: 3, ent: 25, fol: 60},
+    D: {minE: 150, liBack: 220, rise: 250, swing: 8, cupMin: 30, cupMax: 200, bgap: 6, rb: 8, hMax: 30, hMin: 2, ma: 200, vL: 50, vS: 20, step: 3, ent: 25, fol: 60},
     W: {minE: 80, liBack: 620, rise: 104, swing: 4, cupMin: 12, cupMax: 520, bgap: 2, rb: 3, hMax: 26, hMin: 2, ma: 40, vL: 10, vS: 4, step: 3, ent: 8, fol: 26},
     M: {minE: 36, liBack: 200, rise: 36, swing: 2, cupMin: 6, cupMax: 170, bgap: 1, rb: 2, hMax: 8, hMin: 1, ma: 10, vL: 12, vS: 4, step: 1, ent: 3, fol: 12}
   };
@@ -4349,26 +4349,27 @@ const cuApi = (function () {
   const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
   const avg = (a, s, e) => { let t = 0, n = 0; for (let i = Math.max(0, s); i <= e; i++) { t += a[i]; n++; } return n ? t / n : NaN; };
   /* ---- detector: looks at candles up to index e (inclusive) ---- */
-  function detect(A, e, tf) {
+  function detect(A, e, tf, L) {
+    const T = L ? {rise: 1.15, dmax: 0.45, dlong: 0.60, rimLo: 0.85, rimHi: 1.10, hdMax: 0.20, hdLong: 0.30, hdRatio: 0.65, hLow: 0.35, round: 0.05} : {rise: 1.25, dmax: 0.40, dlong: 0.55, rimLo: 0.90, rimHi: 1.08, hdMax: 0.15, hdLong: 0.25, hdRatio: 0.55, hLow: 0.5, round: 0.08};
     const P = PR[tf || "D"], H = A.h, Lw = A.l, C = A.c, V = A.v; if (e < P.minE) return null;
     let best = null; const price = C[e], lastPrev = e - 1;
     for (let li = Math.max(P.swing + 1, e - P.liBack); li <= e - P.cupMin; li++) {
       let ok = true; for (let k = Math.max(0, li - P.swing); k <= Math.min(lastPrev, li + P.swing); k++) if (H[k] > H[li]) { ok = false; break; } if (!ok) continue;
       let mn = 1e18; for (let k = Math.max(0, li - P.rise); k < li; k++) if (C[k] < mn) mn = C[k];
-      if (!(C[li] >= mn * 1.25)) continue;
+      if (!(C[li] >= mn * T.rise)) continue;
       const rim = H[li]; let bi = li + 1, bl = Lw[bi]; for (let k = li + 1; k <= lastPrev; k++) if (Lw[k] < bl) { bl = Lw[k]; bi = k; }
       if (bi > e - P.bgap) continue;
-      const depth = (rim - bl) / rim; if (depth < 0.12 || depth > 0.55) continue;
+      const depth = (rim - bl) / rim; if (depth < 0.12 || depth > T.dlong) continue;
       let ri = bi + 1, rh = H[ri]; for (let k = bi + 1; k <= lastPrev; k++) if (H[k] >= rh) { rh = H[k]; ri = k; }
       if (ri - bi < P.rb) continue; const cupLen = ri - li; if (cupLen < P.cupMin || cupLen > P.cupMax) continue;
-      const long = cupLen * WK[tf || "D"] >= 26; if (depth > 0.40 && !long) continue;
-      if (rh < rim * 0.90 || rh > rim * 1.08) continue;
+      const long = cupLen * WK[tf || "D"] >= 26; if (depth > T.dmax && !long) continue;
+      if (rh < rim * T.rimLo || rh > rim * T.rimHi) continue;
       const hl = lastPrev - ri; if (hl > P.hMax) continue;
       let hlow = Lw[ri]; for (let k = ri; k <= lastPrev; k++) if (Lw[k] < hlow) hlow = Lw[k];
-      const hd = (rh - hlow) / rh; if (hd > (long ? 0.25 : 0.15) || hd > depth * 0.55) continue;
-      if (hlow < bl + (rim - bl) * 0.5) continue;
-      let cnt = 0; for (let k = li; k <= ri; k++) if (Lw[k] <= bl + (rim - bl) / 3) cnt++; const round = cnt / (ri - li + 1); if (round < 0.08) continue;
-      if (price > rh * 1.05) continue;
+      const hd = (rh - hlow) / rh; if (hd > (long ? T.hdLong : T.hdMax) || hd > depth * T.hdRatio) continue;
+      if (hlow < bl + (rim - bl) * T.hLow) continue;
+      let cnt = 0; for (let k = li; k <= ri; k++) if (Lw[k] <= bl + (rim - bl) / 3) cnt++; const round = cnt / (ri - li + 1); if (round < T.round) continue;
+      if (price > rh * 1.12) continue;
       const v50 = avg(V, e - P.vL, lastPrev), hv = hl >= P.hMin ? avg(V, ri + 1, lastPrev) : NaN, dry = isFinite(hv) && v50 > 0 ? hv / v50 : NaN, v20 = avg(V, e - P.vS, lastPrev), bv = v20 > 0 ? V[e] / v20 : NaN;
       let ma = 0, mc = 0; for (let k = Math.max(0, e - P.ma + 1); k <= e; k++) { ma += C[k]; mc++; } const above200 = price > ma / mc;
       const away = (rh / price - 1) * 100, brk = price > rh, weeks = cupLen * WK[tf || "D"], hweeks = hl * WK[tf || "D"], tweeks = weeks + hweeks;
@@ -4401,8 +4402,12 @@ const cuApi = (function () {
     const o = B[sym]; if (!o || o.bars.length < 200) { ["D", "W", "M"].forEach(t => delete RES[t][sym]); return; }
     const wkb = o.wk && o.wk.length >= 80 ? o.wk : aggregate(o.bars, "W"); o.X = {D: {bars: o.bars}, W: {bars: wkb}, M: {bars: aggregate(wkb, "M")}};
     ["D", "W", "M"].forEach(tf => {
-      const X = o.X[tf]; X.A = arrOf(X.bars); const A = X.A, n = A.c.length; let hit = null;
-      for (let d = 0; d <= 2 && !hit; d++) { const r = detect(A, n - 1 - d, tf); if (r && (d === 0 || /Breakout/.test(r.status))) { hit = r; if (d > 0) { hit.status = "Breakout " + d + " " + (tf === "D" ? "day" : tf === "W" ? "week" : "month") + (d > 1 ? "s" : "") + " ago"; hit.price = A.c[n - 1]; hit.away = (hit.pivot / hit.price - 1) * 100; if (hit.price > hit.pivot * 1.06) hit = null; } } }
+      const X = o.X[tf]; X.A = arrOf(X.bars); const A = X.A, n = A.c.length; let hit = detect(A, n - 1, tf, F.loose);
+      if (!(hit && /Breakout/.test(hit.status))) {   // look back for a breakout in the last few candles that is still holding
+        const h0 = hit; hit = null;
+        for (let d = MAXD[tf]; d >= 1 && !hit; d--) { const r = detect(A, n - 1 - d, tf, F.loose), pr = A.c[n - 1]; if (r && /Breakout/.test(r.status) && pr >= r.pivot * 0.97 && pr <= r.pivot * 1.15) { hit = r; hit.status = "Breakout " + d + " " + (tf === "D" ? "day" : tf === "W" ? "week" : "month") + (d > 1 ? "s" : "") + " ago"; hit.price = pr; hit.away = (hit.pivot / pr - 1) * 100; } }
+        if (!hit) hit = h0;
+      }
       if (hit) RES[tf][sym] = hit; else delete RES[tf][sym];
     });
     o.A = o.X.D.A;
@@ -4449,7 +4454,7 @@ const cuApi = (function () {
       const t0 = Date.now();
       while (i < syms.length && Date.now() - t0 < 40) {
         const sym = syms[i++], A = B[sym].X[tf].A, n = A.c.length, seen = new Set();
-        for (let e = P.minE + 10; e < n - 3; e += P.step) { const c = detect(A, e, tf); if (!c || /Breakout/.test(c.status) || c.away > 3) continue; const k = c.li + "|" + c.ri; if (seen.has(k)) continue; seen.add(k); sig.push({sym, e, c, year: A.t[e].slice(0, 4)}); }
+        for (let e = P.minE + 10; e < n - 3; e += P.step) { const c = detect(A, e, tf, F.loose); if (!c || /Breakout/.test(c.status) || c.away > 3) continue; const k = c.li + "|" + c.ri; if (seen.has(k)) continue; seen.add(k); sig.push({sym, e, c, year: A.t[e].slice(0, 4)}); }
       }
       if (i < syms.length) { setTimeout(step, 0); return; }
       BTS[tf] = {sig, syms: syms.length}; BTB[tf] = false; if (current === "cu") { const d = $e("#cubt"); if (d) d.innerHTML = btHTML(); }
@@ -4513,10 +4518,10 @@ const cuApi = (function () {
     const host = document.getElementById("cubody"); if (!host || built) return; built = true;
     host.innerHTML = '<div class="znhead"><div><h2>CUP &amp; HANDLE</h2><span>Nifty 500 stocks forming or breaking out of a cup and handle base</span></div><div class="znpills"><span>Daily, weekly, monthly</span><span>Entry, stop, target</span><span>Back-tested</span></div></div>' +
       '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Timeframe <select id="cuTf"><option value="D">Daily</option><option value="W">Weekly</option><option value="M">Monthly</option></select></label><label>Status <select id="cuSt"><option value="all">All</option><option value="brk">Breakout</option><option value="near">Near breakout</option><option value="form">Handle forming</option></select></label>' +
-      '<label>Min score <input id="cuMin" type="number" min="0" max="100" style="width:64px" value="' + F.min + '"></label><label title="Only show patterns that took at least this many weeks to form">Min time to form <select id="cuW"><option value="0">Any</option><option value="8">8 weeks +</option><option value="13">3 months +</option><option value="26">6 months +</option><option value="52">1 year +</option><option value="156">3 years +</option></select></label><label>Stocks <select id="cuU"><option value="all">Nifty 500</option><option value="fno">F&amp;O only</option></select></label>' +
+      '<label>Min score <input id="cuMin" type="number" min="0" max="100" style="width:64px" value="' + F.min + '"></label><label title="Only show patterns that took at least this many weeks to form">Min time to form <select id="cuW"><option value="0">Any</option><option value="8">8 weeks +</option><option value="13">3 months +</option><option value="26">6 months +</option><option value="52">1 year +</option><option value="156">3 years +</option></select></label><label title="Relaxed accepts looser cups: smaller prior rise, deeper cups and handles, and a right rim further from the left rim">Match <select id="cuL"><option value="0">Strict</option><option value="1">Relaxed</option></select></label><label>Stocks <select id="cuU"><option value="all">Nifty 500</option><option value="fno">F&amp;O only</option></select></label>' +
       '<label>Search <input id="cuQ" type="search" placeholder="symbol or name" style="width:140px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="cuRl">&#8635; Rescan</button></div><div class="note" id="custat" style="margin:8px 0 0"></div></div><div id="curesult"></div>';
-    $e("#cuSt").value = F.st; $e("#cuU").value = F.fno ? "fno" : "all"; $e("#cuTf").value = F.tf; $e("#cuW").value = String(F.minw);
-    host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "cuSt") F.st = t.value; else if (t.id === "cuMin") F.min = +t.value || 0; else if (t.id === "cuU") F.fno = t.value === "fno"; else if (t.id === "cuQ") F.q = t.value; else if (t.id === "cuW") F.minw = +t.value || 0; else if (t.id === "cuTf") { F.tf = t.value; OPEN = null; CT = null; panel(); backtest(); } else return; F.shown = 80; save(); view(); });
+    $e("#cuSt").value = F.st; $e("#cuU").value = F.fno ? "fno" : "all"; $e("#cuTf").value = F.tf; $e("#cuW").value = String(F.minw); $e("#cuL").value = F.loose ? "1" : "0";
+    host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "cuSt") F.st = t.value; else if (t.id === "cuMin") F.min = +t.value || 0; else if (t.id === "cuU") F.fno = t.value === "fno"; else if (t.id === "cuQ") F.q = t.value; else if (t.id === "cuW") F.minw = +t.value || 0; else if (t.id === "cuL") { F.loose = t.value === "1"; Object.keys(B).forEach(analyse); BTS = {}; BTB = {}; backtest(); } else if (t.id === "cuTf") { F.tf = t.value; OPEN = null; CT = null; panel(); backtest(); } else return; F.shown = 80; save(); view(); });
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest) return;
       if (t.closest("#cuRl")) { BTS = {}; load(true); return; }
