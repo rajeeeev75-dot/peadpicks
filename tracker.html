@@ -4324,9 +4324,174 @@ const n5Api = (function () {
   function open() { build(); view(); load(false); if (OPEN && PN && !CH) drawChart(); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "n5" && !document.hidden) load(true); } catch (e) {} }, 120e3);
   setInterval(() => { try { if (OPEN && TF !== "D" && typeof current !== "undefined" && current === "n5" && !document.hidden) drawChart(); } catch (e) {} }, 60e3);
-  return {open};
+  return {open, list: () => LIST};
 })();
 const n5Paint = () => n5Api.open();
+/* ===== CUP & HANDLE TAB: scans the Nifty 500 on daily candles for a cup and handle base that is forming or breaking out, with entry/stop/target, an inline chart and a past-data accuracy table ===== */
+const cuApi = (function () {
+  const $e = s => document.querySelector(s), E = esc;
+  let F = {st: "all", min: 55, fno: false, q: "", shown: 80, rr: 2};
+  try { const sv = JSON.parse(localStorage.getItem("cuF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 80}); } catch (e) {}
+  const save = () => { try { localStorage.setItem("cuF", JSON.stringify(F)); } catch (e) {} };
+  let B = {}, RES = {}, ST = {done: 0, total: 0, busy: false, err: "", t: 0}, OPEN = null, PN = null, CH = null, built = false, BT = null, BTBUSY = false, PT = null;
+  const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+  const avg = (a, s, e) => { let t = 0, n = 0; for (let i = Math.max(0, s); i <= e; i++) { t += a[i]; n++; } return n ? t / n : NaN; };
+  /* ---- detector: looks at candles up to index e (inclusive) ---- */
+  function detect(A, e) {
+    const H = A.h, Lw = A.l, C = A.c, V = A.v; if (e < 150) return null;
+    let best = null; const price = C[e], lastPrev = e - 1;
+    for (let li = Math.max(30, e - 220); li <= e - 30; li++) {
+      let ok = true; for (let k = Math.max(0, li - 8); k <= Math.min(lastPrev, li + 8); k++) if (H[k] > H[li]) { ok = false; break; } if (!ok) continue;
+      let mn = 1e18; for (let k = Math.max(0, li - 120); k < li; k++) if (C[k] < mn) mn = C[k];
+      if (!(C[li] >= mn * 1.25)) continue;
+      const rim = H[li]; let bi = li + 1, bl = Lw[bi]; for (let k = li + 1; k <= lastPrev; k++) if (Lw[k] < bl) { bl = Lw[k]; bi = k; }
+      if (bi > e - 6) continue;
+      const depth = (rim - bl) / rim; if (depth < 0.12 || depth > 0.40) continue;
+      let ri = bi + 1, rh = H[ri]; for (let k = bi + 1; k <= lastPrev; k++) if (H[k] >= rh) { rh = H[k]; ri = k; }
+      if (ri - bi < 8) continue; const cupLen = ri - li; if (cupLen < 30 || cupLen > 200) continue;
+      if (rh < rim * 0.90 || rh > rim * 1.08) continue;
+      const hl = lastPrev - ri; if (hl > 30) continue;
+      let hlow = Lw[ri]; for (let k = ri; k <= lastPrev; k++) if (Lw[k] < hlow) hlow = Lw[k];
+      const hd = (rh - hlow) / rh; if (hd > 0.15 || hd > depth * 0.55) continue;
+      if (hlow < bl + (rim - bl) * 0.5) continue;
+      let cnt = 0; for (let k = li; k <= ri; k++) if (Lw[k] <= bl + (rim - bl) / 3) cnt++; const round = cnt / (ri - li + 1); if (round < 0.08) continue;
+      if (price > rh * 1.05) continue;
+      const v50 = avg(V, e - 50, lastPrev), hv = hl >= 2 ? avg(V, ri + 1, lastPrev) : NaN, dry = isFinite(hv) && v50 > 0 ? hv / v50 : NaN, v20 = avg(V, e - 20, lastPrev), bv = v20 > 0 ? V[e] / v20 : NaN;
+      let ma = 0, mc = 0; for (let k = Math.max(0, e - 199); k <= e; k++) { ma += C[k]; mc++; } const above200 = price > ma / mc;
+      const away = (rh / price - 1) * 100, brk = price > rh;
+      const status = brk ? (bv >= 1.5 ? "Breakout" : "Breakout, weak volume") : away <= 3 ? "Near breakout" : "Handle forming";
+      let sc = 0;
+      sc += Math.max(0, 20 - Math.abs(rh / rim - 1) * 250);                               // right rim close to the left rim
+      sc += depth >= 0.15 && depth <= 0.33 ? 15 : 8;                                       // cup depth sweet spot
+      sc += Math.min(15, round * 60);                                                      // rounded, not V-shaped
+      sc += hd >= 0.03 && hd <= 0.12 ? 20 : hd < 0.03 ? 10 : 8;                            // handle depth
+      sc += isFinite(dry) ? (dry < 0.8 ? 10 : dry < 1 ? 6 : 0) : 3;                       // volume drying up in the handle
+      sc += above200 ? 10 : 0;
+      sc += brk ? (bv >= 1.5 ? 10 : 4) : away <= 3 ? 8 : away <= 6 ? 4 : 0;
+      const o = {li, bi, ri, e, rim, bl, rh, hlow, depth, hd, cupLen, hl, pivot: rh, stop: hlow, target: rh + (rim - bl), status, dry, bv, above200, away, price, score: Math.round(sc)};
+      if (!best || o.score > best.score) best = o;
+    }
+    return best;
+  }
+  const arrOf = b => ({h: b.map(x => x.high), l: b.map(x => x.low), c: b.map(x => x.close), v: b.map(x => x.vol), t: b.map(x => x.time)});
+  function analyse(sym) {
+    const o = B[sym]; if (!o || o.bars.length < 200) { delete RES[sym]; return; }
+    const A = o.A = arrOf(o.bars), n = A.c.length; let hit = null;
+    for (let d = 0; d <= 2 && !hit; d++) { const r = detect(A, n - 1 - d); if (r && (d === 0 || /Breakout/.test(r.status))) { hit = r; if (d > 0) { hit.status = "Breakout " + d + (d === 1 ? " day ago" : " days ago"); hit.price = A.c[n - 1]; hit.away = (hit.pivot / hit.price - 1) * 100; if (hit.price > hit.pivot * 1.06) hit = null; } } }
+    if (hit) RES[sym] = hit; else delete RES[sym];
+  }
+  async function fetchBars(list) {
+    const chunks = []; for (let i = 0; i < list.length; i += 12) chunks.push(list.slice(i, i + 12));
+    ST.total = list.length; ST.done = 0; let ix = 0;
+    const worker = async () => { while (ix < chunks.length) { const ch = chunks[ix++]; try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json(); ch.forEach(sym => { const rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 150) { B[sym] = {t: Date.now(), bars: rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; analyse(sym); } }); } catch (e) {} ST.done += ch.length; schedule(); } };
+    await Promise.all([worker(), worker(), worker()]);
+  }
+  function universe() { const L = n5Api.list(); const fno = new Set(typeof ZN_FNO !== "undefined" ? ZN_FNO : []); return L.filter(x => !F.fno || fno.has(x.s)); }
+  async function load(force) {
+    if (ST.busy || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
+    if (!force && ST.t && Date.now() - ST.t < 20 * 60e3) return;
+    ST.busy = true; ST.err = "";
+    try { const need = n5Api.list().map(x => x.s).filter(s => force || !B[s] || Date.now() - B[s].t > 20 * 60e3); await fetchBars(need); ST.t = Date.now(); if (!Object.keys(B).length) ST.err = "no candles came back from the Worker"; }
+    catch (e) { ST.err = String((e && e.message) || e); }
+    ST.busy = false; view(); backtest();
+  }
+  function schedule() { if (PT) return; PT = setTimeout(() => { PT = null; try { if (current === "cu") view(); } catch (e) {} }, 600); }
+  /* ---- back-test: replay the detector on past candles ---- */
+  function simulate(A, e, c, rr) {
+    const n = A.c.length, entry = c.pivot * 1.001, stop = c.stop * 0.999, risk = entry - stop; if (!(risk > 0)) return null;
+    let ei = -1; for (let k = e + 1; k <= Math.min(n - 1, e + 25); k++) { if (A.h[k] >= entry) { ei = k; break; } if (A.l[k] < stop) return null; }
+    if (ei < 0) return null; const tgt = entry + rr * risk;
+    if (A.l[ei] <= stop) return {r: -1, d: 1};
+    for (let k = ei; k <= Math.min(n - 1, ei + 60); k++) { if (k > ei && A.l[k] <= stop) return {r: -1, d: k - ei}; if (A.h[k] >= tgt) return {r: rr, d: k - ei}; }
+    const last = Math.min(n - 1, ei + 60); if (last - ei < 60) return {open: true}; return {r: (A.c[last] - entry) / risk, d: 60};
+  }
+  function backtest() {
+    if (BTBUSY) return; const syms = Object.keys(B).filter(s => B[s].A); if (syms.length < 20) return; BTBUSY = true;
+    const sig = []; let i = 0;
+    const step = () => {
+      const t0 = Date.now();
+      while (i < syms.length && Date.now() - t0 < 40) {
+        const sym = syms[i++], A = B[sym].A, n = A.c.length, seen = new Set();
+        for (let e = 160; e < n - 5; e += 3) { const c = detect(A, e); if (!c || /Breakout/.test(c.status) || c.away > 3) continue; const k = c.li + "|" + c.ri; if (seen.has(k)) continue; seen.add(k); sig.push({sym, e, c, year: A.t[e].slice(0, 4)}); }
+      }
+      if (i < syms.length) { setTimeout(step, 0); return; }
+      BT = {sig, syms: syms.length}; BTBUSY = false; if (current === "cu") view();
+    };
+    setTimeout(step, 0);
+  }
+  function btHTML() {
+    if (!BT) return '<p class="note" style="margin:0">' + (BTBUSY ? "Replaying the scan on past candles..." : "The accuracy table appears once the candles have loaded.") + "</p>";
+    const rr = F.rr, res = []; BT.sig.forEach(s => { const o = simulate(B[s.sym].A, s.e, s.c, rr); if (o && !o.open) res.push(Object.assign({year: s.year, score: s.c.score}, o)); });
+    const line = (name, rs) => { const n = rs.length, w = rs.filter(x => x.r > 0).length, tot = rs.reduce((a, x) => a + x.r, 0); return {c: [name, n + accFew(n), n ? "<b>" + accPc(w, n) + "</b>" : "-", accR(n ? tot / n : NaN), accR(n ? tot : NaN)]}; };
+    const yrs = Array.from(new Set(res.map(x => x.year))).sort();
+    const pick = '<div class="charttools" style="border:0;padding:0;margin:14px 0 -8px"><b>Target</b>' + [2, 3].map(v => '<button type="button" class="cbtn" data-curr="' + v + '" aria-pressed="' + (v === rr) + '">1 : ' + v + "</button>").join("") + "</div>";
+    return pick + accTable("Back-test on past candles (about 5 years, " + BT.syms + " stocks)", ["Group", "Trades", "Win rate", "Average per trade", "Total"], [line("<b>All signals</b>", res), line("Score 55 to 69", res.filter(x => x.score >= 55 && x.score < 70)), line("Score 70 to 84", res.filter(x => x.score >= 70 && x.score < 85)), line("Score 85 or more", res.filter(x => x.score >= 85))].concat(yrs.map(y => line(y, res.filter(x => x.year === y)))),
+      "Every past day was scanned in steps of 3 candles. Each cup and handle seen within 3% below its pivot counted once. The trade starts only if price reached 0.1% above the pivot within the next 25 candles, with the stop 0.1% under the handle low and the target " + rr + " times the risk. It is followed for up to 60 candles (if a candle touches both, it counts as a loss; unfinished trades are left out). Results are in R, before brokerage and slippage. Stocks that no longer exist are missing, which flatters the result a little. Past results only, not advice.");
+  }
+  /* ---- table ---- */
+  function view() {
+    const host = $e("#curesult"); if (!host) return;
+    if (PN && host.contains(PN)) PN.remove();
+    const L = universe(), q = F.q.trim().toUpperCase(), have = L.filter(x => RES[x.s]);
+    let rows = have.filter(x => RES[x.s].score >= F.min && (F.st === "all" || (F.st === "brk" && /^Breakout/.test(RES[x.s].status)) || (F.st === "near" && RES[x.s].status === "Near breakout") || (F.st === "form" && RES[x.s].status === "Handle forming")) && (!q || x.s.indexOf(q) >= 0 || x.n.toUpperCase().indexOf(q) >= 0));
+    const rank = s => (/^Breakout/.test(s) ? 0 : s === "Near breakout" ? 1 : 2);
+    rows.sort((a, b) => rank(RES[a.s].status) - rank(RES[b.s].status) || RES[b.s].score - RES[a.s].score);
+    const stat = $e("#custat"); if (stat) stat.innerHTML = (ST.busy ? "Loading candles " + Math.min(ST.done, ST.total) + "/" + ST.total + " &middot; " : "") + Object.keys(B).length + " stocks scanned &middot; " + have.length + " with a cup and handle &middot; " + rows.length + " shown" + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + "</span>" : "");
+    const chip = s => '<span class="chip ' + (/^Breakout/.test(s) ? "g" : s === "Near breakout" ? "w" : "n") + '">' + E(s) + "</span>";
+    let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Status</th><th class="num">Score</th><th class="num">Price</th><th class="num">Buy above</th><th class="num">Away %</th><th class="num">Stop</th><th class="num">Target</th><th class="num">R:R</th></tr></thead><tbody>';
+    h += rows.length ? rows.slice(0, F.shown).map((x, i) => {
+      const r = RES[x.s], en = r.pivot * 1.001, st = r.stop * 0.999, rr = (r.target - en) / (en - st), op = OPEN === x.s;
+      return '<tr data-cus="' + E(x.s) + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:190px"><b>' + E(x.s) + "</b>" + znTvA(x.s, "D") + ' <button type="button" class="cbtn" data-cuc="' + E(x.s) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(x.n) + "</div></td><td>" + chip(r.status) + '</td><td class="num"><b>' + r.score + '</b></td><td class="num">' + f2(r.price) + '</td><td class="num">' + f2(en) + '</td><td class="num">' + (r.away > 0 ? "+" : "") + r.away.toFixed(1) + '%</td><td class="num">' + f2(st) + '</td><td class="num">' + f2(r.target) + '</td><td class="num">' + (isFinite(rr) ? rr.toFixed(1) : "-") + "</td></tr>" + (op ? '<tr class="dockrow" data-cudock="1"><td colspan="10"></td></tr>' : "");
+    }).join("") : '<tr><td colspan="10" class="note">' + (ST.busy ? "Scanning, results appear as candles arrive..." : "No cup and handle matches these filters right now.") + "</td></tr>";
+    host.innerHTML = h + "</tbody></table></div>" + (rows.length > F.shown ? '<p><button type="button" class="cbtn" id="cumore">Show more (' + (rows.length - F.shown) + " left)</button></p>" : "") + '<p class="note">Tap a stock to open its chart just below it, and tap again to close. Buy above = pivot (the handle high) plus 0.1%; Stop = handle low minus 0.1%; Target = pivot plus the depth of the cup (the usual measured move). A screening aid, not a signal: always check the chart.</p>' +
+      '<details class="accd" data-accd="cu" style="margin-top:18px"' + (ACC_OPEN.cu ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how past cup and handle setups did (tap to open)</summary><div id="cubt">' + btHTML() + "</div></details>";
+    const dk = host.querySelector("tr[data-cudock] td"); if (dk && PN) dk.appendChild(PN);
+  }
+  function removeChart() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } }
+  function panel() {
+    if (!PN) { PN = document.createElement("div"); PN.id = "cupanel"; }
+    removeChart(); if (!OPEN) { PN.innerHTML = ""; return; }
+    const r = RES[OPEN], o = B[OPEN]; if (!r || !o) { PN.innerHTML = ""; return; }
+    const en = r.pivot * 1.001, st = r.stop * 0.999, wk = Math.round(r.cupLen / 5), line = (a, b) => "<tr><td><b>" + a + "</b></td><td>" + b + "</td></tr>";
+    PN.innerHTML = '<div class="card"><table class="acctbl" style="font-size:.86rem"><tbody>' +
+      line("Cup", "From " + o.A.t[r.li] + " (left rim " + f2(r.rim) + ") down to " + f2(r.bl) + " on " + o.A.t[r.bi] + ", back up to " + f2(r.rh) + " on " + o.A.t[r.ri] + ". Depth " + (r.depth * 100).toFixed(0) + "%, about " + wk + " weeks, right rim " + ((r.rh / r.rim - 1) * 100).toFixed(1) + "% from the left rim.") +
+      line("Handle", r.hl + " candles, " + (r.hd * 100).toFixed(1) + "% deep" + (isFinite(r.dry) ? ", volume " + Math.round(r.dry * 100) + "% of the 50-day average" + (r.dry < 0.9 ? " (drying up, good)" : " (not drying up)") : "") + ".") +
+      line("Trend and volume", (r.above200 ? "Above" : "Below") + " its 200-day average" + (isFinite(r.bv) ? "; today's volume " + r.bv.toFixed(1) + " times the 20-day average" : "") + ".") +
+      line("Entry plan", "Buy above <b>" + f2(en) + "</b> (" + f2(r.price) + " now, " + (r.away > 0 ? r.away.toFixed(1) + "% below" : Math.abs(r.away).toFixed(1) + "% above") + "), stop <b>" + f2(st) + "</b> (" + ((en - st) / en * 100).toFixed(1) + "% risk), target <b>" + f2(r.target) + "</b> (" + ((r.target - en) / (en - st)).toFixed(1) + " times the risk), or exit part at 2 times the risk.") + "</tbody></table>" +
+      '<div class="charttools" style="margin-top:10px">' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, "D") + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-cux="1">Close</button></div><div id="cubox" style="height:420px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div class="note" style="margin:6px 0 0">Daily candles from your Worker. L, B and R mark the left rim, the cup bottom and the right rim. Lines: pivot, stop and target.</div></div>';
+    const box = PN.querySelector("#cubox"), LW = window.LightweightCharts; if (!LW || !box) return;
+    const c = colors(), b = o.bars, chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+    candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+    try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+    try { candle.setMarkers([{time: o.A.t[r.li], position: "aboveBar", color: "#7c3aed", shape: "arrowDown", text: "L"}, {time: o.A.t[r.bi], position: "belowBar", color: "#7c3aed", shape: "arrowUp", text: "B"}, {time: o.A.t[r.ri], position: "aboveBar", color: "#7c3aed", shape: "arrowDown", text: "R"}]); } catch (e) {}
+    [[en, "#2563eb", "Buy"], [st, "#dc2626", "Stop"], [r.target, "#16a34a", "Target"]].forEach(a => { try { candle.createPriceLine({price: a[0], color: a[1], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[2]}); } catch (e) {} });
+    CH = chart; try { const from = o.A.t[Math.max(0, r.li - 25)]; chart.timeScale().setVisibleRange({from, to: b[b.length - 1].time}); } catch (e) { chart.timeScale().fitContent(); }
+  }
+  function build() {
+    const host = document.getElementById("cubody"); if (!host || built) return; built = true;
+    host.innerHTML = '<div class="znhead"><div><h2>CUP &amp; HANDLE</h2><span>Nifty 500 stocks forming or breaking out of a cup and handle base</span></div><div class="znpills"><span>Daily candles</span><span>Entry, stop, target</span><span>Back-tested</span></div></div>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Status <select id="cuSt"><option value="all">All</option><option value="brk">Breakout</option><option value="near">Near breakout</option><option value="form">Handle forming</option></select></label>' +
+      '<label>Min score <input id="cuMin" type="number" min="0" max="100" style="width:64px" value="' + F.min + '"></label><label>Stocks <select id="cuU"><option value="all">Nifty 500</option><option value="fno">F&amp;O only</option></select></label>' +
+      '<label>Search <input id="cuQ" type="search" placeholder="symbol or name" style="width:140px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="cuRl">&#8635; Rescan</button></div><div class="note" id="custat" style="margin:8px 0 0"></div></div><div id="curesult"></div>';
+    $e("#cuSt").value = F.st; $e("#cuU").value = F.fno ? "fno" : "all";
+    host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "cuSt") F.st = t.value; else if (t.id === "cuMin") F.min = +t.value || 0; else if (t.id === "cuU") F.fno = t.value === "fno"; else if (t.id === "cuQ") F.q = t.value; else return; F.shown = 80; save(); view(); });
+    host.addEventListener("click", ev => {
+      const t = ev.target; if (!t || !t.closest) return;
+      if (t.closest("#cuRl")) { load(true); return; }
+      if (t.closest("#cumore")) { F.shown += 80; view(); return; }
+      let b = t.closest("[data-curr]"); if (b) { F.rr = +b.dataset.curr; save(); const d = $e("#cubt"); if (d) d.innerHTML = btHTML(); return; }
+      if (t.closest("[data-cux]")) { OPEN = null; panel(); view(); return; }
+      if (t.closest("a") || t.closest("[data-ind]") || t.closest("#cupanel") || t.closest("summary")) return;
+      b = t.closest("[data-cus]"); if (b) { const s = b.dataset.cus; OPEN = OPEN === s ? null : s; panel(); view(); setTimeout(() => { if (OPEN && PN && PN.scrollIntoView) PN.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); }
+    });
+  }
+  function open() { build(); view(); load(false); }
+  return {open, detect, arrOf};
+})();
+const cuPaint = () => cuApi.open();
+
 
 
 /* ===== APP ===== */
@@ -4344,6 +4509,7 @@ function show(id) {
   if (id === "rm") { try { rmPaint(); } catch (e) {} }
   if (id === "cb") { try { cbPaint(); } catch (e) {} }
   if (id === "n5") { try { n5Paint(); } catch (e) {} }
+  if (id === "cu") { try { cuPaint(); } catch (e) {} }
   ensureChart(sec);
   if (sec) { const cs = getComputedStyle(sec); document.documentElement.style.setProperty("--a", cs.getPropertyValue("--a")); document.documentElement.style.setProperty("--b", cs.getPropertyValue("--b")); }
 }
@@ -4409,7 +4575,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD Picks</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD Picks</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -4446,6 +4612,10 @@ function render(stocks) {
     const n5 = document.createElement("section"); n5.className = "stock"; n5.id = "n5"; n5.style.cssText = "--a:#0f766e;--b:#2563eb";
     n5.innerHTML = '<div id="n5body"></div>'; views.appendChild(n5);
   }
+  if (!document.getElementById("cu")) {
+    const cu = document.createElement("section"); cu.className = "stock"; cu.id = "cu"; cu.style.cssText = "--a:#b45309;--b:#0891b2";
+    cu.innerHTML = '<div id="cubody"></div>'; views.appendChild(cu);
+  }
   if (!document.getElementById("rm")) {
     const rm = document.createElement("section"); rm.className = "stock"; rm.id = "rm"; rm.style.cssText = "--a:#7c3aed;--b:#db2777";
     rm.innerHTML = '<div id="rmbody"></div>'; views.appendChild(rm);
@@ -4479,7 +4649,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "n5" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "n5" || current === "cu" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
