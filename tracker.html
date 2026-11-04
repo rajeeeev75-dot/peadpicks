@@ -4149,12 +4149,13 @@ const cbApi = (function () {
     let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th>' + SRC.map(x => '<th title="' + E(x[1]) + '" style="text-align:center">' + E(x[2]) + "</th>").join("") + '</tr></thead><tbody>';
     h += rows.length ? rows.slice(0, 80).map((r, i) => {
       const q = r.q, chg = q ? +q.pct : NaN, sel = SEL && SEL.sym === r.sym;
-      return '<tr data-cbsym="' + E(r.sym) + '" style="cursor:pointer' + (sel ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:230px;max-width:340px"><b>' + E(r.sym) + "</b>" + znTvA(r.sym, "D") + ' <button type="button" class="cbtn" data-cbchart="' + E(r.sym) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem;line-height:1.3">' + r.why.map(E).join("; ") + '</div></td><td><span class="chip ' + (r.side === 1 ? "g" : "r") + '">' + (r.side === 1 ? "Long" : "Short") + "</span>" + (r.opp ? ' <small title="Some screens point the other way">mixed</small>' : "") + '</td><td class="num"><b>' + r.score + "</b> / 7</td><td class=\"num\">" + (q ? fmt(+q.p) + ' <small class="' + (chg >= 0 ? "accg" : "accb") + '">' + (chg >= 0 ? "+" : "") + chg.toFixed(1) + "%</small>" : "-") + "</td>" +
+      return '<tr data-cbsym="' + E(r.sym) + '" style="cursor:pointer' + (sel ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:230px;max-width:340px"><b>' + E(r.sym) + "</b>" + znTvA(r.sym, "D") + (function () { try { return cuApi.badge(r.sym); } catch (e) { return ""; } })() + ' <button type="button" class="cbtn" data-cbchart="' + E(r.sym) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem;line-height:1.3">' + r.why.map(E).join("; ") + '</div></td><td><span class="chip ' + (r.side === 1 ? "g" : "r") + '">' + (r.side === 1 ? "Long" : "Short") + "</span>" + (r.opp ? ' <small title="Some screens point the other way">mixed</small>' : "") + '</td><td class="num"><b>' + r.score + "</b> / 7</td><td class=\"num\">" + (q ? fmt(+q.p) + ' <small class="' + (chg >= 0 ? "accg" : "accb") + '">' + (chg >= 0 ? "+" : "") + chg.toFixed(1) + "%</small>" : "-") + "</td>" +
         SRC.map(x => '<td style="text-align:center;white-space:nowrap">' + cellOf(r, x[0]) + "</td>").join("") + "</tr>";
     }).join("") : '<tr><td colspan="' + (5 + SRC.length) + '" class="note">No stock has ' + F.min + " or more screens agreeing yet. The other screens may still be loading (see the line above), or lower the minimum score.</td></tr>";
     if (PN && host.contains(PN)) PN.remove();
+    try { cuApi.ensure(rows.slice(0, 80).map(r => r.sym), () => { if (current === "cb") view(); }); } catch (e) {}
     host.innerHTML = h + "</tbody></table></div>" +
-      '<p class="note">Tap a row or its Chart button to open the chart just below it (tap the row again to close it), every screen\'s numbers and entry prices. A tick means that screen currently points to the same side as the row; a plain number under PEAD or Season is that stock\'s own PEAD score or seasonal chance when it does not agree. Score = ticks out of 7. Trade ideas and OI come from the Intraday tab, Zone from the Zone tab (active zone within 3% of price), 123 from the 123 tab on its selected timeframe and settings, Season from Time Cycle (next 2 weeks, 60%+ or 40% or less), PEAD from results in the last 30 days with a known reaction.</p>' + GUIDE;
+      '<p class="note">Tap a row or its Chart button to open the chart just below it (tap the row again to close it), every screen\'s numbers and entry prices. A tick means that screen currently points to the same side as the row; a plain number under PEAD or Season is that stock\'s own PEAD score or seasonal chance when it does not agree. Score = ticks out of 7. Trade ideas and OI come from the Intraday tab, Zone from the Zone tab (active zone within 3% of price), 123 from the 123 tab on its selected timeframe and settings, Season from Time Cycle (next 2 weeks, 60%+ or 40% or less), PEAD from results in the last 30 days with a known reaction. A small C&amp;H badge beside a stock means the Cup &amp; Handle scan found a base on that timeframe (D daily, W weekly, M monthly) with its score; it is shown for information and is not counted in the score.</p>' + GUIDE;
     cbDock();
   }
   function build() {
@@ -4327,138 +4328,173 @@ const n5Api = (function () {
   return {open, list: () => LIST};
 })();
 const n5Paint = () => n5Api.open();
-/* ===== CUP & HANDLE TAB: scans the Nifty 500 on daily candles for a cup and handle base that is forming or breaking out, with entry/stop/target, an inline chart and a past-data accuracy table ===== */
+/* ===== CUP & HANDLE TAB: scans the Nifty 500 on daily, weekly or monthly candles for a cup and handle base that is forming or breaking out, with entry/stop/target, an inline chart and a past-data accuracy table ===== */
 const cuApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
-  let F = {st: "all", min: 55, fno: false, q: "", shown: 80, rr: 2};
+  let F = {st: "all", min: 55, fno: false, q: "", shown: 80, rr: 2, tf: "D", minw: 0};
   try { const sv = JSON.parse(localStorage.getItem("cuF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 80}); } catch (e) {}
+  if (!/^[DWM]$/.test(F.tf)) F.tf = "D";
   const save = () => { try { localStorage.setItem("cuF", JSON.stringify(F)); } catch (e) {} };
-  let B = {}, RES = {}, ST = {done: 0, total: 0, busy: false, err: "", t: 0}, OPEN = null, PN = null, CH = null, built = false, BT = null, BTBUSY = false, PT = null;
+  const TFN = {D: "Daily", W: "Weekly", M: "Monthly"}, UNIT = {D: "candles", W: "weeks", M: "months"}, WK = {D: 0.2, W: 1, M: 4.33};
+  /* shape limits per timeframe, counted in candles of that timeframe */
+  const PR = {
+    D: {minE: 150, liBack: 220, rise: 120, swing: 8, cupMin: 30, cupMax: 200, bgap: 6, rb: 8, hMax: 30, hMin: 2, ma: 200, vL: 50, vS: 20, step: 3, ent: 25, fol: 60},
+    W: {minE: 60, liBack: 200, rise: 52, swing: 4, cupMin: 12, cupMax: 65, bgap: 2, rb: 3, hMax: 8, hMin: 2, ma: 40, vL: 10, vS: 4, step: 1, ent: 8, fol: 26},
+    M: {minE: 30, liBack: 55, rise: 24, swing: 2, cupMin: 6, cupMax: 40, bgap: 1, rb: 2, hMax: 4, hMin: 1, ma: 10, vL: 12, vS: 4, step: 1, ent: 3, fol: 12}
+  };
+  let B = {}, RES = {D: {}, W: {}, M: {}}, ST = {done: 0, total: 0, busy: false, err: "", t: 0}, OPEN = null, PN = null, CH = null, built = false, BTS = {}, BTB = {}, PT = null, TRIED = {};
+  const fmtW = w => (w >= 52 ? (w / 52).toFixed(1) + " yr" : w >= 17 ? (w / 4.33).toFixed(1) + " mo" : Math.max(1, Math.round(w)) + " wk");
   const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
   const avg = (a, s, e) => { let t = 0, n = 0; for (let i = Math.max(0, s); i <= e; i++) { t += a[i]; n++; } return n ? t / n : NaN; };
   /* ---- detector: looks at candles up to index e (inclusive) ---- */
-  function detect(A, e) {
-    const H = A.h, Lw = A.l, C = A.c, V = A.v; if (e < 150) return null;
+  function detect(A, e, tf) {
+    const P = PR[tf || "D"], H = A.h, Lw = A.l, C = A.c, V = A.v; if (e < P.minE) return null;
     let best = null; const price = C[e], lastPrev = e - 1;
-    for (let li = Math.max(30, e - 220); li <= e - 30; li++) {
-      let ok = true; for (let k = Math.max(0, li - 8); k <= Math.min(lastPrev, li + 8); k++) if (H[k] > H[li]) { ok = false; break; } if (!ok) continue;
-      let mn = 1e18; for (let k = Math.max(0, li - 120); k < li; k++) if (C[k] < mn) mn = C[k];
+    for (let li = Math.max(P.swing + 1, e - P.liBack); li <= e - P.cupMin; li++) {
+      let ok = true; for (let k = Math.max(0, li - P.swing); k <= Math.min(lastPrev, li + P.swing); k++) if (H[k] > H[li]) { ok = false; break; } if (!ok) continue;
+      let mn = 1e18; for (let k = Math.max(0, li - P.rise); k < li; k++) if (C[k] < mn) mn = C[k];
       if (!(C[li] >= mn * 1.25)) continue;
       const rim = H[li]; let bi = li + 1, bl = Lw[bi]; for (let k = li + 1; k <= lastPrev; k++) if (Lw[k] < bl) { bl = Lw[k]; bi = k; }
-      if (bi > e - 6) continue;
+      if (bi > e - P.bgap) continue;
       const depth = (rim - bl) / rim; if (depth < 0.12 || depth > 0.40) continue;
       let ri = bi + 1, rh = H[ri]; for (let k = bi + 1; k <= lastPrev; k++) if (H[k] >= rh) { rh = H[k]; ri = k; }
-      if (ri - bi < 8) continue; const cupLen = ri - li; if (cupLen < 30 || cupLen > 200) continue;
+      if (ri - bi < P.rb) continue; const cupLen = ri - li; if (cupLen < P.cupMin || cupLen > P.cupMax) continue;
       if (rh < rim * 0.90 || rh > rim * 1.08) continue;
-      const hl = lastPrev - ri; if (hl > 30) continue;
+      const hl = lastPrev - ri; if (hl > P.hMax) continue;
       let hlow = Lw[ri]; for (let k = ri; k <= lastPrev; k++) if (Lw[k] < hlow) hlow = Lw[k];
       const hd = (rh - hlow) / rh; if (hd > 0.15 || hd > depth * 0.55) continue;
       if (hlow < bl + (rim - bl) * 0.5) continue;
       let cnt = 0; for (let k = li; k <= ri; k++) if (Lw[k] <= bl + (rim - bl) / 3) cnt++; const round = cnt / (ri - li + 1); if (round < 0.08) continue;
       if (price > rh * 1.05) continue;
-      const v50 = avg(V, e - 50, lastPrev), hv = hl >= 2 ? avg(V, ri + 1, lastPrev) : NaN, dry = isFinite(hv) && v50 > 0 ? hv / v50 : NaN, v20 = avg(V, e - 20, lastPrev), bv = v20 > 0 ? V[e] / v20 : NaN;
-      let ma = 0, mc = 0; for (let k = Math.max(0, e - 199); k <= e; k++) { ma += C[k]; mc++; } const above200 = price > ma / mc;
-      const away = (rh / price - 1) * 100, brk = price > rh;
+      const v50 = avg(V, e - P.vL, lastPrev), hv = hl >= P.hMin ? avg(V, ri + 1, lastPrev) : NaN, dry = isFinite(hv) && v50 > 0 ? hv / v50 : NaN, v20 = avg(V, e - P.vS, lastPrev), bv = v20 > 0 ? V[e] / v20 : NaN;
+      let ma = 0, mc = 0; for (let k = Math.max(0, e - P.ma + 1); k <= e; k++) { ma += C[k]; mc++; } const above200 = price > ma / mc;
+      const away = (rh / price - 1) * 100, brk = price > rh, weeks = cupLen * WK[tf || "D"], hweeks = hl * WK[tf || "D"], tweeks = weeks + hweeks;
       const status = brk ? (bv >= 1.5 ? "Breakout" : "Breakout, weak volume") : away <= 3 ? "Near breakout" : "Handle forming";
       let sc = 0;
-      sc += Math.max(0, 20 - Math.abs(rh / rim - 1) * 250);                               // right rim close to the left rim
+      sc += Math.max(0, 15 - Math.abs(rh / rim - 1) * 190);                               // right rim close to the left rim
       sc += depth >= 0.15 && depth <= 0.33 ? 15 : 8;                                       // cup depth sweet spot
       sc += Math.min(15, round * 60);                                                      // rounded, not V-shaped
       sc += hd >= 0.03 && hd <= 0.12 ? 20 : hd < 0.03 ? 10 : 8;                            // handle depth
       sc += isFinite(dry) ? (dry < 0.8 ? 10 : dry < 1 ? 6 : 0) : 3;                       // volume drying up in the handle
       sc += above200 ? 10 : 0;
       sc += brk ? (bv >= 1.5 ? 10 : 4) : away <= 3 ? 8 : away <= 6 ? 4 : 0;
-      const o = {li, bi, ri, e, rim, bl, rh, hlow, depth, hd, cupLen, hl, pivot: rh, stop: hlow, target: rh + (rim - bl), status, dry, bv, above200, away, price, score: Math.round(sc)};
+      sc += Math.min(10, weeks / 3);                                                       // longer cups are stronger
+      const o = {li, bi, ri, e, rim, bl, rh, hlow, depth, hd, cupLen, hl, weeks, hweeks, tweeks, pivot: rh, stop: hlow, target: rh + (rim - bl), status, dry, bv, above200, away, price, score: Math.min(100, Math.round(sc))};
       if (!best || o.score > best.score) best = o;
     }
     return best;
   }
   const arrOf = b => ({h: b.map(x => x.high), l: b.map(x => x.low), c: b.map(x => x.close), v: b.map(x => x.vol), t: b.map(x => x.time)});
-  function analyse(sym) {
-    const o = B[sym]; if (!o || o.bars.length < 200) { delete RES[sym]; return; }
-    const A = o.A = arrOf(o.bars), n = A.c.length; let hit = null;
-    for (let d = 0; d <= 2 && !hit; d++) { const r = detect(A, n - 1 - d); if (r && (d === 0 || /Breakout/.test(r.status))) { hit = r; if (d > 0) { hit.status = "Breakout " + d + (d === 1 ? " day ago" : " days ago"); hit.price = A.c[n - 1]; hit.away = (hit.pivot / hit.price - 1) * 100; if (hit.price > hit.pivot * 1.06) hit = null; } } }
-    if (hit) RES[sym] = hit; else delete RES[sym];
+  function aggregate(bars, tf) {
+    const out = []; let key = null, cur = null;
+    bars.forEach(x => {
+      let k; if (tf === "M") k = x.time.slice(0, 7); else { const d = new Date(x.time + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); k = d.toISOString().slice(0, 10); }
+      if (k !== key) { key = k; cur = {time: x.time, open: x.open, high: x.high, low: x.low, close: x.close, vol: x.vol}; out.push(cur); }
+      else { if (x.high > cur.high) cur.high = x.high; if (x.low < cur.low) cur.low = x.low; cur.close = x.close; cur.vol += x.vol; }
+    });
+    return out;
   }
-  async function fetchBars(list) {
+  function analyse(sym) {
+    const o = B[sym]; if (!o || o.bars.length < 200) { ["D", "W", "M"].forEach(t => delete RES[t][sym]); return; }
+    o.X = {D: {bars: o.bars}, W: {bars: aggregate(o.bars, "W")}, M: {bars: aggregate(o.bars, "M")}};
+    ["D", "W", "M"].forEach(tf => {
+      const X = o.X[tf]; X.A = arrOf(X.bars); const A = X.A, n = A.c.length; let hit = null;
+      for (let d = 0; d <= 2 && !hit; d++) { const r = detect(A, n - 1 - d, tf); if (r && (d === 0 || /Breakout/.test(r.status))) { hit = r; if (d > 0) { hit.status = "Breakout " + d + " " + (tf === "D" ? "day" : tf === "W" ? "week" : "month") + (d > 1 ? "s" : "") + " ago"; hit.price = A.c[n - 1]; hit.away = (hit.pivot / hit.price - 1) * 100; if (hit.price > hit.pivot * 1.06) hit = null; } } }
+      if (hit) RES[tf][sym] = hit; else delete RES[tf][sym];
+    });
+    o.A = o.X.D.A;
+  }
+  async function fetchBars(list, quiet) {
     const chunks = []; for (let i = 0; i < list.length; i += 12) chunks.push(list.slice(i, i + 12));
-    ST.total = list.length; ST.done = 0; let ix = 0;
-    const worker = async () => { while (ix < chunks.length) { const ch = chunks[ix++]; try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json(); ch.forEach(sym => { const rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 150) { B[sym] = {t: Date.now(), bars: rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; analyse(sym); } }); } catch (e) {} ST.done += ch.length; schedule(); } };
+    if (!quiet) { ST.total = list.length; ST.done = 0; } let ix = 0;
+    const worker = async () => { while (ix < chunks.length) { const ch = chunks[ix++]; try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json(); ch.forEach(sym => { const rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 150) { B[sym] = {t: Date.now(), bars: rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; analyse(sym); } }); } catch (e) {} if (!quiet) { ST.done += ch.length; schedule(); } } };
     await Promise.all([worker(), worker(), worker()]);
+  }
+  /* used by the Combo tab: scan just the stocks it lists, then call back so it can repaint */
+  async function ensure(syms, cb) {
+    if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
+    const miss = syms.filter(s => !B[s] && !TRIED[s]); if (!miss.length) return; miss.forEach(s => { TRIED[s] = 1; });
+    try { await fetchBars(miss, true); } catch (e) {} BTS = {}; try { cb && cb(); } catch (e) {}
+  }
+  function badge(sym) {
+    const out = []; ["M", "W", "D"].forEach(tf => { const r = RES[tf][sym]; if (r && r.score >= 55) out.push('<span class="chip ' + (/^Breakout/.test(r.status) ? "g" : r.status === "Near breakout" ? "w" : "n") + '" title="Cup and handle on ' + TFN[tf] + " candles: " + E(r.status) + ", score " + r.score + ", formed over " + fmtW(r.tweeks) + ", buy above " + f2(r.pivot * 1.001) + '" style="font-size:.68rem;padding:0 6px">C&amp;H ' + tf + " " + r.score + "</span>"); });
+    return out.length ? " " + out.join(" ") : "";
   }
   function universe() { const L = n5Api.list(); const fno = new Set(typeof ZN_FNO !== "undefined" ? ZN_FNO : []); return L.filter(x => !F.fno || fno.has(x.s)); }
   async function load(force) {
     if (ST.busy || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
     if (!force && ST.t && Date.now() - ST.t < 20 * 60e3) return;
     ST.busy = true; ST.err = "";
-    try { const need = n5Api.list().map(x => x.s).filter(s => force || !B[s] || Date.now() - B[s].t > 20 * 60e3); await fetchBars(need); ST.t = Date.now(); if (!Object.keys(B).length) ST.err = "no candles came back from the Worker"; }
+    try { const need = n5Api.list().map(x => x.s).filter(s => force || !B[s] || Date.now() - B[s].t > 20 * 60e3); BTS = {}; await fetchBars(need); ST.t = Date.now(); if (!Object.keys(B).length) ST.err = "no candles came back from the Worker"; }
     catch (e) { ST.err = String((e && e.message) || e); }
     ST.busy = false; view(); backtest();
   }
   function schedule() { if (PT) return; PT = setTimeout(() => { PT = null; try { if (current === "cu") view(); } catch (e) {} }, 600); }
-  /* ---- back-test: replay the detector on past candles ---- */
-  function simulate(A, e, c, rr) {
-    const n = A.c.length, entry = c.pivot * 1.001, stop = c.stop * 0.999, risk = entry - stop; if (!(risk > 0)) return null;
-    let ei = -1; for (let k = e + 1; k <= Math.min(n - 1, e + 25); k++) { if (A.h[k] >= entry) { ei = k; break; } if (A.l[k] < stop) return null; }
+  /* ---- back-test: replay the detector on past candles of the chosen timeframe ---- */
+  function simulate(A, e, c, rr, tf) {
+    const P = PR[tf], n = A.c.length, entry = c.pivot * 1.001, stop = c.stop * 0.999, risk = entry - stop; if (!(risk > 0)) return null;
+    let ei = -1; for (let k = e + 1; k <= Math.min(n - 1, e + P.ent); k++) { if (A.h[k] >= entry) { ei = k; break; } if (A.l[k] < stop) return null; }
     if (ei < 0) return null; const tgt = entry + rr * risk;
     if (A.l[ei] <= stop) return {r: -1, d: 1};
-    for (let k = ei; k <= Math.min(n - 1, ei + 60); k++) { if (k > ei && A.l[k] <= stop) return {r: -1, d: k - ei}; if (A.h[k] >= tgt) return {r: rr, d: k - ei}; }
-    const last = Math.min(n - 1, ei + 60); if (last - ei < 60) return {open: true}; return {r: (A.c[last] - entry) / risk, d: 60};
+    for (let k = ei; k <= Math.min(n - 1, ei + P.fol); k++) { if (k > ei && A.l[k] <= stop) return {r: -1, d: k - ei}; if (A.h[k] >= tgt) return {r: rr, d: k - ei}; }
+    const last = Math.min(n - 1, ei + P.fol); if (last - ei < P.fol) return {open: true}; return {r: (A.c[last] - entry) / risk, d: P.fol};
   }
   function backtest() {
-    if (BTBUSY) return; const syms = Object.keys(B).filter(s => B[s].A); if (syms.length < 20) return; BTBUSY = true;
-    const sig = []; let i = 0;
+    const tf = F.tf; if (BTB[tf] || BTS[tf]) return; const syms = Object.keys(B).filter(s => B[s].X); if (syms.length < 20) return; BTB[tf] = true;
+    const P = PR[tf], sig = []; let i = 0;
     const step = () => {
       const t0 = Date.now();
       while (i < syms.length && Date.now() - t0 < 40) {
-        const sym = syms[i++], A = B[sym].A, n = A.c.length, seen = new Set();
-        for (let e = 160; e < n - 5; e += 3) { const c = detect(A, e); if (!c || /Breakout/.test(c.status) || c.away > 3) continue; const k = c.li + "|" + c.ri; if (seen.has(k)) continue; seen.add(k); sig.push({sym, e, c, year: A.t[e].slice(0, 4)}); }
+        const sym = syms[i++], A = B[sym].X[tf].A, n = A.c.length, seen = new Set();
+        for (let e = P.minE + 10; e < n - 3; e += P.step) { const c = detect(A, e, tf); if (!c || /Breakout/.test(c.status) || c.away > 3) continue; const k = c.li + "|" + c.ri; if (seen.has(k)) continue; seen.add(k); sig.push({sym, e, c, year: A.t[e].slice(0, 4)}); }
       }
       if (i < syms.length) { setTimeout(step, 0); return; }
-      BT = {sig, syms: syms.length}; BTBUSY = false; if (current === "cu") view();
+      BTS[tf] = {sig, syms: syms.length}; BTB[tf] = false; if (current === "cu") { const d = $e("#cubt"); if (d) d.innerHTML = btHTML(); }
     };
     setTimeout(step, 0);
   }
   function btHTML() {
-    if (!BT) return '<p class="note" style="margin:0">' + (BTBUSY ? "Replaying the scan on past candles..." : "The accuracy table appears once the candles have loaded.") + "</p>";
-    const rr = F.rr, res = []; BT.sig.forEach(s => { const o = simulate(B[s.sym].A, s.e, s.c, rr); if (o && !o.open) res.push(Object.assign({year: s.year, score: s.c.score}, o)); });
+    const tf = F.tf, BT = BTS[tf];
+    if (!BT) return '<p class="note" style="margin:0">' + (BTB[tf] ? "Replaying the scan on past " + TFN[tf].toLowerCase() + " candles..." : "The accuracy table appears once the candles have loaded.") + "</p>";
+    const rr = F.rr, res = []; BT.sig.forEach(s => { const o = simulate(B[s.sym].X[tf].A, s.e, s.c, rr, tf); if (o && !o.open) res.push(Object.assign({year: s.year, score: s.c.score}, o)); });
     const line = (name, rs) => { const n = rs.length, w = rs.filter(x => x.r > 0).length, tot = rs.reduce((a, x) => a + x.r, 0); return {c: [name, n + accFew(n), n ? "<b>" + accPc(w, n) + "</b>" : "-", accR(n ? tot / n : NaN), accR(n ? tot : NaN)]}; };
     const yrs = Array.from(new Set(res.map(x => x.year))).sort();
     const pick = '<div class="charttools" style="border:0;padding:0;margin:14px 0 -8px"><b>Target</b>' + [2, 3].map(v => '<button type="button" class="cbtn" data-curr="' + v + '" aria-pressed="' + (v === rr) + '">1 : ' + v + "</button>").join("") + "</div>";
-    return pick + accTable("Back-test on past candles (about 5 years, " + BT.syms + " stocks)", ["Group", "Trades", "Win rate", "Average per trade", "Total"], [line("<b>All signals</b>", res), line("Score 55 to 69", res.filter(x => x.score >= 55 && x.score < 70)), line("Score 70 to 84", res.filter(x => x.score >= 70 && x.score < 85)), line("Score 85 or more", res.filter(x => x.score >= 85))].concat(yrs.map(y => line(y, res.filter(x => x.year === y)))),
-      "Every past day was scanned in steps of 3 candles. Each cup and handle seen within 3% below its pivot counted once. The trade starts only if price reached 0.1% above the pivot within the next 25 candles, with the stop 0.1% under the handle low and the target " + rr + " times the risk. It is followed for up to 60 candles (if a candle touches both, it counts as a loss; unfinished trades are left out). Results are in R, before brokerage and slippage. Stocks that no longer exist are missing, which flatters the result a little. Past results only, not advice.");
+    const P = PR[tf];
+    return pick + accTable("Back-test on past " + TFN[tf].toLowerCase() + " candles (about 5 years, " + BT.syms + " stocks)", ["Group", "Trades", "Win rate", "Average per trade", "Total"], [line("<b>All signals</b>", res), line("Score 55 to 69", res.filter(x => x.score >= 55 && x.score < 70)), line("Score 70 to 84", res.filter(x => x.score >= 70 && x.score < 85)), line("Score 85 or more", res.filter(x => x.score >= 85))].concat(yrs.map(y => line(y, res.filter(x => x.year === y)))),
+      "Every past " + (tf === "D" ? "day was scanned in steps of 3 candles" : "candle was scanned") + ". Each cup and handle seen within 3% below its pivot counted once. The trade starts only if price reached 0.1% above the pivot within the next " + P.ent + " " + UNIT[tf] + ", with the stop 0.1% under the handle low and the target " + rr + " times the risk. It is followed for up to " + P.fol + " " + UNIT[tf] + " (if a candle touches both, it counts as a loss; unfinished trades are left out). Results are in R, before brokerage and slippage. Stocks that no longer exist are missing, which flatters the result a little." + (tf === "M" ? " Five years holds only 60 monthly candles, so expect very few cases: treat monthly results as a rough guide only." : "") + " Past results only, not advice.");
   }
   /* ---- table ---- */
   function view() {
     const host = $e("#curesult"); if (!host) return;
     if (PN && host.contains(PN)) PN.remove();
-    const L = universe(), q = F.q.trim().toUpperCase(), have = L.filter(x => RES[x.s]);
-    let rows = have.filter(x => RES[x.s].score >= F.min && (F.st === "all" || (F.st === "brk" && /^Breakout/.test(RES[x.s].status)) || (F.st === "near" && RES[x.s].status === "Near breakout") || (F.st === "form" && RES[x.s].status === "Handle forming")) && (!q || x.s.indexOf(q) >= 0 || x.n.toUpperCase().indexOf(q) >= 0));
+    const tf = F.tf, R = RES[tf], L = universe(), q = F.q.trim().toUpperCase(), have = L.filter(x => R[x.s]);
+    let rows = have.filter(x => R[x.s].score >= F.min && R[x.s].tweeks >= F.minw && (F.st === "all" || (F.st === "brk" && /^Breakout/.test(R[x.s].status)) || (F.st === "near" && R[x.s].status === "Near breakout") || (F.st === "form" && R[x.s].status === "Handle forming")) && (!q || x.s.indexOf(q) >= 0 || x.n.toUpperCase().indexOf(q) >= 0));
     const rank = s => (/^Breakout/.test(s) ? 0 : s === "Near breakout" ? 1 : 2);
-    rows.sort((a, b) => rank(RES[a.s].status) - rank(RES[b.s].status) || RES[b.s].score - RES[a.s].score);
-    const stat = $e("#custat"); if (stat) stat.innerHTML = (ST.busy ? "Loading candles " + Math.min(ST.done, ST.total) + "/" + ST.total + " &middot; " : "") + Object.keys(B).length + " stocks scanned &middot; " + have.length + " with a cup and handle &middot; " + rows.length + " shown" + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + "</span>" : "");
+    rows.sort((a, b) => rank(R[a.s].status) - rank(R[b.s].status) || R[b.s].score - R[a.s].score);
+    const stat = $e("#custat"); if (stat) stat.innerHTML = (ST.busy ? "Loading candles " + Math.min(ST.done, ST.total) + "/" + ST.total + " &middot; " : "") + Object.keys(B).length + " stocks scanned &middot; " + have.length + " with a " + TFN[tf].toLowerCase() + " cup and handle &middot; " + rows.length + " shown" + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + "</span>" : "");
     const chip = s => '<span class="chip ' + (/^Breakout/.test(s) ? "g" : s === "Near breakout" ? "w" : "n") + '">' + E(s) + "</span>";
-    let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Status</th><th class="num">Score</th><th class="num">Price</th><th class="num">Buy above</th><th class="num">Away %</th><th class="num">Stop</th><th class="num">Target</th><th class="num">R:R</th></tr></thead><tbody>';
+    let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Status</th><th class="num">Score</th><th class="num" title="Time taken to form the pattern, from the left rim to today">Time to form</th><th class="num">Price</th><th class="num">Buy above</th><th class="num">Away %</th><th class="num">Stop</th><th class="num">Target</th><th class="num">R:R</th></tr></thead><tbody>';
     h += rows.length ? rows.slice(0, F.shown).map((x, i) => {
-      const r = RES[x.s], en = r.pivot * 1.001, st = r.stop * 0.999, rr = (r.target - en) / (en - st), op = OPEN === x.s;
-      return '<tr data-cus="' + E(x.s) + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:190px"><b>' + E(x.s) + "</b>" + znTvA(x.s, "D") + ' <button type="button" class="cbtn" data-cuc="' + E(x.s) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(x.n) + "</div></td><td>" + chip(r.status) + '</td><td class="num"><b>' + r.score + '</b></td><td class="num">' + f2(r.price) + '</td><td class="num">' + f2(en) + '</td><td class="num">' + (r.away > 0 ? "+" : "") + r.away.toFixed(1) + '%</td><td class="num">' + f2(st) + '</td><td class="num">' + f2(r.target) + '</td><td class="num">' + (isFinite(rr) ? rr.toFixed(1) : "-") + "</td></tr>" + (op ? '<tr class="dockrow" data-cudock="1"><td colspan="10"></td></tr>' : "");
-    }).join("") : '<tr><td colspan="10" class="note">' + (ST.busy ? "Scanning, results appear as candles arrive..." : "No cup and handle matches these filters right now.") + "</td></tr>";
-    host.innerHTML = h + "</tbody></table></div>" + (rows.length > F.shown ? '<p><button type="button" class="cbtn" id="cumore">Show more (' + (rows.length - F.shown) + " left)</button></p>" : "") + '<p class="note">Tap a stock to open its chart just below it, and tap again to close. Buy above = pivot (the handle high) plus 0.1%; Stop = handle low minus 0.1%; Target = pivot plus the depth of the cup (the usual measured move). A screening aid, not a signal: always check the chart.</p>' +
-      '<details class="accd" data-accd="cu" style="margin-top:18px"' + (ACC_OPEN.cu ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how past cup and handle setups did (tap to open)</summary><div id="cubt">' + btHTML() + "</div></details>";
+      const r = R[x.s], en = r.pivot * 1.001, st = r.stop * 0.999, rr = (r.target - en) / (en - st), op = OPEN === x.s;
+      return '<tr data-cus="' + E(x.s) + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:190px"><b>' + E(x.s) + "</b>" + znTvA(x.s, tf === "D" ? "D" : tf) + ' <button type="button" class="cbtn" data-cuc="' + E(x.s) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(x.n) + "</div></td><td>" + chip(r.status) + '</td><td class="num"><b>' + r.score + '</b></td><td class="num">' + fmtW(r.tweeks) + '<div class="note" style="margin:0;font-size:.72rem;white-space:nowrap">cup ' + fmtW(r.weeks) + " + handle " + fmtW(r.hweeks) + "</div></td><td class=\"num\">" + f2(r.price) + '</td><td class="num">' + f2(en) + '</td><td class="num">' + (r.away > 0 ? "+" : "") + r.away.toFixed(1) + '%</td><td class="num">' + f2(st) + '</td><td class="num">' + f2(r.target) + '</td><td class="num">' + (isFinite(rr) ? rr.toFixed(1) : "-") + "</td></tr>" + (op ? '<tr class="dockrow" data-cudock="1"><td colspan="11"></td></tr>' : "");
+    }).join("") : '<tr><td colspan="11" class="note">' + (ST.busy ? "Scanning, results appear as candles arrive..." : "No " + TFN[tf].toLowerCase() + " cup and handle matches these filters right now.") + "</td></tr>";
+    host.innerHTML = h + "</tbody></table></div>" + (rows.length > F.shown ? '<p><button type="button" class="cbtn" id="cumore">Show more (' + (rows.length - F.shown) + " left)</button></p>" : "") + '<p class="note">Tap a stock to open its chart just below it, and tap again to close. Buy above = pivot (the handle high) plus 0.1%; Stop = handle low minus 0.1%; Target = pivot plus the depth of the cup (the usual measured move). Time to form is the cup plus the handle, from the left rim to the latest candle. Longer cups score higher (up to 10 points) and the Min time to form filter keeps only the long bases, and weekly or monthly cups are slower but carry more weight. A screening aid, not a signal: always check the chart.</p>' +
+      '<details class="accd" data-accd="cu" style="margin-top:18px"' + (ACC_OPEN.cu ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how past ' + TFN[tf].toLowerCase() + ' cup and handle setups did (tap to open)</summary><div id="cubt">' + btHTML() + "</div></details>";
     const dk = host.querySelector("tr[data-cudock] td"); if (dk && PN) dk.appendChild(PN);
   }
   function removeChart() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } }
   function panel() {
     if (!PN) { PN = document.createElement("div"); PN.id = "cupanel"; }
     removeChart(); if (!OPEN) { PN.innerHTML = ""; return; }
-    const r = RES[OPEN], o = B[OPEN]; if (!r || !o) { PN.innerHTML = ""; return; }
-    const en = r.pivot * 1.001, st = r.stop * 0.999, wk = Math.round(r.cupLen / 5), line = (a, b) => "<tr><td><b>" + a + "</b></td><td>" + b + "</td></tr>";
+    const tf = F.tf, r = RES[tf][OPEN], o = B[OPEN] && B[OPEN].X && B[OPEN].X[tf]; if (!r || !o) { PN.innerHTML = ""; return; }
+    const en = r.pivot * 1.001, st = r.stop * 0.999, wk = Math.round(r.weeks), u = UNIT[tf], line = (a, b) => "<tr><td><b>" + a + "</b></td><td>" + b + "</td></tr>";
     PN.innerHTML = '<div class="card"><table class="acctbl" style="font-size:.86rem"><tbody>' +
-      line("Cup", "From " + o.A.t[r.li] + " (left rim " + f2(r.rim) + ") down to " + f2(r.bl) + " on " + o.A.t[r.bi] + ", back up to " + f2(r.rh) + " on " + o.A.t[r.ri] + ". Depth " + (r.depth * 100).toFixed(0) + "%, about " + wk + " weeks, right rim " + ((r.rh / r.rim - 1) * 100).toFixed(1) + "% from the left rim.") +
-      line("Handle", r.hl + " candles, " + (r.hd * 100).toFixed(1) + "% deep" + (isFinite(r.dry) ? ", volume " + Math.round(r.dry * 100) + "% of the 50-day average" + (r.dry < 0.9 ? " (drying up, good)" : " (not drying up)") : "") + ".") +
-      line("Trend and volume", (r.above200 ? "Above" : "Below") + " its 200-day average" + (isFinite(r.bv) ? "; today's volume " + r.bv.toFixed(1) + " times the 20-day average" : "") + ".") +
+      line("Cup (" + TFN[tf].toLowerCase() + ")", "From " + o.A.t[r.li] + " (left rim " + f2(r.rim) + ") down to " + f2(r.bl) + " on " + o.A.t[r.bi] + ", back up to " + f2(r.rh) + " on " + o.A.t[r.ri] + ". Depth " + (r.depth * 100).toFixed(0) + "%, " + r.cupLen + " " + u + " (about " + wk + " weeks). Total time to form the pattern, cup plus handle: <b>" + fmtW(r.tweeks) + "</b> (" + o.A.t[r.li] + " to " + o.A.t[o.A.t.length - 1] + "). Right rim " + ((r.rh / r.rim - 1) * 100).toFixed(1) + "% from the left rim.") +
+      line("Handle", r.hl + " " + u + ", " + (r.hd * 100).toFixed(1) + "% deep" + (isFinite(r.dry) ? ", volume " + Math.round(r.dry * 100) + "% of the recent average" + (r.dry < 0.9 ? " (drying up, good)" : " (not drying up)") : "") + ".") +
+      line("Trend and volume", (r.above200 ? "Above" : "Below") + " its long-term average" + (isFinite(r.bv) ? "; latest volume " + r.bv.toFixed(1) + " times the recent average" : "") + ".") +
       line("Entry plan", "Buy above <b>" + f2(en) + "</b> (" + f2(r.price) + " now, " + (r.away > 0 ? r.away.toFixed(1) + "% below" : Math.abs(r.away).toFixed(1) + "% above") + "), stop <b>" + f2(st) + "</b> (" + ((en - st) / en * 100).toFixed(1) + "% risk), target <b>" + f2(r.target) + "</b> (" + ((r.target - en) / (en - st)).toFixed(1) + " times the risk), or exit part at 2 times the risk.") + "</tbody></table>" +
-      '<div class="charttools" style="margin-top:10px">' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, "D") + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-cux="1">Close</button></div><div id="cubox" style="height:420px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div class="note" style="margin:6px 0 0">Daily candles from your Worker. L, B and R mark the left rim, the cup bottom and the right rim. Lines: pivot, stop and target.</div></div>';
+      '<div class="charttools" style="margin-top:10px">' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, tf === "D" ? "D" : tf) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-cux="1">Close</button></div><div id="cubox" style="height:420px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div class="note" style="margin:6px 0 0">' + TFN[tf] + ' candles from your Worker. L, B and R mark the left rim, the cup bottom and the right rim. Lines: pivot, stop and target.</div></div>';
     const box = PN.querySelector("#cubox"), LW = window.LightweightCharts; if (!LW || !box) return;
     const c = colors(), b = o.bars, chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
     const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
@@ -4467,19 +4503,19 @@ const cuApi = (function () {
     try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
     try { candle.setMarkers([{time: o.A.t[r.li], position: "aboveBar", color: "#7c3aed", shape: "arrowDown", text: "L"}, {time: o.A.t[r.bi], position: "belowBar", color: "#7c3aed", shape: "arrowUp", text: "B"}, {time: o.A.t[r.ri], position: "aboveBar", color: "#7c3aed", shape: "arrowDown", text: "R"}]); } catch (e) {}
     [[en, "#2563eb", "Buy"], [st, "#dc2626", "Stop"], [r.target, "#16a34a", "Target"]].forEach(a => { try { candle.createPriceLine({price: a[0], color: a[1], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[2]}); } catch (e) {} });
-    CH = chart; try { const from = o.A.t[Math.max(0, r.li - 25)]; chart.timeScale().setVisibleRange({from, to: b[b.length - 1].time}); } catch (e) { chart.timeScale().fitContent(); }
+    CH = chart; try { const from = o.A.t[Math.max(0, r.li - (tf === "D" ? 25 : 6))]; chart.timeScale().setVisibleRange({from, to: b[b.length - 1].time}); } catch (e) { chart.timeScale().fitContent(); }
   }
   function build() {
     const host = document.getElementById("cubody"); if (!host || built) return; built = true;
-    host.innerHTML = '<div class="znhead"><div><h2>CUP &amp; HANDLE</h2><span>Nifty 500 stocks forming or breaking out of a cup and handle base</span></div><div class="znpills"><span>Daily candles</span><span>Entry, stop, target</span><span>Back-tested</span></div></div>' +
-      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Status <select id="cuSt"><option value="all">All</option><option value="brk">Breakout</option><option value="near">Near breakout</option><option value="form">Handle forming</option></select></label>' +
-      '<label>Min score <input id="cuMin" type="number" min="0" max="100" style="width:64px" value="' + F.min + '"></label><label>Stocks <select id="cuU"><option value="all">Nifty 500</option><option value="fno">F&amp;O only</option></select></label>' +
+    host.innerHTML = '<div class="znhead"><div><h2>CUP &amp; HANDLE</h2><span>Nifty 500 stocks forming or breaking out of a cup and handle base</span></div><div class="znpills"><span>Daily, weekly, monthly</span><span>Entry, stop, target</span><span>Back-tested</span></div></div>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Timeframe <select id="cuTf"><option value="D">Daily</option><option value="W">Weekly</option><option value="M">Monthly</option></select></label><label>Status <select id="cuSt"><option value="all">All</option><option value="brk">Breakout</option><option value="near">Near breakout</option><option value="form">Handle forming</option></select></label>' +
+      '<label>Min score <input id="cuMin" type="number" min="0" max="100" style="width:64px" value="' + F.min + '"></label><label title="Only show patterns that took at least this many weeks to form">Min time to form <select id="cuW"><option value="0">Any</option><option value="8">8 weeks +</option><option value="13">3 months +</option><option value="26">6 months +</option><option value="52">1 year +</option></select></label><label>Stocks <select id="cuU"><option value="all">Nifty 500</option><option value="fno">F&amp;O only</option></select></label>' +
       '<label>Search <input id="cuQ" type="search" placeholder="symbol or name" style="width:140px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="cuRl">&#8635; Rescan</button></div><div class="note" id="custat" style="margin:8px 0 0"></div></div><div id="curesult"></div>';
-    $e("#cuSt").value = F.st; $e("#cuU").value = F.fno ? "fno" : "all";
-    host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "cuSt") F.st = t.value; else if (t.id === "cuMin") F.min = +t.value || 0; else if (t.id === "cuU") F.fno = t.value === "fno"; else if (t.id === "cuQ") F.q = t.value; else return; F.shown = 80; save(); view(); });
+    $e("#cuSt").value = F.st; $e("#cuU").value = F.fno ? "fno" : "all"; $e("#cuTf").value = F.tf; $e("#cuW").value = String(F.minw);
+    host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "cuSt") F.st = t.value; else if (t.id === "cuMin") F.min = +t.value || 0; else if (t.id === "cuU") F.fno = t.value === "fno"; else if (t.id === "cuQ") F.q = t.value; else if (t.id === "cuW") F.minw = +t.value || 0; else if (t.id === "cuTf") { F.tf = t.value; OPEN = null; panel(); backtest(); } else return; F.shown = 80; save(); view(); });
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest) return;
-      if (t.closest("#cuRl")) { load(true); return; }
+      if (t.closest("#cuRl")) { BTS = {}; load(true); return; }
       if (t.closest("#cumore")) { F.shown += 80; view(); return; }
       let b = t.closest("[data-curr]"); if (b) { F.rr = +b.dataset.curr; save(); const d = $e("#cubt"); if (d) d.innerHTML = btHTML(); return; }
       if (t.closest("[data-cux]")) { OPEN = null; panel(); view(); return; }
@@ -4487,8 +4523,8 @@ const cuApi = (function () {
       b = t.closest("[data-cus]"); if (b) { const s = b.dataset.cus; OPEN = OPEN === s ? null : s; panel(); view(); setTimeout(() => { if (OPEN && PN && PN.scrollIntoView) PN.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); }
     });
   }
-  function open() { build(); view(); load(false); }
-  return {open, detect, arrOf};
+  function open() { build(); view(); load(false); backtest(); }
+  return {open, detect, arrOf, ensure, badge};
 })();
 const cuPaint = () => cuApi.open();
 
