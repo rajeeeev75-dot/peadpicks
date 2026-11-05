@@ -1,0 +1,28 @@
+name: PEAD research
+on:
+  schedule:
+    - cron: "30 23 * * 0"   # Monday 05:00 IST: keeps adding stocks to the research data until the whole universe is covered
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency:
+  group: pead-data
+  cancel-in-progress: false
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    env:
+      BUDGET_MIN: "110"
+      BT_MAX: "500"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install yfinance pandas requests numpy
+      - run: python pead_features.py
+      - run: python pead_research.py
+      - run: |
+          git config user.name "pead-bot"; git config user.email "bot@users.noreply.github.com"
+          git add pead_features.csv features_cache.json pead_research.md pead_research.json
+          git diff --staged --quiet || (git commit -m "Update PEAD research" && git pull --rebase && git push)
