@@ -107,6 +107,21 @@ li{margin:6px 0;max-width:70ch}
 .dtile{border:1px solid var(--line);border-radius:12px;padding:10px 12px}.dtile small{display:block;color:var(--mute);font-weight:600}
 .dtile b{font-size:1.5rem;display:block}.dtile b i{font-size:.8rem;font-style:normal;color:var(--mute);font-weight:400}.dtile>span{display:block;font-size:.78rem;color:var(--mute);margin-top:4px}
 .dtile .pchip{display:inline-block;color:#fff}
+/* DVM blocks (layout ported from the DVM scores page) */
+:root{--dv-pos:#1a9e5c;--dv-pos-bg:#e6f6ee;--dv-neu:#e08a00;--dv-neu-bg:#fff3df;--dv-neg:#d6403a;--dv-neg-bg:#fdeceb}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--dv-pos-bg:#12301f;--dv-neu-bg:#3a2c0c;--dv-neg-bg:#3b1816}}
+:root[data-theme="dark"]{--dv-pos-bg:#12301f;--dv-neu-bg:#3a2c0c;--dv-neg-bg:#3b1816}
+.dvmx-pos{--dvc:var(--dv-pos);--dvb:var(--dv-pos-bg)}.dvmx-neu{--dvc:var(--dv-neu);--dvb:var(--dv-neu-bg)}.dvmx-neg{--dvc:var(--dv-neg);--dvb:var(--dv-neg-bg)}.dvmx-na{--dvc:var(--mute);--dvb:transparent}
+.dvmx-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dvmx-squares{display:inline-flex;gap:3px;vertical-align:middle}.dvmx-squares span{width:10px;height:10px;border-radius:2px;display:inline-block;background:var(--dvc)}
+.dvmx-wrap{display:flex;flex-wrap:wrap;gap:1rem;margin:10px 0 8px}
+.dvmx-block{flex:1 1 220px;max-width:320px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--dvb)}
+.dvmx-progress{height:5px;background:color-mix(in srgb,var(--ink) 10%,transparent)}.dvmx-bar{height:100%;background:var(--dvc)}
+.dvmx-body{display:flex;justify-content:space-between;align-items:center;padding:.9rem 1rem;gap:.75rem}
+.dvmx-title{font-size:.9rem;font-weight:700}.dvmx-insight{font-size:.8rem;color:var(--mute);margin-top:.2rem}
+.dvmx-score{font-size:1.8rem;font-weight:700;white-space:nowrap;color:var(--dvc)}.dvmx-score small{font-size:.75rem;font-weight:400;color:var(--mute)}
+.dvmx-sub{padding:0 1rem .85rem;font-size:.76rem;color:var(--mute)}
+.dvmx-class{margin-top:1rem;font-size:.9rem}.dvmx-tag{font-weight:700;color:var(--dvc)}.dvmx-desc{color:var(--mute);display:block;margin-top:.25rem;font-size:.8rem;max-width:60ch}
 .obs .os{font-size:.78rem;color:var(--mute);font-weight:600}
 .risk li::marker{color:var(--warn)}
 .wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--line);margin-bottom:12px}
@@ -1990,7 +2005,22 @@ function refreshOverview() {
 }
 
 /* ===== DVM-style scores (own approximation of the Durability / Valuation / Momentum idea, NOT Trendlyne's score) ===== */
-const dvmBand = (v, bad, good) => (v > good ? ["Good", "pp"] : v < bad ? ["Weak", "pn"] : ["Neutral", "pw"]);
+/* Bands as Trendlyne publishes them (they also reproduce the DVM page: 70 green, 51.8 green, 58.6 amber). */
+const DVM_BANDS = {durability: {bad: 35, good: 55}, valuation: {bad: 30, good: 50}, momentum: {bad: 30, good: 59}};
+/* Wording under each score: [good, neutral, weak]. These phrases are mine, modelled on the DVM page. */
+const DVM_LABELS = {durability: ["High Financial Strength", "Medium Financial Strength", "Low Financial Strength"], valuation: ["Affordable Valuation", "Fair Valuation", "Expensive Valuation"], momentum: ["Technically Bullish", "Technically Neutral", "Technically Bearish"]};
+const dvmColour = (kind, v) => { if (!isFinite(v)) return "na"; const b = DVM_BANDS[kind]; return v > b.good ? "pos" : v < b.bad ? "neg" : "neu"; };
+/* One-line verdict from the three colours. Only "Strong Performer, Under Radar" is the DVM page's own wording; the rest is built the same way. */
+function dvmClass(cd, cv, cm) {
+  if (cd === "na" || cv === "na" || cm === "na") return null;
+  const q = {pos: "Strong Performer", neu: "Average Performer", neg: "Weak Financials"}[cd];
+  const qd = {pos: "These stocks have good quality scores and strong financials.", neu: "These stocks have middling quality scores and mixed financials.", neg: "These stocks have weak financial strength."}[cd];
+  let x, xd;
+  if (cv === "pos") { x = cm === "pos" ? "In Momentum" : "Under Radar"; xd = cm === "pos" ? "They are affordably priced and the price trend is already positive." : "They are affordably priced stocks with potential for good returns"; }
+  else if (cv === "neu") { x = cm === "pos" ? "Fairly Priced, In Momentum" : "Fairly Priced"; xd = cm === "pos" ? "They are fairly priced and the price trend is positive." : "They are fairly priced."; }
+  else { x = cm === "pos" ? "Expensive, Running Hot" : "Expensive"; xd = cm === "pos" ? "They are expensive on valuation and already trending up, so the price assumes a lot." : "They are expensive on valuation, so the price already assumes a lot."; }
+  return {tag: q + ", " + x, desc: qd + " " + xd, c: cd};
+}
 function dvmEma(arr, len) { const k = 2 / (len + 1), out = []; let e = arr[0]; for (let i = 0; i < arr.length; i++) { e = i ? arr[i] * k + e * (1 - k) : arr[0]; out.push(e); } return out; }
 function dvmMomentum(bars) {
   if (!bars || bars.length < 60) return null;
@@ -2042,16 +2072,21 @@ function dvmCalc(s, c, bars, P) {
   return R;
 }
 function dvmHTML(R) {
-  const tile = (name, v, bad, good, sub) => {
-    if (!isFinite(v)) return '<div class="dtile"><small>' + name + '</small><b>-</b><span>' + sub + "</span></div>";
-    const b = dvmBand(v, bad, good);
-    return '<div class="dtile"><small>' + name + '</small><b>' + pf(v, 1) + '<i> / 100</i></b><span class="pchip ' + b[1] + '">' + b[0] + "</span><span>" + sub + "</span></div>";
+  const kinds = [["durability", "Durability score", R.d, R.dParts ? R.dParts.map(x => x[0] + " " + pf(x[1], 0) + "/" + x[2]).join(", ") : "needs the PEAD numbers in the sheet"],
+    ["valuation", "Valuation score", R.v, R.vNote || "needs a P/E in the sheet"],
+    ["momentum", "Momentum score", R.m, R.mSig ? R.mSig.filter(x => x[1] >= 0.5).length + " of " + R.mSig.length + " signals positive" : "needs the History tab"]];
+  const cols = kinds.map(k => dvmColour(k[0], k[2]));
+  const block = (k, c) => {
+    const ok = c !== "na", v = k[2], L = DVM_LABELS[k[0]], lab = ok ? L[{pos: 0, neu: 1, neg: 2}[c]] : "Not enough data";
+    return '<div class="dvmx-block dvmx-' + c + '" data-kind="' + k[0] + '"><div class="dvmx-progress"><div class="dvmx-bar" style="width:' + (ok ? clampN(v, 0, 100) : 0) + '%"></div></div>' +
+      '<div class="dvmx-body"><div><div class="dvmx-title">' + k[1] + '</div><div class="dvmx-insight">' + lab + '</div></div>' +
+      '<div class="dvmx-score">' + (ok ? pf(v, 1) + ' <small>/ 100</small>' : "-") + "</div></div>" +
+      '<div class="dvmx-sub">' + esc(k[3]) + "</div></div>";
   };
-  let h = '<div class="card dvm"><b>DVM-style scores</b> <span class="note"></span><div class="dtiles">';
-  h += tile("Durability", R.d, 35, 55, R.dParts ? R.dParts.map(x => x[0] + " " + pf(x[1], 0) + "/" + x[2]).join(", ") : "needs the PEAD numbers in the sheet");
-  h += tile("Valuation", R.v, 30, 50, R.vNote || "needs a P/E in the sheet");
-  h += tile("Momentum", R.m, 30, 59, R.mSig ? R.mSig.filter(x => x[1] >= 0.5).length + " of " + R.mSig.length + " signals positive" : "needs the History tab");
-  h += "</div>";
+  const squares = kinds.map((k, i) => '<span class="dvmx-' + cols[i] + '" title="' + k[1] + ": " + (cols[i] === "na" ? "n/a" : pf(k[2], 1)) + '"></span>').join("");
+  let h = '<div class="card dvm"><div class="dvmx-head"><b>DVM-style scores</b><span class="dvmx-squares">' + squares + '</span></div><div class="dvmx-wrap">' + kinds.map((k, i) => block(k, cols[i])).join("") + "</div>";
+  const C = dvmClass(cols[0], cols[1], cols[2]);
+  if (C) h += '<div class="dvmx-class dvmx-' + C.c + '"><span class="dvmx-tag">' + esc(C.tag) + '</span><span class="dvmx-desc">' + esc(C.desc) + "</span></div>";
   if (R.mSig) h += '<p class="note">Momentum signals: ' + R.mSig.map(x => esc(x[0]) + " " + (x[1] >= 0.5 ? "✓" : "✗")).join(" | ") + "</p>";
   h += '<p class="note">Bands as Trendlyne publishes them: Durability good above 55, weak below 35; Valuation good above 50, weak below 30; Momentum good above 59, weak below 30. Higher Valuation means cheaper. Screening aid only, not advice.</p></div>';
   return h;
