@@ -677,10 +677,11 @@ async function ixChartDraw() {
   const host = document.getElementById("ixchart"); if (!host) return;
   if (IX_CH) { try { IX_CH.remove(); } catch (e) {} IX_CH = null; }
   if (!IX_SEL) { host.innerHTML = ""; return; }
-  const sym = IX_SEL.sym, tf = IX_SEL.tf, tv = znTv(sym, tf === "D" ? "D" : tf);
+  const sym = IX_SEL.sym, tf = IX_SEL.tf, tv = znTv(sym, tf === "D" ? "D" : tf), planOn = !!IX_SEL.plan && (tf === "5" || tf === "15"); IX_SEL.tok = Math.random();
   host.style.scrollMarginTop = "70px";
   host.innerHTML = '<h2 class="hb hbn">&#128200; Chart: ' + esc(sym) + '</h2><div class="card"><div class="charttools">' + IX_TFS.map(t => '<button type="button" class="cbtn" data-ixtf="' + t[0] + '" aria-pressed="' + (t[0] === tf) + '">' + t[1] + "</button>").join("") +
-    '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + tv + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-ixclose="1">Close chart</button></div>' +
+    '<span class="csep"></span><button type="button" class="cbtn" data-ixplantoggle="1" aria-pressed="' + !!IX_SEL.plan + '" title="Entry, stop and targets from your Supertrader rules (SMC and VWAP with delta and conviction)">Trade plan</button><span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + tv + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-ixclose="1">Close chart</button></div>' +
+    (IX_SEL.plan ? '<div id="ixplan" style="margin-top:8px">' + (planOn ? "" : '<p class="note">The trade plan works on the 5m or 15m chart. Pick one of them.</p>') + "</div>" : "") +
     '<div id="ixbox" style="height:420px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="ixnote" class="note" style="margin:6px 0 0">Loading chart...</div></div>';
   const say = t => { const n = document.getElementById("ixnote"); if (n) n.innerHTML = t; };
   const LW = window.LightweightCharts; if (!LW) { say("The chart library did not load. Use the TradingView link."); return; }
@@ -702,10 +703,11 @@ async function ixChartDraw() {
   /* trade idea levels, when the stock is on the Trade ideas list */
   let lv = null, side = "";
   if (IDEAS_LAST) [[IDEAS_LAST.L, "Long"], [IDEAS_LAST.S, "Short"]].forEach(a => a[0].forEach(x => { if (!lv && String(x.s).toUpperCase() === sym.toUpperCase() && x.lv) { lv = x.lv; side = a[1]; } }));
-  if (lv) [[lv.t, "Trigger", "#2563eb"], [lv.st, "Stop", c.dn], [lv.tg, "Target", c.up]].forEach(a => { try { candle.createPriceLine({price: a[0], color: a[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[1]}); } catch (e) {} });
+  if (lv && !planOn) [[lv.t, "Trigger", "#2563eb"], [lv.st, "Stop", c.dn], [lv.tg, "Target", c.up]].forEach(a => { try { candle.createPriceLine({price: a[0], color: a[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[1]}); } catch (e) {} });
   const n = bars.length;
   try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const last = bars[n - 1].time, d = new Date(last + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: last}); } } catch (e) { chart.timeScale().fitContent(); }
   IX_CH = chart;
+  if (planOn) tpRender(chart, candle, sym, tf, IX_SEL.dir || (side === "Long" ? 1 : side === "Short" ? -1 : 0), IX_SEL.tok).catch(() => {});
   say((intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + (lv ? " Dashed lines: " + side + " trigger, stop and target from the Trade ideas screen." : "") + " Scroll or zoom on the chart.");
 }
 const ixList = sym => Array.from(document.querySelectorAll("#ixbody [data-ixchart]")).filter(x => x.getAttribute("data-ixchart") === sym && !x.closest(".dockrow"));
@@ -720,9 +722,17 @@ function ixDock() {
   const dr = document.createElement("tr"), td = document.createElement("td"); dr.className = "dockrow"; td.colSpan = 30; td.appendChild(host); dr.appendChild(td); tr.after(dr); if (old) old.remove();
 }
 document.addEventListener("click", ev => {
-  let t = ev.target && ev.target.closest ? ev.target.closest("[data-ixchart],[data-ixtf],[data-ixclose]") : null;
+  let t = ev.target && ev.target.closest ? ev.target.closest("[data-ixchart],[data-ixtf],[data-ixclose],[data-ixplan],[data-ixplantoggle]") : null;
   if (!t && ev.target && ev.target.closest) { const bb = ev.target.closest("td > b:first-child"); if (bb && bb.parentElement) t = bb.parentElement.querySelector("[data-ixchart]"); }
   if (!t) return;
+  if (t.hasAttribute("data-ixplantoggle")) { if (IX_SEL) { IX_SEL.plan = !IX_SEL.plan; if (IX_SEL.plan && IX_SEL.tf !== "5" && IX_SEL.tf !== "15") IX_SEL.tf = "5"; ixChartDraw(); } return; }
+  if (t.hasAttribute("data-ixplan")) {
+    const sym = t.getAttribute("data-ixplan"), row = t.closest("tr"), cb = row && row.querySelector("[data-ixchart]"), occ = Math.max(0, ixList(sym).indexOf(cb));
+    if (IX_SEL && IX_SEL.sym === sym && IX_SEL.plan && (IX_SEL.occ || 0) === occ) { IX_SEL = null; ixChartDraw(); ixDock(); return; }
+    IX_SEL = {sym, tf: IX_SEL && (IX_SEL.tf === "5" || IX_SEL.tf === "15") ? IX_SEL.tf : "5", occ, plan: true, dir: +t.getAttribute("data-dir") || 0}; ixChartDraw(); ixDock();
+    setTimeout(() => { const h = document.getElementById("ixchart"); if (h && h.scrollIntoView) h.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 50);
+    return;
+  }
   if (t.hasAttribute("data-ixclose")) { IX_SEL = null; ixChartDraw(); ixDock(); return; }
   if (t.hasAttribute("data-ixtf")) { if (IX_SEL) { IX_SEL.tf = t.getAttribute("data-ixtf"); ixChartDraw(); } return; }
   const sym = t.getAttribute("data-ixchart"), occ = Math.max(0, ixList(sym).indexOf(t));
@@ -731,6 +741,210 @@ document.addEventListener("click", ev => {
   setTimeout(() => { const h = document.getElementById("ixchart"); if (h && h.scrollIntoView) h.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 50);
 });
 setInterval(() => { try { if (IX_SEL && typeof current !== "undefined" && current === "ix" && !document.hidden && IX_SEL.tf !== "D") ixChartDraw(); } catch (e) {} }, 60 * 1000);
+/* ===== TRADE PLAN: the Supertrader logic (SMC CHoCH > FVG > tap, VWAP bounce or cross, delta surge, conviction) run on Worker candles ===== */
+const TP = {SURGE: 0.20, ATR_SL: 1.2, SMC_BUF: 0.25, SMART: 2.0, FRESH: 12, VMULT: 1.5}, TPC = {};
+const tpEma = (a, n) => { const k = 2 / (n + 1), o = []; let e = null; a.forEach(v => { e = e === null ? v : v * k + e * (1 - k); o.push(e); }); return o; };
+/* internal CHoCH, same leg logic as f_get_choch(size) in the indicator */
+function tpChoch(B, size) {
+  const n = B.length, bu = new Array(n).fill(false), be = new Array(n).fill(false);
+  let leg = 0, bias = 0, ph = NaN, pl = NaN, phx = false, plx = false;
+  for (let i = 0; i < n; i++) {
+    if (i >= size) {
+      let hi = -Infinity, lo = Infinity; for (let k = i - size + 1; k <= i; k++) { if (B[k].high > hi) hi = B[k].high; if (B[k].low < lo) lo = B[k].low; }
+      const prev = leg;
+      if (B[i - size].high > hi) leg = 0; else if (B[i - size].low < lo) leg = 1;
+      if (leg !== prev) { if (leg === 1) { pl = B[i - size].low; plx = false; } else { ph = B[i - size].high; phx = false; } }
+    }
+    const c = B[i].close, c0 = i ? B[i - 1].close : c;
+    if (isFinite(ph) && !phx && c > ph && c0 <= ph) { phx = true; if (bias === -1) bu[i] = true; bias = 1; }
+    if (isFinite(pl) && !plx && c < pl && c0 >= pl) { plx = true; if (bias === 1) be[i] = true; bias = -1; }
+  }
+  return [bu, be];
+}
+/* B = closed candles {time (IST seconds), open, high, low, close, vol}; L1 = 1-minute candles used for the buy/sell volume split (or null) */
+function tpCompute(B, tfMin, L1) {
+  const n = B.length, tfs = tfMin * 60, atr = [], vav = [], day = B.map(b => Math.floor(b.time / 86400));
+  let a = 0;
+  for (let i = 0; i < n; i++) {
+    const b = B[i], tr = i ? Math.max(b.high - b.low, Math.abs(b.high - B[i - 1].close), Math.abs(b.low - B[i - 1].close)) : b.high - b.low;
+    a = i === 0 ? tr : i < 14 ? (a * i + tr) / (i + 1) : (a * 13 + tr) / 14; atr.push(a);
+    let s = 0, c = 0; for (let k = Math.max(0, i - 19); k <= i; k++) { s += B[k].vol; c++; } vav.push(c >= 20 ? s / c : NaN);
+  }
+  const vw = [], vu = [], vl = []; let sv = 0, sp = 0, sp2 = 0, cd = -1;
+  for (let i = 0; i < n; i++) {
+    const b = B[i]; if (day[i] !== cd) { cd = day[i]; sv = sp = sp2 = 0; }
+    const p = (b.high + b.low + b.close) / 3, v = b.vol || 0; sv += v; sp += p * v; sp2 += p * p * v;
+    const w = sv > 0 ? sp / sv : p, sd = sv > 0 ? Math.sqrt(Math.max(0, sp2 / sv - w * w)) : 0; vw.push(w); vu.push(w + TP.VMULT * sd); vl.push(w - TP.VMULT * sd);
+  }
+  /* buy and sell volume per candle from the 1-minute candles (TradingView's up and down volume method); candle shape estimate where there are none */
+  const du = new Array(n).fill(0), dn = new Array(n).fill(0), has = new Array(n).fill(false);
+  if (L1 && L1.length) { const idx = new Map(B.map((b, i) => [b.time, i])); let pd = 1; L1.forEach(m => { const d = m.close > m.open ? 1 : m.close < m.open ? -1 : pd; pd = d; const i = idx.get(Math.floor(m.time / tfs) * tfs); if (i === undefined) return; has[i] = true; if (d > 0) du[i] += m.vol; else dn[i] += m.vol; }); }
+  const rat = [], conv = [], est = [];
+  for (let i = 0; i < n; i++) {
+    const t = du[i] + dn[i]; let r;
+    if (has[i] && t > 0) { r = (du[i] - dn[i]) / t; est.push(false); } else { const g = B[i].high - B[i].low; r = g > 0 ? 2 * (B[i].close - B[i].low) / g - 1 : 0; est.push(true); }
+    rat.push(r); conv.push(Math.max(-100, Math.min(100, r * (vav[i] > 0 ? B[i].vol / vav[i] : 0) * 50)));
+  }
+  const bs = rat.map((r, i) => r > TP.SURGE && i > 0 && r - rat[i - 1] > 0), es = rat.map((r, i) => r < -TP.SURGE && i > 0 && r - rat[i - 1] < 0);
+  const gate = (d, i) => (d > 0 ? bs[i] || (i > 0 && bs[i - 1]) : es[i] || (i > 0 && es[i - 1]));
+  const e8 = tpEma(B.map(b => b.close), 8);
+  const trend15 = i => { const g = new Map(); for (let k = 0; k <= i; k++) g.set(Math.floor(B[k].time / 900), B[k].close); const c = Array.from(g.values()), a5 = tpEma(c, 5), a8 = tpEma(c, 8), a15 = tpEma(c, 15), z = c.length - 1; return a5[z] > a8[z] && a8[z] > a15[z] ? 1 : a5[z] < a8[z] && a8[z] < a15[z] ? -1 : 0; };
+  /* SMC: CHoCH (internal 5 and swing 50), then fair value gap, then a tap of the gap */
+  const [ib, ie] = tpChoch(B, 5), [sb, se] = tpChoch(B, 50), sigs = [];
+  let cum = 0, st = {1: {s: 0, top: NaN, bot: NaN, at: 0}, "-1": {s: 0, top: NaN, bot: NaN, at: 0}}, lastV = {1: -999, "-1": -999}, lastDay = -1;
+  for (let i = 0; i < n; i++) {
+    const b = B[i]; if (day[i] !== lastDay) { lastDay = day[i]; lastV = {1: -999, "-1": -999}; }
+    const c1 = i >= 1 ? B[i - 1] : null, c2 = i >= 2 ? B[i - 2] : null;
+    let bullF = false, bearF = false, ft = NaN, fb = NaN;
+    if (c1 && c2) { const bd = c1.open ? (c1.close - c1.open) / (c1.open * 100) : 0; cum += Math.abs(bd); const th = cum / Math.max(i, 1) * 2;
+      if (b.low > c2.high && c1.close > c2.high && bd > th) { bullF = true; ft = b.low; fb = c2.high; }
+      if (b.high < c2.low && c1.close < c2.low && -bd > th) { bearF = true; ft = c2.low; fb = b.high; } }
+    const bc = ib[i] || sb[i], sc = ie[i] || se[i];
+    if (bc) { st[1] = {s: 1, top: NaN, bot: NaN, at: i}; st[-1] = {s: 0, top: NaN, bot: NaN, at: 0}; }
+    if (sc) { st[-1] = {s: 1, top: NaN, bot: NaN, at: i}; st[1] = {s: 0, top: NaN, bot: NaN, at: 0}; }
+    [1, -1].forEach(d => {
+      const S = st[d];
+      if (S.s === 1 && i - S.at > 50) S.s = 0;
+      if (S.s === 1 && (d > 0 ? bullF : bearF)) { S.s = 2; S.top = ft; S.bot = fb; S.at = i; }
+      if (S.s === 2 && i - S.at > 50) { S.s = 0; S.top = S.bot = NaN; }
+      if (S.s === 2 && (d > 0 ? b.close < S.bot : b.close > S.top)) { S.s = 0; S.top = S.bot = NaN; }
+      if (S.s === 2 && isFinite(S.top) && (d > 0 ? b.low <= S.top && b.high >= S.bot : b.high >= S.bot && b.low <= S.top)) {
+        const ep = d > 0 ? Math.min(b.open, S.top) : Math.max(b.open, S.bot), sl = d > 0 ? S.bot - TP.SMC_BUF * atr[i] : S.top + TP.SMC_BUF * atr[i];
+        if (gate(d, i)) sigs.push({i, d, kind: "SMC", ep, sl, zone: [S.bot, S.top]});
+        S.s = 0; S.top = S.bot = NaN;
+      }
+    });
+    /* VWAP bounce or cross, with the engulfing confirmation and a simple VWAP and EMA slope filter (an approximation of the indicator's angle filters) */
+    if (i >= 6) {
+      const vp = vw[i - 1], fr = TP.SURGE * 0 + atr[i] * 0.25, g = b.close > b.open, rd = b.close < b.open;
+      const flat = Math.abs(vw[i] - vw[i - 5]) < 0.25 * atr[i], vUp = vw[i] > vp, vDn = vw[i] < vp, eDn = e8[i] < e8[i - 3], eUp = e8[i] > e8[i - 3];
+      const bB = vw[i] >= vp && b.low <= vw[i] + fr && b.close >= vw[i] - fr && g, bS = vw[i] <= vp && b.high >= vw[i] - fr && b.close <= vw[i] + fr && rd;
+      const cB = ((b.close > vw[i] && c1.close <= vp) || (b.open < vw[i] && b.close > vw[i])) && g, cS = ((b.close < vw[i] && c1.close >= vp) || (b.open > vw[i] && b.close < vw[i])) && rd;
+      const paB = g && b.close > Math.max(c1.open, c1.close), paS = rd && b.close < Math.min(c1.open, c1.close);
+      const okB = !(vDn && !flat) && !eDn && (flat ? b.close > vw[i] : true), okS = !(vUp && !flat) && !eUp && (flat ? b.close < vw[i] : true);
+      const trB = (bB || cB) && i - lastV[1] > 8 && paB && okB, trS = (bS || cS) && i - lastV[-1] > 8 && paS && okS;
+      [[1, trB], [-1, trS]].forEach(a2 => { const d = a2[0]; if (!a2[1] || !gate(d, i)) return; if (sigs.some(s => s.i === i && s.d === d)) return;
+        const ep = d > 0 ? (bB ? Math.max(b.low, Math.min(b.high, vw[i])) : Math.min(b.close, Math.max(vw[i], b.low))) : (bS ? Math.min(b.high, Math.max(b.low, vw[i])) : Math.max(b.close, Math.min(vw[i], b.high)));
+        sigs.push({i, d, kind: "VWAP", ep, sl: d > 0 ? ep - atr[i] * TP.ATR_SL : ep + atr[i] * TP.ATR_SL}); lastV[d] = i; });
+    }
+  }
+  sigs.forEach(s => {
+    const i = s.i, d = s.d, risk = Math.abs(s.ep - s.sl), t15 = trend15(i);
+    s.risk = risk; s.atr = atr[i]; s.ratio = rat[i]; s.conv = conv[i]; s.volx = vav[i] > 0 ? B[i].vol / vav[i] : NaN; s.est = est[i]; s.trend = t15; s.time = B[i].time;
+    s.t1 = s.ep + d * risk; s.t2 = s.ep + d * TP.SMART * atr[i];
+    const band = d > 0 ? vu[i] : vl[i]; s.t3 = (d > 0 ? band > s.ep : band < s.ep) ? band : NaN;
+    const hi = Math.abs(s.ratio) * 100 >= TP.SURGE * 100 && s.volx > 1 && t15 === d;
+    s.grade = hi && d * s.conv >= 20 ? "A" : (d * s.conv >= 20 || hi) ? "B" : "C";
+  });
+  const last = n - 1;
+  return {sigs, armed: {1: st[1], "-1": st[-1]}, vw, vu, vl, atr, day, last: {price: B[last].close, atr: atr[last], vw: vw[last], vu: vu[last], vl: vl[last], ratio: rat[last], conv: conv[last], volx: vav[last] > 0 ? B[last].vol / vav[last] : NaN, est: est[last]}};
+}
+/* turns the signals into a plan for one direction, judged against the latest price */
+function tpPlan(R, B, d, tfMin) {
+  const n = B.length, px = R.last.price, atr = R.last.atr, out = {d, px, atr};
+  const mine = R.sigs.filter(s => s.d === d), opp = R.sigs.filter(s => s.d === -d), s = mine.length ? mine[mine.length - 1] : null, o = opp.length ? opp[opp.length - 1] : null;
+  const age = s ? n - 1 - s.i : 1e9, fresh = s && age <= TP.FRESH && R.day[s.i] === R.day[n - 1];
+  out.sig = s; out.age = age; out.opp = o && R.day[o.i] === R.day[n - 1] && (!s || o.i > s.i) && n - 1 - o.i <= TP.FRESH ? o : null;
+  const A = R.armed[d];
+  if (s && fresh) {
+    const ext = d * (px - s.ep) / atr, stopped = d * (px - s.sl) <= 0, done = d * (px - s.t1) >= 0;
+    out.ext = ext;
+    out.state = out.opp ? "conflict" : stopped ? "stopped" : done ? "late" : ext > 1.5 ? "late" : ext > 0.5 ? "extended" : "live";
+  } else if (A && A.s === 2 && isFinite(A.top)) {
+    const ep = d > 0 ? A.top : A.bot, sl = d > 0 ? A.bot - TP.SMC_BUF * atr : A.top + TP.SMC_BUF * atr, risk = Math.abs(ep - sl);
+    out.state = "armed"; out.pend = {ep, sl, risk, t1: ep + d * risk, t2: ep + d * TP.SMART * atr, zone: [A.bot, A.top], kind: "SMC"};
+  } else if (A && A.s === 1) out.state = "choch";
+  else out.state = s ? "old" : "none";
+  return out;
+}
+const tpF = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+const TP_TXT = {live: ["Entry zone: signal is live", "g"], extended: ["Extended: wait for a pullback toward the entry", "w"], late: ["Late: do not chase, the move has run", "r"], stopped: ["Invalidated: price is already through the stop", "r"],
+  conflict: ["Conflict: an opposite signal fired after it. Stay out", "r"], armed: ["Waiting: gap marked, entry only if price taps it", "w"], choch: ["Structure turned but no gap yet. Nothing to trade", "n"], old: ["Signal is old. Wait for a fresh one", "n"], none: ["No signal yet", "n"]};
+const tpTime = t => { const m = Math.floor((t % 86400) / 60); return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"); };
+const tpConvTxt = c => (c >= 75 ? "extreme bull" : c >= 20 ? "bullish" : c <= -75 ? "extreme bear" : c <= -20 ? "bearish" : "neutral");
+function tpPlanHTML(P, side) {
+  const d = P.d, s = P.sig, L = TP_TXT[P.state], lv = P.state === "armed" ? P.pend : s;
+  let h = '<div class="card" style="margin:0 0 8px;border-left:4px solid var(--' + (d > 0 ? "good" : "bad") + ')"><div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center"><b>Supertrader plan: ' + (d > 0 ? "BUY" : "SELL") + '</b><span class="chip ' + L[1] + '">' + esc(L[0]) + "</span>" +
+    (s && P.state !== "armed" && P.state !== "choch" && P.state !== "none" ? '<span class="note" style="margin:0">' + s.kind + " signal at " + tpTime(s.time) + ", grade <b>" + s.grade + "</b></span>" : "") + "</div>";
+  if (lv && P.state !== "choch" && P.state !== "none") {
+    const risk = lv.risk, row = (nm, v, extra) => "<tr><td>" + nm + '</td><td class="num"><b>' + tpF(v) + '</b></td><td class="num">' + (isFinite(v) ? (d * (v - lv.ep) >= 0 ? "+" : "") + tpF(v - lv.ep) + " (" + ((v / lv.ep - 1) * 100).toFixed(2) + "%)" : "-") + '</td><td class="num">' + (isFinite(v) && risk > 0 ? (Math.abs(v - lv.ep) / risk).toFixed(1) + "R" : "") + "</td><td style=\"white-space:normal;min-width:190px\"><small>" + (extra || "") + "</small></td></tr>";
+    h += '<div class="wrap"><table class="pptbl" style="margin-top:8px"><thead><tr><th>Level</th><th class="num">Price</th><th class="num">From entry</th><th class="num">Reward / risk</th><th>Basis</th></tr></thead><tbody>' +
+      row(P.state === "armed" ? "Entry (if the gap is tapped)" : "Entry", lv.ep, s && s.kind === "SMC" || P.state === "armed" ? "Edge of the fair value gap the candle opened in" : "VWAP price at the signal candle") +
+      row("Stop", lv.sl, (s && s.kind === "VWAP" ? TP.ATR_SL + " ATR from entry" : "Far side of the gap plus " + TP.SMC_BUF + " ATR") + ", risk " + tpF(risk) + " per share") +
+      row("Target 1", lv.t1, "1R: a move equal to the risk. Book part here") +
+      row("Target 2", lv.t2, TP.SMART + " ATR, the indicator's smart target") + (s && P.state !== "armed" ? row("Target 3", s.t3, "VWAP " + (d > 0 ? "upper" : "lower") + " band, only if it is beyond the entry") : "") + "</tbody></table></div>";
+    if (P.state === "armed") h += '<p class="note" style="margin:6px 0 0">Gap zone ' + tpF(lv.zone[0]) + " to " + tpF(lv.zone[1]) + ". The indicator only fires when the delta surge and conviction are also there on the tap candle, so wait for that candle to close.</p>";
+  }
+  if (s && P.state !== "armed" && P.state !== "choch" && P.state !== "none") {
+    const q = (cond, t) => '<span class="chip ' + (cond ? "g" : "n") + '">' + t + "</span> ";
+    h += '<div style="margin-top:8px">' + q(Math.abs(s.ratio) >= TP.SURGE, "Delta " + (s.ratio * 100).toFixed(0) + "%" + (s.est ? " (estimated)" : "")) + q(d * s.conv >= 20, "Conviction " + Math.round(s.conv) + " " + tpConvTxt(s.conv)) + q(s.volx > 1, "Volume " + (isFinite(s.volx) ? s.volx.toFixed(1) : "-") + "x average") + q(s.trend === d, "15m EMA stack " + (s.trend === d ? "agrees" : s.trend === 0 ? "mixed" : "against")) + "</div>";
+    h += '<p class="note" style="margin:6px 0 0">Price now ' + tpF(P.px) + (isFinite(P.ext) ? ", " + Math.abs(P.ext).toFixed(1) + " ATR " + (P.ext >= 0 ? "beyond" : "short of") + " the entry" : "") + ". Grade A needs delta, conviction, volume and the 15m trend all in your direction.</p>";
+  }
+  if (P.opp) h += '<p class="note" style="margin:6px 0 0;color:var(--bad)">A ' + (P.opp.d > 0 ? "BUY" : "SELL") + " signal (" + P.opp.kind + ") fired at " + tpTime(P.opp.time) + ", against the " + (d > 0 ? "BUY" : "SELL") + " on the watchlist.</p>";
+  return h + "</div>";
+}
+async function tpBars(sym, tf) {
+  const key = sym + "|" + tf, c = IXC[key];
+  if (c && Date.now() - c.t < 45e3) return c.bars;
+  const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + tf, {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym];
+  if (!rows || rows.length < 5) return null;
+  const bars = rows.map(x => ({time: x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0})); IXC[key] = {t: Date.now(), bars}; return bars;
+}
+/* candles that have not closed yet are left out, so a signal never appears and vanishes */
+async function tpRun(sym, tf) {
+  const tfMin = +tf || 5, [bars, l1] = await Promise.all([tpBars(sym, String(tfMin)), tpBars(sym, "1").catch(() => null)]);
+  if (!bars) return null;
+  const nowI = Date.now() / 1000 + 19800, closed = bars.filter(b => b.time + tfMin * 60 <= nowI + 5);
+  if (closed.length < 60) return null;
+  return {B: closed, all: bars, R: tpCompute(closed, tfMin, l1 && l1.length ? l1 : null), l1: !!(l1 && l1.length)};
+}
+async function tpRender(chart, candle, sym, tf, dir, token) {
+  const host = document.getElementById("ixplan"); if (!host) return;
+  const say = t => { if (document.getElementById("ixplan") === host) host.innerHTML = t; };
+  say('<p class="note">Working out the plan from 1-minute and ' + tf + "-minute candles...</p>");
+  let X = null; try { X = await tpRun(sym, tf); } catch (e) {}
+  if (!IX_SEL || IX_SEL.sym !== sym || IX_SEL.tf !== tf || !IX_SEL.plan || token !== IX_SEL.tok) return;
+  if (!X) { say('<p class="note">Not enough intraday candles from your Worker for ' + esc(sym) + " to work out a plan.</p>"); return; }
+  const {B, R} = X;
+  let d = dir; if (!d) { const last = R.sigs.length ? R.sigs[R.sigs.length - 1] : null; d = last ? last.d : 1; }
+  const P = tpPlan(R, B, d, +tf); TPC[sym] = {t: Date.now(), tf, side: d, P, ok: X.l1};
+  let h = tpPlanHTML(P, d);
+  if (!X.l1) h = h.replace('<div class="card"', '<p class="note" style="color:var(--bad);margin:0 0 6px">1-minute candles were not available, so delta is estimated from each candle\'s shape. Treat the grade as rough.</p><div class="card"');
+  say(h);
+  /* chart overlays: VWAP per day, bands for today, signal arrows, plan lines */
+  const c = colors(), LW = window.LightweightCharts, lastDay = R.day[R.day.length - 1];
+  try {
+    const days = Array.from(new Set(R.day)).slice(-2);
+    days.forEach(dy => { const idx = []; R.day.forEach((x, i) => { if (x === dy) idx.push(i); });
+      const mk = (arr, col, w, ls) => { const s = chart.addLineSeries({color: col, lineWidth: w, lineStyle: ls, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false}); s.setData(idx.map(i => ({time: B[i].time, value: arr[i]}))); };
+      mk(R.vw, "#2563eb", 2, 0); if (dy === lastDay) { mk(R.vu, "#2563eb88", 1, 2); mk(R.vl, "#2563eb88", 1, 2); } });
+  } catch (e) {}
+  try { candle.setMarkers(R.sigs.filter(s => s.d === d).slice(-8).map(s => ({time: B[s.i].time, position: d > 0 ? "belowBar" : "aboveBar", color: d > 0 ? c.up : c.dn, shape: d > 0 ? "arrowUp" : "arrowDown", text: s.kind + " " + s.grade}))); } catch (e) {}
+  const pl = (v, col, t, ls) => { if (isFinite(v)) try { candle.createPriceLine({price: v, color: col, lineWidth: 1, lineStyle: ls == null ? 2 : ls, axisLabelVisible: true, title: t}); } catch (e) {} };
+  const lv = P.state === "armed" ? P.pend : P.sig && ["live", "extended", "late", "stopped", "conflict", "old"].indexOf(P.state) >= 0 ? P.sig : null;
+  if (lv) { pl(lv.ep, "#2563eb", "Entry", 0); pl(lv.sl, c.dn, "Stop"); pl(lv.t1, "#0891b2", "T1"); pl(lv.t2, c.up, "T2"); if (lv.t3) pl(lv.t3, "#7c3aed", "T3"); if (lv.zone) { pl(lv.zone[0], "#78716c", "Gap", 3); pl(lv.zone[1], "#78716c", "Gap", 3); } }
+}
+/* the Supertrader plan column on the results watchlist: fills in as each stock's candles arrive */
+function tpCell(sym, side) {
+  if (!side) return '<span class="note">-</span>';
+  const c = TPC[sym]; if (!c || c.side !== side) return '<span class="note" data-tpload="' + esc(sym) + '" data-side="' + side + '">loading...</span>';
+  const P = c.P, s = P.sig, lv = P.state === "armed" ? P.pend : (["live", "extended"].indexOf(P.state) >= 0 ? s : null), L = TP_TXT[P.state];
+  return '<span class="chip ' + L[1] + '" title="' + esc(L[0]) + '">' + esc(P.state === "live" ? "Live" : P.state === "extended" ? "Extended" : P.state === "armed" ? "Waiting for tap" : P.state === "late" ? "Late" : P.state === "stopped" ? "Stopped" : P.state === "conflict" ? "Conflict" : P.state === "choch" ? "No gap yet" : P.state === "old" ? "Old signal" : "No signal") + "</span>" +
+    (s && ["live", "extended", "late", "stopped", "conflict"].indexOf(P.state) >= 0 ? ' <b title="Grade: A needs delta, conviction, volume and the 15m trend in your direction">' + s.grade + "</b>" : "") +
+    (lv ? "<br><small>Entry " + tpF(lv.ep) + " &middot; Stop " + tpF(lv.sl) + "<br>T1 " + tpF(lv.t1) + " &middot; T2 " + tpF(lv.t2) + "</small>" : "");
+}
+let TP_BUSY = false;
+async function tpFill() {
+  if (TP_BUSY) return; const todo = Array.from(document.querySelectorAll("[data-tpload]")); if (!todo.length || !MARKET_API_URL) return; TP_BUSY = true;
+  try {
+    for (const el of todo) {
+      const sym = el.getAttribute("data-tpload"), side = +el.getAttribute("data-side");
+      try { const X = await tpRun(sym, "5"); if (X) TPC[sym] = {t: Date.now(), tf: "5", side, P: tpPlan(X.R, X.B, side, 5), ok: X.l1}; else TPC[sym] = {t: Date.now(), tf: "5", side, P: {d: side, state: "none"}, ok: false}; } catch (e) { TPC[sym] = {t: Date.now(), tf: "5", side, P: {d: side, state: "none"}, ok: false}; }
+      document.querySelectorAll('[data-tpload="' + sym + '"]').forEach(x => { const td = x.closest("td"); if (td) td.innerHTML = tpCell(sym, side); });
+    }
+  } finally { TP_BUSY = false; }
+}
+setInterval(() => { try { if (typeof current !== "undefined" && current === "ix" && !document.hidden) Object.keys(TPC).forEach(k => { if (Date.now() - TPC[k].t > 120e3) delete TPC[k]; }); } catch (e) {} }, 60e3);
 /* ===== RESULTS WATCHLIST (F&O stocks with results today or on the next trading day, with buy/sell signals from Trade ideas and OI spurts) ===== */
 function resultWatchHTML(M, oiBy) {
   let h = '<h2 class="hb hbn">&#128197; Results watchlist: F&amp;O stocks reporting today or next trading day</h2>';
@@ -750,9 +964,9 @@ function resultWatchHTML(M, oiBy) {
     const side = L > S ? 1 : S > L ? -1 : 0, mixed = L && S;
     return {sym, n: e.n, d: e.d, q, side, mixed, why, n2: L + S, lv: i && i.x.lv, day: e.d === todayK ? 0 : 1};
   }).sort((a, b) => a.day - b.day || Math.abs(b.side) - Math.abs(a.side) || b.n2 - a.n2 || (a.sym < b.sym ? -1 : 1));
-  h += '<div class="card"><div class="charttools" style="border:0;padding:0 0 8px;gap:8px 12px"><span>An OI spurt alone gives a signal only when open interest rose at least</span><input id="oiMinPct" type="number" min="0" step="1" style="width:62px" value="' + OI_MIN + '"><span>% and the price moved at least</span><input id="oiMinMove" type="number" min="0" step="0.1" style="width:62px" value="' + OI_MOVE + '"><span>%. A trade idea needs no minimum.</span></div><div class="wrap"><table class="pptbl"><thead><tr><th>Stock</th><th>Results</th><th class="num">Price</th><th>Signal</th><th>Why</th><th class="num">Trigger</th><th class="num">Stop</th><th class="num">Target</th></tr></thead><tbody>' +
-    rows.map(r => '<tr><td style="white-space:nowrap"><b>' + esc(r.sym) + "</b>" + znTvA(r.sym, "D") + " " + ixBtn(r.sym) + '</td><td>' + (r.day === 0 ? "Today" : "Next session") + '</td><td class="num">' + (r.q ? fmt(+r.q.p) + ' <small style="color:var(--' + (+r.q.pct >= 0 ? "good" : "bad") + ')">' + pct(+r.q.pct, 1) + "</small>" : "-") + "</td><td>" +
-      (r.side === 1 ? '<span class="chip g">BUY</span>' : r.side === -1 ? '<span class="chip r">SELL</span>' : '<span class="chip n">Wait</span>') + (r.mixed ? ' <small title="Trade idea and OI point opposite ways">mixed</small>' : "") + '</td><td style="white-space:normal;min-width:200px"><small>' + (r.why.length ? r.why.map(esc).join("; ") : "No trade idea or OI spurt yet") + '</small></td>' +
+  h += '<div class="card"><div class="charttools" style="border:0;padding:0 0 8px;gap:8px 12px"><span>An OI spurt alone gives a signal only when open interest rose at least</span><input id="oiMinPct" type="number" min="0" step="1" style="width:62px" value="' + OI_MIN + '"><span>% and the price moved at least</span><input id="oiMinMove" type="number" min="0" step="0.1" style="width:62px" value="' + OI_MOVE + '"><span>%. A trade idea needs no minimum.</span></div><div class="wrap"><table class="pptbl"><thead><tr><th>Stock</th><th>Results</th><th class="num">Price</th><th>Signal</th><th>Why</th><th>Supertrader plan</th><th class="num">Trigger</th><th class="num">Stop</th><th class="num">Target</th></tr></thead><tbody>' +
+    rows.map(r => '<tr><td style="white-space:nowrap"><b>' + esc(r.sym) + "</b>" + znTvA(r.sym, "D") + " " + ixBtn(r.sym) + (r.side ? ' <button type="button" class="cbtn" data-ixplan="' + esc(r.sym) + '" data-dir="' + r.side + '" style="padding:1px 9px;font-size:.75rem;margin-left:2px" title="Entry, stop and targets from your Supertrader rules on the 5m chart">Plan</button>' : "") + '</td><td>' + (r.day === 0 ? "Today" : "Next session") + '</td><td class="num">' + (r.q ? fmt(+r.q.p) + ' <small style="color:var(--' + (+r.q.pct >= 0 ? "good" : "bad") + ')">' + pct(+r.q.pct, 1) + "</small>" : "-") + "</td><td>" +
+      (r.side === 1 ? '<span class="chip g">BUY</span>' : r.side === -1 ? '<span class="chip r">SELL</span>' : '<span class="chip n">Wait</span>') + (r.mixed ? ' <small title="Trade idea and OI point opposite ways">mixed</small>' : "") + '</td><td style="white-space:normal;min-width:200px"><small>' + (r.why.length ? r.why.map(esc).join("; ") : "No trade idea or OI spurt yet") + '</small></td><td style="white-space:nowrap;min-width:170px">' + tpCell(r.sym, r.side) + '</td>' +
       (r.lv && r.side ? '<td class="num">' + fmt(r.lv.t) + '</td><td class="num">' + fmt(r.lv.st) + '</td><td class="num">' + fmt(r.lv.tg) + "</td>" : '<td class="num">-</td><td class="num">-</td><td class="num">-</td>') + "</tr>").join("") + "</tbody></table></div>" +
     '<p class="note" style="margin-bottom:0">F&amp;O stocks whose board meeting for results is today or on the next trading day (' + esc(nextK) + "), from NSE's calendar. The calendar gives the date but not the time, so check the exchange filing to see which came after 2 pm. BUY or SELL appears when the Trade ideas screen lists the stock, or when the OI spurt shows a build-up big enough to pass the minimum above (price up with OI up is long, price down with OI up is short). First-day result moves are fast and gap-prone: use the chart, keep the stop tight and size small. Trigger, stop and target come from the Trade ideas screen. General information, not advice.</p></div>";
   return h;
@@ -780,6 +994,7 @@ function ixPaint() {
   try { h += resultWatchHTML(M, oiBy); } catch (e) { h += '<div class="card"><p class="note">Problem drawing the results watchlist: ' + esc(e && e.message) + '</p></div>'; }
   const keepIx = IX_SEL ? document.getElementById("ixchart") : null; if (keepIx) keepIx.remove();
   o.innerHTML = h;
+  try { tpFill(); } catch (e) {}
   if (keepIx) { const fr = document.getElementById("ixchart"); if (fr) fr.replaceWith(keepIx); try { ixDock(); } catch (e) {} }
   try { ixChartDraw(); } catch (e) {}
 }
