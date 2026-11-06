@@ -3465,6 +3465,36 @@ const ppApi = (function () {
     return head + '<div class="card"><div class="wrap"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Results</th><th class="num">20d up</th><th class="num">20d avg</th><th class="num">20d vs Nifty</th><th class="num">60d avg</th><th class="num">60d vs Nifty</th><th>Verdict</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
       '<p class="note" style="margin-bottom:0">' + d.events.toLocaleString("en-IN") + " past results from " + d.stocks + " stocks, announced " + E(d.from) + " to " + E(d.to) + ". Each return starts at the close of the first session after the result, when the reaction is known, and runs 20 or 60 trading days. 'vs Nifty' is the average gain over the Nifty in the same days, with its rough 95% range after the &plusmn;. A group is marked 'Edge likely' only when it has 30 or more results and its range stays above zero. The SHORT row shows returns as if the stock was sold. " + E(d.note) + " Past results only, not a promise.</p></div>";
   }
+  /* ---- back-test of the BUY rules, worked out here from pead_features.csv (written by the PEAD research action) ---- */
+  const BR_URL = PEAD_CSV_DIRECT.replace(/pead\.csv$/, "pead_features.csv");
+  let BR = null, BR_STATE = "idle";
+  function brLoad() {
+    if (BR_STATE === "loading" || (BR_STATE === "ok" && Date.now() - BR.t < 6 * 36e5)) return;
+    BR_STATE = "loading";
+    fetch(BR_URL + "?t=" + Math.floor(Date.now() / 6e5), {cache: "no-store"}).then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then(t => { const rows = parseCSV(t), N = ["total", "react", "dist_52w", "ret_6m", "turnover_cr", "x20", "x60", "r20", "s8_20", "s12_20"];
+        rows.forEach(r => { N.forEach(k => { r[k] = r[k] === "" || r[k] == null ? NaN : +r[k]; }); r.year = String(r.entry || "").slice(0, 4); });
+        BR = {t: Date.now(), rows}; BR_STATE = "ok"; }).catch(e => { BR_STATE = "none"; })
+      .then(() => { try { if (current === "pp") view(); } catch (e) {} });
+  }
+  function brHTML() {
+    brLoad();
+    const sum = '<summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">';
+    if (BR_STATE !== "ok") return '<div class="card" style="margin-bottom:12px"><b>BUY rules back-test</b><p class="note" style="margin:6px 0 0">' + (BR_STATE === "none" ? "pead_features.csv was not found next to pead.csv. Run the PEAD research workflow in your GitHub repository." : "Loading the BUY rules back-test...") + "</p></div>";
+    const R = BR.rows, f1 = x => (isFinite(x) ? (x > 0 ? "+" : "") + x.toFixed(1) + "%" : "-"), cl = x => (x > 0 ? "accg" : x < 0 ? "accb" : "");
+    const base = r => r.total >= BK.score && r.dist_52w >= BK.hi && r.turnover_cr >= BK.turn, A = r => base(r) && r.react >= BK.react, B = r => base(r) && r.ret_6m >= BK.mom;
+    const groups = [["Every result", () => true], ["Score 55+ only", r => r.total >= BK.score], ["Rule A: near 52-week high, reaction 3%+, liquid", A], ["Rule B: near 52-week high, 6-month return 20%+, liquid", B], ["Rule A or B (what shows BUY)", r => A(r) || B(r)]];
+    const avg = a => a.reduce((x, y) => x + y, 0) / a.length, med = a => { const b = a.slice().sort((x, y) => x - y), m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+    const yrs = ["2024", "2025", "2026"], body = groups.map((g, gi) => {
+      const S = R.filter(g[1]), v = S.map(r => r.x20).filter(isFinite), u = S.map(r => r.x60).filter(isFinite), st = S.map(r => r.s12_20).filter(isFinite);
+      const yc = yrs.map(y => { const q = S.filter(r => r.year === y).map(r => r.x20).filter(isFinite); return q.length >= 5 ? '<span class="' + cl(avg(q)) + '">' + f1(avg(q)) + '</span> <small>(' + q.length + ")</small>" : "-"; });
+      return "<tr" + (gi === 4 ? ' style="background:color-mix(in srgb,var(--a) 10%,var(--card))"' : "") + "><td>" + (gi === 4 ? "<b>" + g[0] + "</b>" : g[0]) + '</td><td class="num">' + v.length + '</td><td class="num"><span class="' + cl(avg(v)) + '">' + (v.length ? f1(avg(v)) : "-") + '</span></td><td class="num">' + (v.length ? f1(med(v)) : "-") + '</td><td class="num">' + (v.length ? Math.round(v.filter(x => x > 0).length / v.length * 100) + "%" : "-") +
+        '</td><td class="num">' + (u.length ? f1(avg(u)) : "-") + '</td><td class="num">' + (st.length ? f1(avg(st)) : "-") + "</td>" + yc.map(c => '<td class="num">' + c + "</td>").join("") + "</tr>";
+    }).join("");
+    return '<div class="card" style="margin-bottom:12px"><b>BUY rules back-test</b> <span class="note">(' + R.length.toLocaleString("en-IN") + " past results from the PEAD research file)</span>" +
+      '<div class="wrap"><table class="acctbl" style="margin-top:8px"><thead><tr><th>Group</th><th class="num">Results</th><th class="num">20d vs Nifty (avg)</th><th class="num">20d vs Nifty (median)</th><th class="num">Beat Nifty</th><th class="num">60d vs Nifty (avg)</th><th class="num">20d return with a 12% stop (avg)</th><th class="num">2024</th><th class="num">2025</th><th class="num">2026</th></tr></thead><tbody>' + body + "</tbody></table></div>" +
+      '<p class="note" style="margin:8px 0 0">Each trade buys the close of the first session after the result and is measured against the Nifty over the same days. Years show the average 20-day gain vs the Nifty, with the number of results in brackets. The rules were picked on this same data, so expect the live numbers to be lower. Results are before costs. The research file covers only the stocks the action has processed so far, and most announcement dates are inferred from volume jumps.</p></div>';
+  }
   function pending() {
     let M = null; try { M = MARKET; } catch (e) {}
     const list = (M && M.earnings) || [], have = {};
@@ -3587,7 +3617,7 @@ const ppApi = (function () {
       return r;
     }).join("") : '<tr><td colspan="12" class="note">' + (F.sig === "buy" ? (bkBusy ? "Checking price history for the rules..." : "No stock meets the BUY rules right now.") : "No stocks match these filters. Lower the minimum score or widen the results window.") + '</td></tr>';
     h += '</tbody></table></div><p class="note">Cash-flow quality (10 pts in your Pine indicator) needs 3-year operating cash flow, which the free data feed does not carry, so scores here can be up to 10 points lower than the dashboard. Check the filing before buying.</p>';
-    try { h += '<details class="pbtd" style="margin-top:18px"' + (PBT_OPEN ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how past results performed after the announcement (tap to open)</summary>' + pbtHTML() + "</details>"; } catch (e) {}
+    try { h += '<details class="pbtd" style="margin-top:18px"' + (PBT_OPEN ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how past results performed after the announcement (tap to open)</summary>' + brHTML() + pbtHTML() + "</details>"; } catch (e) {}
     host.innerHTML = h; paintStatus();
     try { chartDraw(); } catch (e) {}
   }
