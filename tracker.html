@@ -4751,8 +4751,9 @@ const stApi = (function () {
   /* The signal is decided on closed bars only, so drop a bar that is still forming */
   function closedOnly(b, mins) { const nowIst = Date.now() / 1000 + 19800; let n = b.length; while (n && typeof b[n - 1].time === "number" && b[n - 1].time + mins * 60 > nowIst) n--; return n === b.length ? b : b.slice(0, n); }
   /* Replay the rules bar by bar. Signals are decided at a bar's close; trades fill at the next bar's open. */
-  function replay(bars) {
-    const N = bars.length, L = CFG.ladder.map(x => superTrend(bars, x[0], x[1])), fl = superTrend(bars, CFG.filt[0], CFG.filt[1]), em = F.ema ? emaArr(bars, CFG.ema) : null;
+  function replay(bars, opt) {
+    opt = opt || {}; const useEma = opt.ema !== undefined ? opt.ema : F.ema, tod = i => (bars[i].time % 86400) / 60, day = i => Math.floor(bars[i].time / 86400);
+    const N = bars.length, L = CFG.ladder.map(x => superTrend(bars, x[0], x[1])), fl = superTrend(bars, CFG.filt[0], CFG.filt[1]), em = useEma ? emaArr(bars, CFG.ema) : null;
     const out = {n: N, trades: [], cur: null, emaApprox: !!em && N < CFG.ema};
     if (N < CFG.warm + 5) return out;
     let pos = 0, e = null, last = null;
@@ -4764,10 +4765,23 @@ const stApi = (function () {
       const eok = !em ? true : (prop === 1 ? bars[i].close > em[i] : bars[i].close < em[i]);
       let gate;
       if (pos) gate = "in position"; else if (fd !== prop) gate = "BLOCKED wrong regime"; else if (!fa) gate = "WAITING filter not advancing"; else if (!eok) gate = "BLOCKED by " + CFG.ema + " EMA"; else if (!conf) gate = "WAITING confirm"; else gate = "OK";
+      /* extra rules, used only by the signal quality lab */
+      let vok = true;
+      if (!pos && (opt.v3 || opt.noOpen || opt.noLate || opt.rv || opt.risk || opt.sq)) {
+        if (opt.v3 && up !== 3 && up !== 0) vok = false;
+        if (opt.noOpen && tod(i) < 555 + opt.noOpen) vok = false;
+        if (opt.noLate && tod(i) >= opt.noLate) vok = false;
+        if (opt.sq && i + 1 < N && day(i + 1) !== day(i)) vok = false;
+        if (opt.rv && i >= 21) { let sv = 0; for (let k = i - 20; k < i; k++) sv += bars[k].vol || 0; if (!(sv > 0 && (bars[i].vol || 0) >= opt.rv * sv / 20)) vok = false; }
+        if (opt.risk && !(Math.abs(bars[i].close - L[2].line[i]) / bars[i].close * 100 <= opt.risk)) vok = false;
+      }
+      if (pos && opt.sq && i + 1 < N && day(i + 1) !== day(i)) {
+        const xp = bars[i].close; out.trades.push({side: pos, ei: e.i, xi: i, ep: e.p, xp, ret: pos * (xp / e.p - 1) * 100, bars: i - e.i, t: bars[e.i].time}); pos = 0; e = null; last = {i, up, prop, conf, fd, fa, gate: "closed for the day", dr}; continue;
+      }
       if (pos) {
-        const exit = fd !== pos || prop !== pos;
+        const exit = fd !== pos || prop !== pos || (opt.slow && L[2].dir[i] !== pos);
         if (exit && i + 1 < N) { const xp = bars[i + 1].open; out.trades.push({side: pos, ei: e.i, xi: i + 1, ep: e.p, xp, ret: pos * (xp / e.p - 1) * 100, bars: i + 1 - e.i, t: bars[e.i].time}); pos = 0; e = null; }
-      } else if (gate === "OK" && i + 1 < N) { pos = prop; e = {i: i + 1, p: bars[i + 1].open, sig: i}; }
+      } else if (gate === "OK" && vok && i + 1 < N) { pos = prop; e = {i: i + 1, p: bars[i + 1].open, sig: i}; }
       last = {i, up, prop, conf, fd, fa, gate: pos && gate === "OK" ? "in position" : gate, dr};
     }
     if (pos && e) {
@@ -4777,6 +4791,38 @@ const stApi = (function () {
     out.last = last; out.close = bars[N - 1].close; out.t = bars[N - 1].time; out.fline = fl.line[N - 1];
     if (out.cur === null && last && !pos && last.i === N - 1) out.cur = null;
     return out;
+  }
+  /* ---- signal quality lab: re-runs the rules with one extra filter at a time and compares the results ---- */
+  const LAB = [
+    ["Current rules (baseline)", {}],
+    ["Without the 200 EMA filter", {ema: false}],
+    ["Only when all 3 lines agree (3/0 or 0/3)", {v3: true}],
+    ["Skip signals in the first 30 minutes", {noOpen: 30}],
+    ["No new entries after 14:30", {noLate: 870}],
+    ["Intraday only: close the trade at the end of the day", {sq: true}],
+    ["Signal bar volume at least 1.2 times the 20-bar average", {rv: 1.2}],
+    ["Stop (slow line) no more than 1.5% away", {risk: 1.5}],
+    ["Also exit when the slow line (22) flips", {slow: true}],
+    ["Intraday set: skip first 30 min, none after 14:30, close at day end", {noOpen: 30, noLate: 870, sq: true}],
+    ["Intraday set plus volume 1.2 and all 3 lines agree", {noOpen: 30, noLate: 870, sq: true, rv: 1.2, v3: true}]
+  ];
+  let LABRES = "";
+  function runLab() {
+    const syms = Object.keys(B).filter(sy => B[sy].bars && B[sy].bars.length > CFG.warm + 5);
+    if (!syms.length) { LABRES = '<p class="note">No 15-minute data loaded yet.</p>'; return; }
+    const data = syms.map(sy => closedOnly(B[sy].bars, 15)), res = LAB.map(v => { const ts = []; data.forEach(b => { replay(b, v[1]).trades.forEach(t => ts.push(t)); }); return ts; });
+    const base = res[0], cut = base.length ? base.map(t => t.t).sort((a, b) => a - b)[base.length >> 1] : 0;
+    const half = (ts, a) => { const q = ts.filter(t => (a ? t.t < cut : t.t >= cut)).map(t => t.ret - F.cost); return q.length >= 5 ? q.reduce((x, y) => x + y, 0) / q.length : NaN; };
+    const bs = stats(base), b1 = half(base, 1), b2 = half(base, 0), days = data.length ? Math.round(data.reduce((a, b) => a + b.length, 0) / data.length / 25) : 0;
+    let h = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule set</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Avg net %</th><th class="num">Median net %</th><th class="num">Profit factor</th><th class="num">Earlier half avg %</th><th class="num">Later half avg %</th><th>Verdict</th></tr></thead><tbody>';
+    LAB.forEach((v, i) => {
+      const s2 = stats(res[i]); if (!s2) { h += "<tr><td>" + v[0] + '</td><td colspan="8" style="color:var(--mute)">No trades</td></tr>'; return; }
+      const a = half(res[i], 1), c = half(res[i], 0);
+      let verdict = "baseline"; if (i) { const better = bs && s2.net > bs.net, both = isFinite(a) && isFinite(c) && isFinite(b1) && isFinite(b2) && a > b1 && c > b2, enough = s2.n >= bs.n * 0.3; verdict = better && both && enough ? "better in both halves" : better && enough ? "better overall, not in both halves" : better ? "better but few trades" : "no improvement"; }
+      h += "<tr" + (i === 0 ? ' style="background:color-mix(in srgb,var(--a) 8%,var(--card))"' : "") + "><td>" + v[0] + '</td><td class="num">' + s2.n + '</td><td class="num">' + s2.win.toFixed(0) + '%</td><td class="num" style="' + col(s2.net) + '"><b>' + sg(s2.net) + '</b></td><td class="num">' + sg(s2.med) + '</td><td class="num">' + (isFinite(s2.pf) ? s2.pf.toFixed(2) : "-") + '</td><td class="num">' + sg(a) + '</td><td class="num">' + sg(c) + '</td><td style="font-size:.82rem;' + (verdict === "better in both halves" ? "color:var(--good);font-weight:700" : "color:var(--mute)") + '">' + verdict + "</td></tr>";
+    });
+    h += '</tbody></table></div><p class="note" style="margin:8px 0 0">Based on about ' + days + " trading days of 15-minute candles for " + syms.length + " stocks, costs of " + F.cost + "% per trade included. The data is split at the middle trade date into an earlier and a later half. Only trust a rule that is better in both halves and still keeps a good share of the trades. With this little history, a rule that wins by a small margin is probably luck.</p>";
+    LABRES = h;
   }
   function compute() {
     const rows = [], trades = [], lens = [];
@@ -4897,7 +4943,7 @@ const stApi = (function () {
     h += '<details class="pbtd" style="margin-top:14px"' + (F.btOpen ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test of these rules</summary><div class="card" style="margin-top:6px"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Cost per trade (round trip %) <input id="stcost" type="number" step="0.01" min="0" style="width:70px" value="' + F.cost + '"></label></div>' +
       '<div class="wrap" style="overflow-x:auto"><table class="acctbl" style="margin-top:8px"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Avg gross %</th><th class="num">Avg net %</th><th class="num">Median net %</th><th class="num">Avg win %</th><th class="num">Avg loss %</th><th class="num">Profit factor</th><th class="num">Avg bars held</th></tr></thead><tbody>' +
       S.map(g => { const s = stats(g[1]); return s ? "<tr><td>" + g[0] + '</td><td class="num">' + s.n + '</td><td class="num">' + s.win.toFixed(0) + '%</td><td class="num" style="' + col(s.gross) + '">' + sg(s.gross) + '</td><td class="num" style="' + col(s.net) + '"><b>' + sg(s.net) + '</b></td><td class="num">' + sg(s.med) + '</td><td class="num">' + sg(s.aw) + '</td><td class="num">' + sg(s.al) + '</td><td class="num">' + (isFinite(s.pf) ? s.pf.toFixed(2) : "-") + '</td><td class="num">' + s.bars.toFixed(0) + "</td></tr>" : "<tr><td>" + g[0] + '</td><td colspan="9" style="color:var(--mute)">No closed trades yet</td></tr>'; }).join("") + "</tbody></table></div>" +
-      '<p class="note" style="margin:8px 0 0">Replays the same rules over the 15-minute history the feed holds (about ' + lens + " bars per stock, roughly " + Math.round(lens / 25) + " trading days). Entries and exits are filled at the next bar's open. Costs are subtracted per trade. This is a short window, so a few trades from one strong or weak market phase can swing every number. Trades that are still open are not counted. Treat it as a sanity check, not proof of an edge.</p></div></details>";
+      '<p class="note" style="margin:8px 0 0">Replays the same rules over the 15-minute history the feed holds (about ' + lens + " bars per stock, roughly " + Math.round(lens / 25) + " trading days). Entries and exits are filled at the next bar's open. Costs are subtracted per trade. This is a short window, so a few trades from one strong or weak market phase can swing every number. Trades that are still open are not counted. Treat it as a sanity check, not proof of an edge.</p>" + '<div style="margin-top:10px"><button type="button" class="cbtn" data-stlab="1">Run signal quality lab</button> <span class="note" style="margin:0">Tests one extra rule at a time to see what improves the results</span></div><div id="stlabres" style="margin-top:8px">' + LABRES + "</div></div></details>";
     host.innerHTML = h;
     const d = host.querySelector("details.pbtd"); if (d) d.addEventListener("toggle", () => { F.btOpen = d.open; save(); });
     const dk = host.querySelector("tr[data-stdock] td"); if (dk && PN) dk.appendChild(PN);
@@ -4911,6 +4957,7 @@ const stApi = (function () {
       const t = ev.target; if (!t || !t.closest) return; let b;
       if ((b = t.closest("[data-stv]"))) { F.view = b.dataset.stv; F.shown = 100; save(); sync(); view(); return; }
       if (t.closest("#strl")) { load(true); return; }
+      if (t.closest("[data-stlab]")) { const box = $e("#stlabres"); if (box) box.innerHTML = '<p class="note">Running the tests...</p>'; setTimeout(() => { try { runLab(); } catch (e) { LABRES = '<p class="note">The lab could not run: ' + E(String((e && e.message) || e)) + "</p>"; } const bx = $e("#stlabres"); if (bx) bx.innerHTML = LABRES; }, 30); return; }
       if ((b = t.closest("[data-sttf]"))) { TF = b.dataset.sttf; panel(); drawChart(); return; }
       if (t.closest("[data-stx]")) { OPEN = null; panel(); view(); return; }
       if (t.closest("a") || t.closest("[data-ind]") || t.closest("#stpanel")) return;
