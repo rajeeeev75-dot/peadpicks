@@ -3043,7 +3043,8 @@ function znSave() { try { localStorage.setItem("znOpt", JSON.stringify(ZO)); } c
 const znDate = s => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "-" + p[1] + "-" + p[0] : "—"; };
 const znTfName = tf => (ZN_TFS.find(x => x[0] === tf) || [0, tf])[1];
 const znIntra = tf => tf !== "D" && tf !== "W";
-const znTv = (sym, tf) => "https://www.tradingview.com/chart/?symbol=NSE%3A" + encodeURIComponent(String(sym || "").replace(/[&-]/g, "_")) + (tf ? "&interval=" + tf : "");
+const ZN_IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"], ZN_IDXN = {NIFTY: "Nifty 50", BANKNIFTY: "Bank Nifty", FINNIFTY: "Fin Nifty", MIDCPNIFTY: "Midcap Nifty", SENSEX: "Sensex"};
+const znTv = (sym, tf) => "https://www.tradingview.com/chart/?symbol=" + (String(sym) === "SENSEX" ? "BSE" : "NSE") + "%3A" + encodeURIComponent(String(sym || "").replace(/[&-]/g, "_")) + (tf ? "&interval=" + tf : "");
 const znTvA = (sym, tf) => ' <a class="tvl" href="' + znTv(sym, tf) + '" target="_blank" rel="noopener" title="Open on TradingView">TV &#8599;</a>';
 const znP2 = n => String(n).padStart(2, "0");
 function znFmtT(t) { if (typeof t === "number") { const d = new Date(t * 1000); return znP2(d.getUTCDate()) + "-" + znP2(d.getUTCMonth() + 1) + " " + znP2(d.getUTCHours()) + ":" + znP2(d.getUTCMinutes()); } return znDate(t); }
@@ -3060,6 +3061,7 @@ function znUniverse() {
   });
   ((M && M.stocks) || []).forEach(x => { if (!x || !x.s) return; const sym = String(x.s).toUpperCase(); if (seen.has(sym)) return; seen.add(sym); out.push({sym, name: sym, mc: NaN, px: +x.p, sheet: false, tk: ""}); });
   ZN_FNO.forEach(sym => { if (seen.has(sym)) return; seen.add(sym); out.push({sym, name: sym, mc: NaN, px: NaN, sheet: false, tk: ""}); });
+  ZN_IDX.forEach(sym => { if (seen.has(sym)) return; seen.add(sym); out.push({sym, name: ZN_IDXN[sym], mc: NaN, px: NaN, sheet: false, tk: "", idx: true}); });
   return out;
 }
 const znHistBars = (u, tf) => { const h = u.tk && HIST && HIST[u.tk]; return (tf === "D" || tf === "W") && h && h.length ? znAgg(h, tf) : null; };
@@ -4279,7 +4281,7 @@ const cbApi = (function () {
   let F = {side: "Both", min: 3};
   try { const sv = JSON.parse(localStorage.getItem("cbF") || "null"); if (sv) F = Object.assign(F, sv); } catch (e) {}
   const save = () => { try { localStorage.setItem("cbF", JSON.stringify(F)); } catch (e) {} };
-  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["mkt", "Market direction agrees", "Mkt"]];
+  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["st", "SuperTrend (15m, started this session)", "ST"], ["mkt", "Market direction agrees", "Mkt"]];
   const px2 = v => (isFinite(v) ? fmt(v, v < 100 ? 2 : 1) : "-");
   const sgn = (v, d = 1) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) + "%" : "-");
   let PT = null, last = 0, LASTR = {};
@@ -4306,6 +4308,7 @@ const cbApi = (function () {
     try { const g = rmApi.signals(); rmTf = g.tf; Object.keys(g.m).forEach(sym => { const x = g.m[sym]; give(sym, x.dir, "rm", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 " + (x.st === "fresh" ? x.kind.toLowerCase() + " " + x.age + " bars ago" : "armed") + " (" + g.tf + ")", isFinite(x.score) ? String(Math.round(x.score)) : "", Object.assign({tf: g.tf}, x)); }); } catch (e) {}
     const tcm = {}, tcs = {};
     try { const sn = tcApi.season(14); Object.keys(sn.m).forEach(sym => { const x = sn.m[sym]; tcm[sym] = x; tcs[x.sec] = sn.sm[x.sec]; if (x.prob >= 60 && x.avg > 0) give(sym, 1, "tc", "Rose in " + Math.round(x.prob) + "% of past years over the next 2 weeks", Math.round(x.prob) + "%", {x}); else if (x.prob <= 40 && x.avg < 0) give(sym, -1, "tc", "Fell in " + Math.round(100 - x.prob) + "% of past years over the next 2 weeks", Math.round(100 - x.prob) + "%", {x}); }); } catch (e) {}
+    try { const g = stApi.signals(25); Object.keys(g).forEach(sym => { const x = g[sym]; give(sym, x.side, "st", "SuperTrend " + (x.side === 1 ? "LONG" : "SHORT") + " since " + x.when + " (" + x.bars + " bars, 15m)", x.bars + "b", x); }); } catch (e) {}
     const pdm = {};
     try { ppApi.list().forEach(x => { if (!(x.d <= 60)) return; pdm[x.sym] = x; if (!(x.d <= 30) || !isFinite(x.react)) return; if (/EXCELLENT|VERY GOOD/i.test(x.rec) && x.react >= 0) give(x.sym, 1, "pead", x.rec.toLowerCase() + ", score " + Math.round(x.total) + ", reaction " + pct(x.react, 1), String(Math.round(x.total)), {x}); else if (/POOR/i.test(x.rec) && x.react < 0) give(x.sym, -1, "pead", x.rec.toLowerCase() + ", score " + Math.round(x.total) + ", reaction " + pct(x.react, 1), String(Math.round(x.total)), {x}); }); } catch (e) {}
     const mb = marketBias(), rows = [];
@@ -4321,7 +4324,7 @@ const cbApi = (function () {
     return {rows, mb, rmTf};
   }
   function load(force) {
-    try { znLoad(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {}
+    try { znLoad(false); } catch (e) {} try { stApi.load(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {}
     last = Date.now();
   }
 
@@ -4336,6 +4339,7 @@ const cbApi = (function () {
     };
     if (d.idea && d.idea.x && d.idea.x.lv) { const v = d.idea.x.lv; add("Trade idea trigger", v.t, v.st, v.tg, "levels from the Intraday screen"); }
     if (d.zone && d.zone.z) { const z = d.zone.z; add("Zone proximal line", z.prox, z.dist, z.target, (z.type === "D" ? "demand " : "supply ") + z.pat + " zone, " + d.zone.tf); }
+    if (d.st && isFinite(d.st.stop)) { const x = d.st, r = Math.abs(x.close - x.stop); add("SuperTrend 15m, exit at 2R", x.close, x.stop, x.close + (x.side === 1 ? 2 : -2) * r, "now, stop at the slowest line"); }
     if (d.rm && d.rm.plan) { const p = d.rm.plan; add("123 plan, exit at T1 (1R)", p.entry, p.stop, p.t1, "signal bar close, " + d.rm.tf); add("123 plan, exit at T2", p.entry, p.stop, p.t2, "measured move or 2R, " + d.rm.tf); }
     if (daily && daily.length > 40) {
       const n0 = daily.length, today = new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Kolkata"}), nb = daily[n0 - 1].time >= today && n0 > 1 ? n0 - 1 : n0, b = daily.slice(0, nb), n = b.length;
@@ -4439,6 +4443,7 @@ const cbApi = (function () {
     if (d.idea) { const x = d.idea.x; L.push(row("Trade idea", "Score " + x.sc + "/10" + (x.lv ? ". Trigger " + px2(x.lv.t) + ", stop " + px2(x.lv.st) + ", target " + px2(x.lv.tg) : ""))); }
     if (d.oi) { L.push(row("OI spurt", (r.side === 1 ? "Long" : "Short") + " build-up: open interest " + sgn(+d.oi.r.pct, 0) + " (change " + Math.round(+d.oi.r.chg).toLocaleString("en-IN") + "), price " + sgn(+d.oi.q.pct, 1))); }
     if (d.zone) { const z = d.zone.z; L.push(row("Zone", (z.type === "D" ? "Demand" : "Supply") + " zone (" + z.pat + ") on " + d.zone.tf + ": proximal " + px2(z.prox) + ", distal " + px2(z.dist) + ", target " + px2(z.target) + ", strength " + Math.round(z.prob) + "%, " + Math.abs(d.zone.away).toFixed(1) + "% from price. Active on: " + d.zone.tfs.join(", "))); }
+    if (d.st) { const x = d.st; L.push(row("SuperTrend", (x.side === 1 ? "LONG" : "SHORT") + " on 15m since " + x.when + " (" + x.bars + " bars), " + x.votes + " of 3 lines agree. Entry " + px2(x.entry) + ", now " + px2(x.close) + " (" + sgn(x.pl, 2) + "), stop " + px2(x.stop))); }
     if (d.rm) { const x = d.rm; L.push(row("123 reversal", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 on " + x.tf + ", " + (x.st === "fresh" ? x.kind.toLowerCase() + " signal " + x.age + " bars ago" : "armed, waiting for the neckline") + (isFinite(x.score) ? ", quality " + Math.round(x.score) + "/100" : "") + (x.plan ? ". Plan: entry " + px2(x.plan.entry) + ", stop " + px2(x.plan.stop) + ", T1 " + px2(x.plan.t1) + ", T2 " + px2(x.plan.t2) : ""))); }
     if (tc) { const sec = r.tcSec; L.push(row("Season", "Over the next 2 weeks it rose in " + Math.round(tc.prob) + "% of " + tc.n + " past years, average " + sgn(tc.avg * 100, 1) + (tc.sec ? ". " + E(tc.sec) + " sector: " + (sec ? Math.round(sec.prob) + "% of " + sec.n + " years" : "n/a") : ""))); }
     if (pd) L.push(row("PEAD", "Score <b>" + Math.round(pd.total) + "/100</b> (" + E(pd.rec.toLowerCase()) + "), reported " + (pd.d === 0 ? "today" : pd.d + " days ago") + (isFinite(pd.react) ? ", first-session reaction " + sgn(pd.react, 1) : "") + (isFinite(pd.revY) ? ". Sales " + sgn(pd.revY, 0) + " YoY, profit " + sgn(pd.npY, 0) + " YoY" : "") + (pd.fwdPe > 0 ? ", forward P/E " + pd.fwdPe.toFixed(1) : "")));
@@ -4523,7 +4528,7 @@ const cbApi = (function () {
     const rows = R.rows.filter(r => r.score >= F.min && (F.side === "Both" || (F.side === "Long" ? r.side === 1 : r.side === -1)));
     const st = (name, n) => name + (n ? " <b>" + n + "</b>" : " <i>waiting</i>");
     const cnt = k => R.rows.filter(r => r.has[k]).length;
-    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · Market: " + E(R.mb.t);
+    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · " + st("SuperTrend", cnt("st")) + " · Market: " + E(R.mb.t);
     let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th>' + SRC.map(x => '<th title="' + E(x[1]) + '" style="text-align:center">' + E(x[2]) + "</th>").join("") + '</tr></thead><tbody>';
     h += rows.length ? rows.slice(0, 80).map((r, i) => {
       const q = r.q, chg = q ? +q.pct : NaN, sel = SEL && SEL.sym === r.sym;
@@ -4710,10 +4715,12 @@ const n5Paint = () => n5Api.open();
 const stApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
   const CFG = {ladder: [[8, 2], [15, 2], [22, 2]], filt: [20, 3], confirm: 2, adv: 3, warm: 30};
-  let F = {view: "sig", q: "", sort: "pl", dir: -1, shown: 100, cost: 0.1};
+  let F = {view: "sig", q: "", sort: "since", dir: -1, shown: 100, cost: 0.1, v: 2};
   try { const sv = JSON.parse(localStorage.getItem("stF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 100}); } catch (e) {}
+  if (F.v !== 2) { F.sort = "since"; F.dir = -1; F.v = 2; }
   const save = () => { try { localStorage.setItem("stF", JSON.stringify(F)); } catch (e) {} };
-  const B = {}, STAT = {t: 0, busy: false, done: 0, total: 0, fail: 0, err: ""}; let built = false, PT = null, RES = null, BT = null;
+  const B = {}, STAT = {t: 0, busy: false, done: 0, total: 0, fail: 0, err: ""}; let built = false, PT = null, RES = null, BT = null, OPEN = null, TF = "15", PN = null, CH = null;
+  const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
   const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
   const sg = (v, d = 2) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) : "-");
   const col = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
@@ -4778,7 +4785,7 @@ const stApi = (function () {
   }
   async function load(force) {
     if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL || STAT.busy) return;
-    const now = Date.now(), uni = ZN_FNO.slice(), todo = uni.filter(s => force || !B[s] || now - B[s].t > 300e3);
+    const now = Date.now(), uni = ZN_IDX.concat(ZN_FNO), todo = uni.filter(s => force || !B[s] || now - B[s].t > 300e3);
     if (!todo.length) return;
     STAT.busy = true; STAT.done = uni.length - todo.length; STAT.total = uni.length; STAT.fail = 0; STAT.err = "";
     const chunks = []; for (let i = 0; i < todo.length; i += 12) chunks.push(todo.slice(i, i + 12));
@@ -4791,6 +4798,58 @@ const stApi = (function () {
       STAT.done += ch.length; schedule(); } };
     await Promise.all([run(), run(), run()]);
     STAT.busy = false; STAT.t = Date.now(); compute(); schedule();
+  }
+  /* used by the Combo tab: open positions that started within the last session (about 25 fifteen-minute bars) */
+  function signals(maxBars) {
+    const mb = maxBars || 25, m = {}; if (!RES) return m;
+    RES.forEach(r => { const c = r.cur; if (c && c.bars <= mb) m[r.sym] = {side: c.side, since: c.since, when: when(c.since), bars: c.bars, entry: c.entry, close: r.close, stop: c.stop, risk: c.risk, pl: c.pl, votes: r.last.up}; });
+    return m;
+  }
+  /* ---- in-page chart: candles, the three ladder lines, the filter line, entries and exits, stop ---- */
+  async function barsFor(sym, tf) {
+    if (tf === "15" && B[sym] && B[sym].bars && B[sym].bars.length > 5) return B[sym].bars.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close, vol: x.vol}));
+    const key = sym + "|" + tf; let o = IXC[key];
+    if (!o || Date.now() - o.t > 45e3) {
+      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + (tf === "D" ? "DF" : tf), {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 5) IXC[key] = o = {t: Date.now(), bars: rows.map(x => ({time: tf === "D" ? String(x[0]).slice(0, 10) : x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; } catch (e) {}
+    }
+    return o && o.bars;
+  }
+  function removeChart() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } }
+  async function drawChart() {
+    if (!OPEN || !PN) return; const sym = OPEN, tf = TF, box = PN.querySelector("#stbox"); if (!box) return;
+    const b = await barsFor(sym, tf), note = PN.querySelector("#stnote");
+    if (OPEN !== sym || TF !== tf || !PN.querySelector("#stbox")) return;
+    removeChart();
+    const LW = window.LightweightCharts;
+    if (!b || !LW) { if (note) note.textContent = "No chart data for " + sym + " from your Worker" + (LW ? "" : " (chart library missing)") + ". Use the TradingView link."; return; }
+    const c = colors(), intra = tf !== "D";
+    const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+    candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+    /* SuperTrend lines: coloured by direction, the filter drawn thick */
+    const lines = CFG.ladder.map(x => [superTrend(b, x[0], x[1]), 1, "aa"]).concat([[superTrend(b, CFG.filt[0], CFG.filt[1]), 3, ""]]);
+    lines.forEach(a => { try { const ser = chart.addLineSeries({lineWidth: a[1], priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false}), d = []; for (let i = 0; i < b.length; i++) { if (!a[0].dir[i] || !isFinite(a[0].line[i])) continue; d.push({time: b[i].time, value: a[0].line[i], color: (a[0].dir[i] === 1 ? c.up : c.dn) + a[2]}); } ser.setData(d); } catch (e) {} });
+    /* entries and exits from the same rules, and the open position's stop */
+    let cur = null;
+    try {
+      const R = replay(b), mk = []; cur = R.cur;
+      R.trades.slice(-30).forEach(t => { mk.push({time: b[t.ei].time, position: t.side === 1 ? "belowBar" : "aboveBar", color: t.side === 1 ? c.up : c.dn, shape: t.side === 1 ? "arrowUp" : "arrowDown", text: t.side === 1 ? "L" : "S"}); mk.push({time: b[t.xi].time, position: t.side === 1 ? "aboveBar" : "belowBar", color: "#64748b", shape: "circle", text: sg(t.ret, 1) + "%"}); });
+      if (R.cur) { const sig = b.length - 1 - R.cur.bars; if (sig >= 0 && sig < b.length - 1 + 1) mk.push({time: b[sig].time, position: R.cur.side === 1 ? "belowBar" : "aboveBar", color: R.cur.side === 1 ? c.up : c.dn, shape: R.cur.side === 1 ? "arrowUp" : "arrowDown", text: R.cur.side === 1 ? "LONG" : "SHORT"}); }
+      mk.sort((x, y) => (x.time < y.time ? -1 : x.time > y.time ? 1 : 0)); candle.setMarkers(mk);
+      if (R.cur) { [[R.cur.entry, "#2563eb", "Entry"], [R.cur.stop, "#dc2626", "Stop"]].forEach(a => { try { candle.createPriceLine({price: a[0], color: a[1], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[2]}); } catch (e) {} }); }
+    } catch (e) {}
+    try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+    CH = chart; const n = b.length;
+    try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 120 : 90)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
+    if (note) note.innerHTML = "Thin lines: the three ladder SuperTrends (8, 15, 22). Thick line: the regime filter (20, 3.0). Green is up, red is down. Arrows mark entries from these rules and circles mark exits with the result." + (cur ? " On this timeframe the rules hold a " + (cur.side === 1 ? "LONG" : "SHORT") + ": entry " + f2(cur.entry) + ", stop " + f2(cur.stop) + "." : "") + " Candles from your Worker, can lag a few minutes.";
+  }
+  function panel() {
+    if (!PN) { PN = document.createElement("div"); PN.id = "stpanel"; }
+    removeChart();
+    if (!OPEN) { PN.innerHTML = ""; return; }
+    PN.innerHTML = '<div class="card"><div class="charttools" style="border:0;padding:0;margin-bottom:6px"><b>' + E(OPEN) + "</b>" + (ZN_IDXN[OPEN] ? ' <span class="note" style="margin:0">' + ZN_IDXN[OPEN] + "</span>" : "") + '</div><div class="charttools">' + TFS.map(t => '<button type="button" class="cbtn" data-sttf="' + t[0] + '" aria-pressed="' + (t[0] === TF) + '">' + t[1] + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, TF) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-stx="1">Close chart</button></div>' +
+      '<div id="stbox" style="height:420px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="stnote" class="note" style="margin:6px 0 0">Loading chart...</div></div>';
   }
   function schedule() { if (PT) return; PT = setTimeout(() => { PT = null; try { if (typeof current !== "undefined" && current === "st") { compute(); view(); } } catch (e) {} }, 500); }
   const VIEWS = [["sig", "Signals"], ["long", "LONG"], ["short", "SHORT"], ["new", "Fresh (last 8 bars)"], ["wait", "Blocked / waiting"], ["all", "All stocks"]];
@@ -4813,10 +4872,11 @@ const stApi = (function () {
     rows.slice(0, F.shown).forEach(r => {
       const c = r.cur, l = r.last, tv = znTv(r.sym, "15");
       const pill = c ? '<span style="font-weight:700;padding:1px 7px;border-radius:5px;font-size:.78rem;color:#fff;background:' + (c.side === 1 ? "var(--good)" : "var(--bad)") + '">' + (c.side === 1 ? "LONG" : "SHORT") + "</span>" : '<span style="color:var(--mute)">-</span>';
-      h += "<tr><td><b>" + E(r.sym) + '</b> <a class="tvl" style="font-size:.74rem;font-weight:600;color:var(--a);text-decoration:none" href="' + tv + '" target="_blank" rel="noopener">TV</a></td><td>' + pill + "</td><td>" + votes(l.dr) + ' <span class="mono" style="font-size:.76rem;color:var(--mute)">' + l.up + "/" + (3 - l.up) + '</span></td><td style="' + col(l.fd) + '">' + (l.fd === 1 ? "UP" : "DOWN") + (l.fa ? " &#8599;" : "") + "</td>" +
-        "<td>" + (c ? when(c.since) + ' <span style="color:var(--mute);font-size:.76rem">(' + c.bars + " bars)</span>" : "-") + '</td><td class="num">' + (c ? f2(c.entry) : "-") + '</td><td class="num">' + f2(r.close) + '</td><td class="num" style="' + (c ? col(c.pl) : "") + '">' + (c ? sg(c.pl) : "-") + '</td><td class="num">' + (c ? f2(c.stop) : "-") + '</td><td class="num">' + (c ? c.risk.toFixed(2) : "-") + '</td><td style="font-size:.8rem;color:var(--mute)">' + E(l.gate) + "</td></tr>";
+      const op = OPEN === r.sym;
+      h += '<tr data-sts="' + E(r.sym) + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td><b>' + E(r.sym) + "</b>" + (ZN_IDXN[r.sym] ? ' <span style="font-size:.72rem;color:var(--mute)">' + ZN_IDXN[r.sym] + "</span>" : "") + ' <a class="tvl" style="font-size:.74rem;font-weight:600;color:var(--a);text-decoration:none" href="' + tv + '" target="_blank" rel="noopener">TV</a> <button type="button" class="cbtn" data-stc="' + E(r.sym) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button></td><td>' + pill + "</td><td>" + votes(l.dr) + ' <span class="mono" style="font-size:.76rem;color:var(--mute)">' + l.up + "/" + (3 - l.up) + '</span></td><td style="' + col(l.fd) + '">' + (l.fd === 1 ? "UP" : "DOWN") + (l.fa ? " &#8599;" : "") + "</td>" +
+        "<td>" + (c ? when(c.since) + ' <span style="color:var(--mute);font-size:.76rem">(' + c.bars + " bars)</span>" : "-") + '</td><td class="num">' + (c ? f2(c.entry) : "-") + '</td><td class="num">' + f2(r.close) + '</td><td class="num" style="' + (c ? col(c.pl) : "") + '">' + (c ? sg(c.pl) : "-") + '</td><td class="num">' + (c ? f2(c.stop) : "-") + '</td><td class="num">' + (c ? c.risk.toFixed(2) : "-") + '</td><td style="font-size:.8rem;color:var(--mute)">' + E(l.gate) + "</td></tr>" + (op ? '<tr class="dockrow" data-stdock="1"><td colspan="11"></td></tr>' : "");
     });
-    if (!rows.length) h += '<tr><td colspan="10" style="text-align:center;color:var(--mute);padding:16px">Nothing matches this view.</td></tr>';
+    if (!rows.length) h += '<tr><td colspan="11" style="text-align:center;color:var(--mute);padding:16px">Nothing matches this view.</td></tr>';
     h += "</tbody></table></div></div>";
     if (rows.length > F.shown) h += '<div style="text-align:center;margin:10px"><button type="button" class="cbtn" id="stmore">Show more (' + (rows.length - F.shown) + " left)</button></div>";
     /* back-test */
@@ -4828,16 +4888,21 @@ const stApi = (function () {
       '<p class="note" style="margin:8px 0 0">Replays the same rules over the 15-minute history the feed holds (about ' + lens + " bars per stock, roughly " + Math.round(lens / 25) + " trading days). Entries and exits are filled at the next bar's open. Costs are subtracted per trade. This is a short window, so a few trades from one strong or weak market phase can swing every number. Trades that are still open are not counted. Treat it as a sanity check, not proof of an edge.</p></div></details>";
     host.innerHTML = h;
     const d = host.querySelector("details.pbtd"); if (d) d.addEventListener("toggle", () => { F.btOpen = d.open; save(); });
+    const dk = host.querySelector("tr[data-stdock] td"); if (dk && PN) dk.appendChild(PN);
   }
   function build() {
     const host = document.getElementById("stbody"); if (!host || built) return; built = true;
-    host.innerHTML = '<div class="znhead" style="background:linear-gradient(120deg,#0e7490,#1d4ed8)"><div><h2>SUPERTREND SCREENER</h2><span>Three SuperTrends vote on 15-minute bars, a slower SuperTrend must agree</span></div><div class="znpills"><span>8 / 15 / 22 at 2.0</span><span>Filter 20 at 3.0</span><span>~200 F&amp;O stocks</span></div></div>' +
+    host.innerHTML = '<div class="znhead" style="background:linear-gradient(120deg,#0e7490,#1d4ed8)"><div><h2>SUPERTREND SCREENER</h2><span>Three SuperTrends vote on 15-minute bars, a slower SuperTrend must agree</span></div><div class="znpills"><span>8 / 15 / 22 at 2.0</span><span>Filter 20 at 3.0</span><span>Indices + ~200 F&amp;O stocks</span></div></div>' +
       '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 10px">' + VIEWS.map(v => '<button type="button" class="cbtn" data-stv="' + v[0] + '">' + v[1] + "</button>").join("") + '<label>Search <input id="stq" type="search" placeholder="symbol" style="width:110px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="strl">&#8635; Reload</button></div><div class="note" id="ststat" style="margin:8px 0 0"></div>' +
       '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">How the signal works</summary><p class="note" style="margin:6px 0 0">Three SuperTrends (ATR 8, 15, 22, factor 2.0) each say whether the close is above or below their line. The majority proposes a direction, and it must hold for two bars in a row. A separate SuperTrend(20, 3.0) must agree and be moving that way (its line higher than 3 bars ago for a LONG, lower for a SHORT), otherwise the stock shows BLOCKED wrong regime or WAITING filter not advancing. An open position exits when the filter flips or the vote turns the other way. Stop is the slowest line (22). This is my own reading of the published description of the open-source Ostri scanner, so it may differ from its code in the details.</p></details></div><div id="stres"></div>';
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest) return; let b;
       if ((b = t.closest("[data-stv]"))) { F.view = b.dataset.stv; F.shown = 100; save(); sync(); view(); return; }
       if (t.closest("#strl")) { load(true); return; }
+      if ((b = t.closest("[data-sttf]"))) { TF = b.dataset.sttf; panel(); drawChart(); return; }
+      if (t.closest("[data-stx]")) { OPEN = null; panel(); view(); return; }
+      if (t.closest("a") || t.closest("[data-ind]") || t.closest("#stpanel")) return;
+      if ((b = t.closest("[data-sts]"))) { const sy = b.dataset.sts; OPEN = OPEN === sy ? null : sy; panel(); view(); if (OPEN) { drawChart(); setTimeout(() => { if (PN && PN.scrollIntoView) PN.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); } return; }
       if (t.closest("#stmore")) { F.shown += 100; view(); return; }
       if ((b = t.closest("[data-stk]"))) { const k = b.dataset.stk; F.dir = F.sort === k ? -F.dir : (k === "sym" ? 1 : -1); F.sort = k; save(); view(); }
     });
@@ -4847,7 +4912,8 @@ const stApi = (function () {
   function sync() { document.querySelectorAll("#stbody [data-stv]").forEach(b => b.setAttribute("aria-pressed", b.dataset.stv === F.view ? "true" : "false")); }
   function open() { build(); sync(); if (RES) view(); else view(); load(false); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "st" && !document.hidden) load(false); } catch (e) {} }, 120e3);
-  return {open, _test: {superTrend, replay, CFG}};
+  setInterval(() => { try { if (OPEN && TF !== "D" && typeof current !== "undefined" && current === "st" && !document.hidden) drawChart(); } catch (e) {} }, 60e3);
+  return {open, signals, load, _test: {superTrend, replay, CFG}};
 })();
 const stPaint = () => stApi.open();
 /* ===== CUP & HANDLE TAB: scans the Nifty 500 on daily, weekly or monthly candles for a cup and handle base that is forming or breaking out, with entry/stop/target, an inline chart and a past-data accuracy table ===== */
@@ -4952,7 +5018,7 @@ const cuApi = (function () {
   }
   const BTF = () => (F.tf === "A" || F.tf === "X" ? "D" : F.tf);
   function mergedRes() { const out = {}; Object.keys(B).forEach(sym => { let b = null; ["M", "W", "D"].forEach(k => { const r = RES[k][sym]; if (r && r.score >= F.min && r.tweeks >= F.minw && (!b || r.tweeks > b.tweeks)) b = r; }); if (b) out[sym] = b; }); return out; }
-  function universe() { const L = n5Api.list(); const fno = new Set(typeof ZN_FNO !== "undefined" ? ZN_FNO : []); return L.filter(x => !F.fno || fno.has(x.s)); }
+  function universe() { const L = n5Api.list(); const fno = new Set(typeof ZN_FNO !== "undefined" ? ZN_FNO : []); return ZN_IDX.map(sy => ({s: sy, n: ZN_IDXN[sy], i: "Index"})).concat(L.filter(x => !F.fno || fno.has(x.s))); }
   async function load(force) {
     if (ST.busy || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
     if (!force && ST.t && Date.now() - ST.t < 20 * 60e3) return;
