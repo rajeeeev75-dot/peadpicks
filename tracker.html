@@ -4714,12 +4714,12 @@ const n5Paint = () => n5Api.open();
 /* ===== SUPERTREND SCREENER TAB: three SuperTrends vote on 15-minute bars, a slower SuperTrend regime filter must agree, plus a replay back-test of the same rules ===== */
 const stApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
-  const CFG = {ladder: [[8, 2], [15, 2], [22, 2]], filt: [20, 3], confirm: 2, adv: 3, warm: 30};
-  let F = {view: "sig", q: "", sort: "since", dir: -1, shown: 100, cost: 0.1, v: 2};
+  const CFG = {ladder: [[8, 2], [15, 2], [22, 2]], filt: [20, 3], confirm: 2, adv: 1, warm: 30, ema: 200};
+  let F = {view: "sig", q: "", sort: "since", dir: -1, shown: 100, cost: 0.1, v: 2, ema: true};
   try { const sv = JSON.parse(localStorage.getItem("stF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 100}); } catch (e) {}
   if (F.v !== 2) { F.sort = "since"; F.dir = -1; F.v = 2; }
   const save = () => { try { localStorage.setItem("stF", JSON.stringify(F)); } catch (e) {} };
-  const B = {}, STAT = {t: 0, busy: false, done: 0, total: 0, fail: 0, err: ""}; let built = false, PT = null, RES = null, BT = null, OPEN = null, TF = "15", PN = null, CH = null;
+  const B = {}, STAT = {t: 0, busy: false, done: 0, total: 0, fail: 0, err: ""}; let built = false, PT = null, RES = null, BT = null, OPEN = null, TF = "15", PN = null, CH = null, LONGTF = true;
   const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
   const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
   const sg = (v, d = 2) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) : "-");
@@ -4728,7 +4728,7 @@ const stApi = (function () {
   const when = t => { const d = new Date((t + 900) * 1000); return isFinite(d) ? String(d.getUTCDate()).padStart(2, "0") + " " + MON[d.getUTCMonth()] + " " + String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0") : "-"; };
   /* SuperTrend as TradingView computes it: Wilder ATR, ratcheting bands, dir +1 up / -1 down */
   function superTrend(bars, n, f) {
-    const N = bars.length, dir = new Array(N).fill(0), line = new Array(N).fill(NaN); let atr = NaN, pu = NaN, pl = NaN, pd = 1, tr0 = 0;
+    const N = bars.length, dir = new Array(N).fill(0), line = new Array(N).fill(NaN); let atr = NaN, pu = NaN, pl = NaN, pd = -1, tr0 = 0;
     for (let i = 0; i < N; i++) {
       const b = bars[i], pc = i ? bars[i - 1].close : b.close, tr = Math.max(b.high - b.low, Math.abs(b.high - pc), Math.abs(b.low - pc));
       if (i < n) { tr0 += tr; if (i === n - 1) atr = tr0 / n; } else atr = (atr * (n - 1) + tr) / n;
@@ -4736,15 +4736,24 @@ const stApi = (function () {
       const hl2 = (b.high + b.low) / 2; let up = hl2 + f * atr, lo = hl2 - f * atr;
       if (isFinite(pl)) lo = (lo > pl || pc < pl) ? lo : pl;
       if (isFinite(pu)) up = (up < pu || pc > pu) ? up : pu;
-      let d = pd; if (!isFinite(pu)) d = 1; else if (pd === -1 && b.close > up) d = 1; else if (pd === 1 && b.close < lo) d = -1;
+      let d = pd; if (!isFinite(pu)) d = -1; else if (pd === -1 && b.close > up) d = 1; else if (pd === 1 && b.close < lo) d = -1;
       dir[i] = d; line[i] = d === 1 ? lo : up; pu = up; pl = lo; pd = d;
     }
     return {dir, line};
   }
+  /* EMA like TradingView: first value is the simple average of the first n closes, empty before that */
+  function emaArr(bars, n) {
+    const N = bars.length, o = new Array(N).fill(NaN), k = 2 / (n + 1); if (!N) return o;
+    if (N >= n) { let sm = 0; for (let i = 0; i < n; i++) sm += bars[i].close; o[n - 1] = sm / n; for (let i = n; i < N; i++) o[i] = bars[i].close * k + o[i - 1] * (1 - k); }
+    else { o[0] = bars[0].close; for (let i = 1; i < N; i++) o[i] = bars[i].close * k + o[i - 1] * (1 - k); }
+    return o;
+  }
+  /* The signal is decided on closed bars only, so drop a bar that is still forming */
+  function closedOnly(b, mins) { const nowIst = Date.now() / 1000 + 19800; let n = b.length; while (n && typeof b[n - 1].time === "number" && b[n - 1].time + mins * 60 > nowIst) n--; return n === b.length ? b : b.slice(0, n); }
   /* Replay the rules bar by bar. Signals are decided at a bar's close; trades fill at the next bar's open. */
   function replay(bars) {
-    const N = bars.length, L = CFG.ladder.map(x => superTrend(bars, x[0], x[1])), fl = superTrend(bars, CFG.filt[0], CFG.filt[1]);
-    const out = {n: N, trades: [], cur: null};
+    const N = bars.length, L = CFG.ladder.map(x => superTrend(bars, x[0], x[1])), fl = superTrend(bars, CFG.filt[0], CFG.filt[1]), em = F.ema ? emaArr(bars, CFG.ema) : null;
+    const out = {n: N, trades: [], cur: null, emaApprox: !!em && N < CFG.ema};
     if (N < CFG.warm + 5) return out;
     let pos = 0, e = null, last = null;
     for (let i = CFG.warm; i < N; i++) {
@@ -4752,10 +4761,11 @@ const stApi = (function () {
       const up = dr.filter(d => d === 1).length, prop = up >= 2 ? 1 : -1;
       let conf = true; for (let k = 1; k < CFG.confirm; k++) { const u2 = L.filter(s => s.dir[i - k] === 1).length; if ((u2 >= 2 ? 1 : -1) !== prop) conf = false; }
       const fd = fl.dir[i], fa = i >= CFG.adv && isFinite(fl.line[i - CFG.adv]) ? (fd === 1 ? fl.line[i] > fl.line[i - CFG.adv] : fl.line[i] < fl.line[i - CFG.adv]) : false;
+      const eok = !em ? true : (prop === 1 ? bars[i].close > em[i] : bars[i].close < em[i]);
       let gate;
-      if (pos) gate = "in position"; else if (!conf) gate = "no confirmed vote"; else if (fd !== prop) gate = "BLOCKED wrong regime"; else if (!fa) gate = "WAITING filter not advancing"; else gate = "OK";
+      if (pos) gate = "in position"; else if (fd !== prop) gate = "BLOCKED wrong regime"; else if (!fa) gate = "WAITING filter not advancing"; else if (!eok) gate = "BLOCKED by " + CFG.ema + " EMA"; else if (!conf) gate = "WAITING confirm"; else gate = "OK";
       if (pos) {
-        const exit = fd !== pos || (conf && prop !== pos);
+        const exit = fd !== pos || prop !== pos;
         if (exit && i + 1 < N) { const xp = bars[i + 1].open; out.trades.push({side: pos, ei: e.i, xi: i + 1, ep: e.p, xp, ret: pos * (xp / e.p - 1) * 100, bars: i + 1 - e.i, t: bars[e.i].time}); pos = 0; e = null; }
       } else if (gate === "OK" && i + 1 < N) { pos = prop; e = {i: i + 1, p: bars[i + 1].open, sig: i}; }
       last = {i, up, prop, conf, fd, fa, gate: pos && gate === "OK" ? "in position" : gate, dr};
@@ -4771,10 +4781,10 @@ const stApi = (function () {
   function compute() {
     const rows = [], trades = [], lens = [];
     Object.keys(B).forEach(sym => {
-      const bars = B[sym].bars; if (!bars || bars.length < CFG.warm + 5) return; lens.push(bars.length);
+      const bars = closedOnly(B[sym].bars || [], 15); if (!bars || bars.length < CFG.warm + 5) return; lens.push(bars.length);
       const r = replay(bars); r.trades.forEach(t => { t.sym = sym; trades.push(t); });
       if (!r.last) return;
-      rows.push({sym, close: r.close, t: r.t, cur: r.cur, last: r.last, n: r.n, nt: r.trades.length, fline: r.fline});
+      rows.push({sym, close: r.close, t: r.t, cur: r.cur, last: r.last, n: r.n, nt: r.trades.length, fline: r.fline, ea: r.emaApprox});
     });
     RES = rows; BT = {trades, lens};
   }
@@ -4791,7 +4801,8 @@ const stApi = (function () {
     const chunks = []; for (let i = 0; i < todo.length; i += 12) chunks.push(todo.slice(i, i + 12));
     let nx = 0;
     const run = async () => { while (nx < chunks.length) { const ch = chunks[nx++];
-      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=15", {cache: "no-store"}), j = await r.json(), t = Date.now();
+      try { let r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=" + (LONGTF ? "15X" : "15"), {cache: "no-store"}), j = await r.json(), t = Date.now();
+        if (LONGTF && (j.error || !Object.keys(j.bars || {}).length)) { LONGTF = false; r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=15", {cache: "no-store"}); j = await r.json(); }
         Object.keys(j.bars || {}).forEach(sy => { B[sy] = {t, bars: j.bars[sy].map(x => ({time: x[0], open: x[1], high: x[2], low: x[3], close: x[4], vol: x[5]}))}; });
         STAT.fail += (j.failed || []).length; if (j.error) STAT.err = j.error;
       } catch (e) { STAT.fail += ch.length; STAT.err = String((e && e.message) || e); }
@@ -4817,7 +4828,7 @@ const stApi = (function () {
   function removeChart() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } }
   async function drawChart() {
     if (!OPEN || !PN) return; const sym = OPEN, tf = TF, box = PN.querySelector("#stbox"); if (!box) return;
-    const b = await barsFor(sym, tf), note = PN.querySelector("#stnote");
+    let b = await barsFor(sym, tf), note = PN.querySelector("#stnote"); if (b && tf !== "D") b = closedOnly(b, +tf);
     if (OPEN !== sym || TF !== tf || !PN.querySelector("#stbox")) return;
     removeChart();
     const LW = window.LightweightCharts;
@@ -4830,6 +4841,7 @@ const stApi = (function () {
     /* SuperTrend lines: coloured by direction, the filter drawn thick */
     const lines = CFG.ladder.map(x => [superTrend(b, x[0], x[1]), 1, "aa"]).concat([[superTrend(b, CFG.filt[0], CFG.filt[1]), 3, ""]]);
     lines.forEach(a => { try { const ser = chart.addLineSeries({lineWidth: a[1], priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false}), d = []; for (let i = 0; i < b.length; i++) { if (!a[0].dir[i] || !isFinite(a[0].line[i])) continue; d.push({time: b[i].time, value: a[0].line[i], color: (a[0].dir[i] === 1 ? c.up : c.dn) + a[2]}); } ser.setData(d); } catch (e) {} });
+    if (F.ema) { try { const es = chart.addLineSeries({color: "#94a3b8", lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false}), ev = emaArr(b, CFG.ema), d = []; for (let i = 0; i < b.length; i++) if (isFinite(ev[i])) d.push({time: b[i].time, value: ev[i]}); es.setData(d); } catch (e) {} }
     /* entries and exits from the same rules, and the open position's stop */
     let cur = null;
     try {
@@ -4842,7 +4854,7 @@ const stApi = (function () {
     try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
     CH = chart; const n = b.length;
     try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 120 : 90)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
-    if (note) note.innerHTML = "Thin lines: the three ladder SuperTrends (8, 15, 22). Thick line: the regime filter (20, 3.0). Green is up, red is down. Arrows mark entries from these rules and circles mark exits with the result." + (cur ? " On this timeframe the rules hold a " + (cur.side === 1 ? "LONG" : "SHORT") + ": entry " + f2(cur.entry) + ", stop " + f2(cur.stop) + "." : "") + " Candles from your Worker, can lag a few minutes.";
+    if (note) note.innerHTML = "Thin lines: the three ladder SuperTrends (8, 15, 22). Thick line: the regime filter (20, 3.0). Green is up, red is down." + (F.ema ? " Grey line: 200 EMA." : "") + " Arrows mark entries from these rules and circles mark exits with the result." + (cur ? " On this timeframe the rules hold a " + (cur.side === 1 ? "LONG" : "SHORT") + ": entry " + f2(cur.entry) + ", stop " + f2(cur.stop) + "." : "") + " Candles from your Worker, can lag a few minutes.";
   }
   function panel() {
     if (!PN) { PN = document.createElement("div"); PN.id = "stpanel"; }
@@ -4857,7 +4869,7 @@ const stApi = (function () {
   function view() {
     const host = $e("#stres"); if (!host) return;
     const stat = $e("#ststat");
-    if (stat) stat.innerHTML = STAT.busy ? "Loading 15-minute bars: " + STAT.done + " / " + STAT.total + " stocks..." : RES ? RES.length + " stocks scanned" + (STAT.fail ? ", " + STAT.fail + " had no data" : "") + (RES.length ? " | latest bar closed " + when(Math.max.apply(null, RES.map(r => r.t))) + " IST" : "") + (STAT.err ? " | " + E(STAT.err) : "") : (STAT.err ? E(STAT.err) : "Waiting for the market feed (needs the Worker)...");
+    if (stat) stat.innerHTML = STAT.busy ? "Loading 15-minute bars: " + STAT.done + " / " + STAT.total + " stocks..." : RES ? RES.length + " stocks scanned" + (STAT.fail ? ", " + STAT.fail + " had no data" : "") + (RES.length ? " | latest bar closed " + when(Math.max.apply(null, RES.map(r => r.t))) + " IST" : "") + (RES.some(r => r.ea) ? " | history is shorter than 200 bars for some stocks, so their 200 EMA is approximate (update the Worker to v41 for longer history)" : "") + (STAT.err ? " | " + E(STAT.err) : "") : (STAT.err ? E(STAT.err) : "Waiting for the market feed (needs the Worker)...");
     if (!RES) { host.innerHTML = '<div class="card empty">' + (STAT.busy ? "Loading candles..." : "No 15-minute data yet. This tab needs the Worker.") + "</div>"; return; }
     let rows = RES.slice(); const q = F.q.trim().toUpperCase();
     if (q) rows = rows.filter(r => r.sym.includes(q));
@@ -4893,8 +4905,8 @@ const stApi = (function () {
   function build() {
     const host = document.getElementById("stbody"); if (!host || built) return; built = true;
     host.innerHTML = '<div class="znhead" style="background:linear-gradient(120deg,#0e7490,#1d4ed8)"><div><h2>SUPERTREND SCREENER</h2><span>Three SuperTrends vote on 15-minute bars, a slower SuperTrend must agree</span></div><div class="znpills"><span>8 / 15 / 22 at 2.0</span><span>Filter 20 at 3.0</span><span>Indices + ~200 F&amp;O stocks</span></div></div>' +
-      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 10px">' + VIEWS.map(v => '<button type="button" class="cbtn" data-stv="' + v[0] + '">' + v[1] + "</button>").join("") + '<label>Search <input id="stq" type="search" placeholder="symbol" style="width:110px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="strl">&#8635; Reload</button></div><div class="note" id="ststat" style="margin:8px 0 0"></div>' +
-      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">How the signal works</summary><p class="note" style="margin:6px 0 0">Three SuperTrends (ATR 8, 15, 22, factor 2.0) each say whether the close is above or below their line. The majority proposes a direction, and it must hold for two bars in a row. A separate SuperTrend(20, 3.0) must agree and be moving that way (its line higher than 3 bars ago for a LONG, lower for a SHORT), otherwise the stock shows BLOCKED wrong regime or WAITING filter not advancing. An open position exits when the filter flips or the vote turns the other way. Stop is the slowest line (22). This is my own reading of the published description of the open-source Ostri scanner, so it may differ from its code in the details.</p></details></div><div id="stres"></div>';
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 10px">' + VIEWS.map(v => '<button type="button" class="cbtn" data-stv="' + v[0] + '">' + v[1] + "</button>").join("") + '<label title="As in the Ostri Pine script: longs only above the 200 EMA, shorts only below it"><input type="checkbox" id="stema"' + (F.ema ? " checked" : "") + '> 200 EMA filter</label><label>Search <input id="stq" type="search" placeholder="symbol" style="width:110px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="strl">&#8635; Reload</button></div><div class="note" id="ststat" style="margin:8px 0 0"></div>' +
+      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">How the signal works</summary><p class="note" style="margin:6px 0 0">Three SuperTrends (ATR 8, 15, 22, factor 2.0) each say whether the close is above or below their line. The majority proposes a direction, and it must hold for two closed bars in a row. A separate SuperTrend(20, 3.0) must agree and be moving that way (its line higher than on the previous bar for a LONG, lower for a SHORT), otherwise the stock shows BLOCKED wrong regime or WAITING filter not advancing. With the 200 EMA filter on, a LONG also needs the close above the 200 EMA and a SHORT needs it below. An open position exits as soon as the filter flips or the majority turns the other way. Stop is the slowest line (22). These rules follow the Ostri Pine script you sent. Signals use closed bars only.</p></details></div><div id="stres"></div>';
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest) return; let b;
       if ((b = t.closest("[data-stv]"))) { F.view = b.dataset.stv; F.shown = 100; save(); sync(); view(); return; }
@@ -4907,7 +4919,7 @@ const stApi = (function () {
       if ((b = t.closest("[data-stk]"))) { const k = b.dataset.stk; F.dir = F.sort === k ? -F.dir : (k === "sym" ? 1 : -1); F.sort = k; save(); view(); }
     });
     host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "stq") { F.q = t.value; F.shown = 100; save(); view(); } });
-    host.addEventListener("change", ev => { const t = ev.target; if (t && t.id === "stcost") { const v = parseFloat(t.value); F.cost = isFinite(v) && v >= 0 ? v : 0; save(); view(); } });
+    host.addEventListener("change", ev => { const t = ev.target; if (t && t.id === "stema") { F.ema = !!t.checked; save(); compute(); view(); if (OPEN) drawChart(); return; } if (t && t.id === "stcost") { const v = parseFloat(t.value); F.cost = isFinite(v) && v >= 0 ? v : 0; save(); view(); } });
   }
   function sync() { document.querySelectorAll("#stbody [data-stv]").forEach(b => b.setAttribute("aria-pressed", b.dataset.stv === F.view ? "true" : "false")); }
   function open() { build(); sync(); if (RES) view(); else view(); load(false); }
