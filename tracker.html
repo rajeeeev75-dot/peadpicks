@@ -200,6 +200,7 @@ footer{margin-top:28px;color:var(--mute);font-size:.86rem;border-top:1px solid v
 #tc .tcbar{display:inline-block;vertical-align:middle;width:64px;height:7px;border-radius:99px;background:color-mix(in srgb,var(--mute) 25%,transparent);overflow:hidden;margin-left:4px}#tc .tcbar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--a),var(--b))}#tc .tcbar.wide{display:block;width:100%;margin:6px 0 0}
 #tc .tcck{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}#tc .tcck small{display:block;color:var(--mute);font-weight:600;font-size:.78rem}#tc .tcck b{display:block;font-size:1.02rem}#tc .tcck span{display:block;font-size:.78rem;color:var(--mute)}
 #tc .det td{white-space:normal;background:color-mix(in srgb,var(--a) 6%,var(--card))}#tc .tcy{display:inline-block;margin:2px 6px 2px 0;padding:2px 9px;border-radius:999px;font-size:.8rem;font-weight:600;border:1px solid var(--line)}#tc .tcy.u{color:var(--good)}#tc .tcy.d{color:var(--bad)}
+#st .cbtn[aria-pressed="true"]{background:#0e7490;border-color:#0e7490;color:#fff}#st .vote i{display:block}
 #rm .cbtn[aria-pressed="true"]{background:#7c3aed;border-color:#7c3aed;color:#fff}#rm .cbtn{font-size:.92rem;padding:5px 12px}#rm .znhead{background:linear-gradient(120deg,#6d28d9,#db2777)}
 #rm label{display:inline-flex;gap:6px;align-items:center;font-size:.9rem;color:var(--mute)}#rm select,#rm input[type=number]{font:inherit;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 #rm .rmtbl td{white-space:nowrap}#rm .rmtbl td small{color:var(--mute)}#rm .rmg{border-radius:999px;padding:2px 10px;font-size:.78rem;font-weight:800;color:#fff}#rm .rmu{color:var(--good);font-weight:700}#rm .rmd{color:var(--bad);font-weight:700}
@@ -4705,6 +4706,150 @@ const n5Api = (function () {
   return {open, list: () => LIST};
 })();
 const n5Paint = () => n5Api.open();
+/* ===== SUPERTREND SCREENER TAB: three SuperTrends vote on 15-minute bars, a slower SuperTrend regime filter must agree, plus a replay back-test of the same rules ===== */
+const stApi = (function () {
+  const $e = s => document.querySelector(s), E = esc;
+  const CFG = {ladder: [[8, 2], [15, 2], [22, 2]], filt: [20, 3], confirm: 2, adv: 3, warm: 30};
+  let F = {view: "sig", q: "", sort: "pl", dir: -1, shown: 100, cost: 0.1};
+  try { const sv = JSON.parse(localStorage.getItem("stF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 100}); } catch (e) {}
+  const save = () => { try { localStorage.setItem("stF", JSON.stringify(F)); } catch (e) {} };
+  const B = {}, STAT = {t: 0, busy: false, done: 0, total: 0, fail: 0, err: ""}; let built = false, PT = null, RES = null, BT = null;
+  const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+  const sg = (v, d = 2) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) : "-");
+  const col = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
+  const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const when = t => { const d = new Date((t + 900) * 1000); return isFinite(d) ? String(d.getUTCDate()).padStart(2, "0") + " " + MON[d.getUTCMonth()] + " " + String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0") : "-"; };
+  /* SuperTrend as TradingView computes it: Wilder ATR, ratcheting bands, dir +1 up / -1 down */
+  function superTrend(bars, n, f) {
+    const N = bars.length, dir = new Array(N).fill(0), line = new Array(N).fill(NaN); let atr = NaN, pu = NaN, pl = NaN, pd = 1, tr0 = 0;
+    for (let i = 0; i < N; i++) {
+      const b = bars[i], pc = i ? bars[i - 1].close : b.close, tr = Math.max(b.high - b.low, Math.abs(b.high - pc), Math.abs(b.low - pc));
+      if (i < n) { tr0 += tr; if (i === n - 1) atr = tr0 / n; } else atr = (atr * (n - 1) + tr) / n;
+      if (!isFinite(atr)) continue;
+      const hl2 = (b.high + b.low) / 2; let up = hl2 + f * atr, lo = hl2 - f * atr;
+      if (isFinite(pl)) lo = (lo > pl || pc < pl) ? lo : pl;
+      if (isFinite(pu)) up = (up < pu || pc > pu) ? up : pu;
+      let d = pd; if (!isFinite(pu)) d = 1; else if (pd === -1 && b.close > up) d = 1; else if (pd === 1 && b.close < lo) d = -1;
+      dir[i] = d; line[i] = d === 1 ? lo : up; pu = up; pl = lo; pd = d;
+    }
+    return {dir, line};
+  }
+  /* Replay the rules bar by bar. Signals are decided at a bar's close; trades fill at the next bar's open. */
+  function replay(bars) {
+    const N = bars.length, L = CFG.ladder.map(x => superTrend(bars, x[0], x[1])), fl = superTrend(bars, CFG.filt[0], CFG.filt[1]);
+    const out = {n: N, trades: [], cur: null};
+    if (N < CFG.warm + 5) return out;
+    let pos = 0, e = null, last = null;
+    for (let i = CFG.warm; i < N; i++) {
+      const dr = L.map(s => s.dir[i]); if (dr.some(d => !d) || !fl.dir[i]) continue;
+      const up = dr.filter(d => d === 1).length, prop = up >= 2 ? 1 : -1;
+      let conf = true; for (let k = 1; k < CFG.confirm; k++) { const u2 = L.filter(s => s.dir[i - k] === 1).length; if ((u2 >= 2 ? 1 : -1) !== prop) conf = false; }
+      const fd = fl.dir[i], fa = i >= CFG.adv && isFinite(fl.line[i - CFG.adv]) ? (fd === 1 ? fl.line[i] > fl.line[i - CFG.adv] : fl.line[i] < fl.line[i - CFG.adv]) : false;
+      let gate;
+      if (pos) gate = "in position"; else if (!conf) gate = "no confirmed vote"; else if (fd !== prop) gate = "BLOCKED wrong regime"; else if (!fa) gate = "WAITING filter not advancing"; else gate = "OK";
+      if (pos) {
+        const exit = fd !== pos || (conf && prop !== pos);
+        if (exit && i + 1 < N) { const xp = bars[i + 1].open; out.trades.push({side: pos, ei: e.i, xi: i + 1, ep: e.p, xp, ret: pos * (xp / e.p - 1) * 100, bars: i + 1 - e.i, t: bars[e.i].time}); pos = 0; e = null; }
+      } else if (gate === "OK" && i + 1 < N) { pos = prop; e = {i: i + 1, p: bars[i + 1].open, sig: i}; }
+      last = {i, up, prop, conf, fd, fa, gate: pos && gate === "OK" ? "in position" : gate, dr};
+    }
+    if (pos && e) {
+      const c = bars[N - 1].close, lastSt = L[2].line[N - 1];
+      out.cur = {side: pos, since: bars[e.sig].time, bars: N - 1 - e.sig, entry: bars[e.sig].close, fill: e.p, pl: pos * (c / bars[e.sig].close - 1) * 100, stop: lastSt, risk: isFinite(lastSt) ? Math.abs(c - lastSt) / c * 100 : NaN};
+    }
+    out.last = last; out.close = bars[N - 1].close; out.t = bars[N - 1].time; out.fline = fl.line[N - 1];
+    if (out.cur === null && last && !pos && last.i === N - 1) out.cur = null;
+    return out;
+  }
+  function compute() {
+    const rows = [], trades = [], lens = [];
+    Object.keys(B).forEach(sym => {
+      const bars = B[sym].bars; if (!bars || bars.length < CFG.warm + 5) return; lens.push(bars.length);
+      const r = replay(bars); r.trades.forEach(t => { t.sym = sym; trades.push(t); });
+      if (!r.last) return;
+      rows.push({sym, close: r.close, t: r.t, cur: r.cur, last: r.last, n: r.n, nt: r.trades.length, fline: r.fline});
+    });
+    RES = rows; BT = {trades, lens};
+  }
+  function stats(ts) {
+    const net = ts.map(t => t.ret - F.cost), g = ts.map(t => t.ret), n = ts.length; if (!n) return null;
+    const w = net.filter(x => x > 0), l = net.filter(x => x <= 0), sum = a => a.reduce((x, y) => x + y, 0), sorted = net.slice().sort((a, b) => a - b), m = n >> 1;
+    return {n, win: w.length / n * 100, gross: sum(g) / n, net: sum(net) / n, med: n % 2 ? sorted[m] : (sorted[m - 1] + sorted[m]) / 2, aw: w.length ? sum(w) / w.length : NaN, al: l.length ? sum(l) / l.length : NaN, pf: l.length && sum(l) < 0 ? sum(w) / -sum(l) : NaN, bars: sum(ts.map(t => t.bars)) / n};
+  }
+  async function load(force) {
+    if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL || STAT.busy) return;
+    const now = Date.now(), uni = ZN_FNO.slice(), todo = uni.filter(s => force || !B[s] || now - B[s].t > 300e3);
+    if (!todo.length) return;
+    STAT.busy = true; STAT.done = uni.length - todo.length; STAT.total = uni.length; STAT.fail = 0; STAT.err = "";
+    const chunks = []; for (let i = 0; i < todo.length; i += 12) chunks.push(todo.slice(i, i + 12));
+    let nx = 0;
+    const run = async () => { while (nx < chunks.length) { const ch = chunks[nx++];
+      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=15", {cache: "no-store"}), j = await r.json(), t = Date.now();
+        Object.keys(j.bars || {}).forEach(sy => { B[sy] = {t, bars: j.bars[sy].map(x => ({time: x[0], open: x[1], high: x[2], low: x[3], close: x[4], vol: x[5]}))}; });
+        STAT.fail += (j.failed || []).length; if (j.error) STAT.err = j.error;
+      } catch (e) { STAT.fail += ch.length; STAT.err = String((e && e.message) || e); }
+      STAT.done += ch.length; schedule(); } };
+    await Promise.all([run(), run(), run()]);
+    STAT.busy = false; STAT.t = Date.now(); compute(); schedule();
+  }
+  function schedule() { if (PT) return; PT = setTimeout(() => { PT = null; try { if (typeof current !== "undefined" && current === "st") { compute(); view(); } } catch (e) {} }, 500); }
+  const VIEWS = [["sig", "Signals"], ["long", "LONG"], ["short", "SHORT"], ["new", "Fresh (last 8 bars)"], ["wait", "Blocked / waiting"], ["all", "All stocks"]];
+  function votes(dr) { return '<span class="vote" style="display:inline-flex;gap:2px;align-items:flex-end;height:13px">' + dr.map((d, i) => '<i style="width:4px;border-radius:1px;display:block;height:' + (7 + i * 3) + 'px;background:' + (d === 1 ? "var(--good)" : "var(--bad)") + '"></i>').join("") + "</span>"; }
+  function view() {
+    const host = $e("#stres"); if (!host) return;
+    const stat = $e("#ststat");
+    if (stat) stat.innerHTML = STAT.busy ? "Loading 15-minute bars: " + STAT.done + " / " + STAT.total + " stocks..." : RES ? RES.length + " stocks scanned" + (STAT.fail ? ", " + STAT.fail + " had no data" : "") + (RES.length ? " | latest bar closed " + when(Math.max.apply(null, RES.map(r => r.t))) + " IST" : "") + (STAT.err ? " | " + E(STAT.err) : "") : (STAT.err ? E(STAT.err) : "Waiting for the market feed (needs the Worker)...");
+    if (!RES) { host.innerHTML = '<div class="card empty">' + (STAT.busy ? "Loading candles..." : "No 15-minute data yet. This tab needs the Worker.") + "</div>"; return; }
+    let rows = RES.slice(); const q = F.q.trim().toUpperCase();
+    if (q) rows = rows.filter(r => r.sym.includes(q));
+    const isSig = r => !!r.cur;
+    rows = rows.filter(r => F.view === "all" ? true : F.view === "sig" ? isSig(r) : F.view === "long" ? isSig(r) && r.cur.side === 1 : F.view === "short" ? isSig(r) && r.cur.side === -1 : F.view === "new" ? isSig(r) && r.cur.bars <= 8 : /BLOCKED|WAITING/.test(r.last.gate));
+    const key = {sym: r => r.sym, state: r => (r.cur ? r.cur.side : 0), pl: r => (r.cur ? r.cur.pl : -1e9), since: r => (r.cur ? -r.cur.bars : -1e9), risk: r => (r.cur ? r.cur.risk : 1e9), close: r => r.close}[F.sort] || (r => r.sym);
+    rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * F.dir; });
+    const all = RES, nL = all.filter(r => r.cur && r.cur.side === 1).length, nS = all.filter(r => r.cur && r.cur.side === -1).length;
+    const th = (k, t, cls) => '<th' + (cls ? ' class="' + cls + '"' : "") + ' data-stk="' + k + '" style="cursor:pointer">' + t + (F.sort === k ? (F.dir < 0 ? " &#9660;" : " &#9650;") : "") + "</th>";
+    let h = '<div class="note" style="margin:0 0 8px">' + nL + " LONG and " + nS + " SHORT positions open, " + all.filter(r => /BLOCKED|WAITING/.test(r.last.gate)).length + " blocked or waiting, out of " + all.length + " stocks.</div>";
+    h += '<div class="card" style="padding:0"><div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr>' + th("sym", "Stock") + th("state", "Signal") + "<th>Votes</th><th>Filter</th>" + th("since", "Since (bar close)") + '<th class="num">Entry</th>' + th("close", "Close", "num") + th("pl", "P/L %", "num") + '<th class="num">Stop</th>' + th("risk", "Risk %", "num") + "<th>Gate</th></tr></thead><tbody>";
+    rows.slice(0, F.shown).forEach(r => {
+      const c = r.cur, l = r.last, tv = znTv(r.sym, "15");
+      const pill = c ? '<span style="font-weight:700;padding:1px 7px;border-radius:5px;font-size:.78rem;color:#fff;background:' + (c.side === 1 ? "var(--good)" : "var(--bad)") + '">' + (c.side === 1 ? "LONG" : "SHORT") + "</span>" : '<span style="color:var(--mute)">-</span>';
+      h += "<tr><td><b>" + E(r.sym) + '</b> <a class="tvl" style="font-size:.74rem;font-weight:600;color:var(--a);text-decoration:none" href="' + tv + '" target="_blank" rel="noopener">TV</a></td><td>' + pill + "</td><td>" + votes(l.dr) + ' <span class="mono" style="font-size:.76rem;color:var(--mute)">' + l.up + "/" + (3 - l.up) + '</span></td><td style="' + col(l.fd) + '">' + (l.fd === 1 ? "UP" : "DOWN") + (l.fa ? " &#8599;" : "") + "</td>" +
+        "<td>" + (c ? when(c.since) + ' <span style="color:var(--mute);font-size:.76rem">(' + c.bars + " bars)</span>" : "-") + '</td><td class="num">' + (c ? f2(c.entry) : "-") + '</td><td class="num">' + f2(r.close) + '</td><td class="num" style="' + (c ? col(c.pl) : "") + '">' + (c ? sg(c.pl) : "-") + '</td><td class="num">' + (c ? f2(c.stop) : "-") + '</td><td class="num">' + (c ? c.risk.toFixed(2) : "-") + '</td><td style="font-size:.8rem;color:var(--mute)">' + E(l.gate) + "</td></tr>";
+    });
+    if (!rows.length) h += '<tr><td colspan="10" style="text-align:center;color:var(--mute);padding:16px">Nothing matches this view.</td></tr>';
+    h += "</tbody></table></div></div>";
+    if (rows.length > F.shown) h += '<div style="text-align:center;margin:10px"><button type="button" class="cbtn" id="stmore">Show more (' + (rows.length - F.shown) + " left)</button></div>";
+    /* back-test */
+    const T = BT ? BT.trades : [], S = [["All trades", T], ["LONG only", T.filter(t => t.side === 1)], ["SHORT only", T.filter(t => t.side === -1)]];
+    const lens = BT && BT.lens.length ? BT.lens.slice().sort((a, b) => a - b)[BT.lens.length >> 1] : 0;
+    h += '<details class="pbtd" style="margin-top:14px"' + (F.btOpen ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test of these rules</summary><div class="card" style="margin-top:6px"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Cost per trade (round trip %) <input id="stcost" type="number" step="0.01" min="0" style="width:70px" value="' + F.cost + '"></label></div>' +
+      '<div class="wrap" style="overflow-x:auto"><table class="acctbl" style="margin-top:8px"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Avg gross %</th><th class="num">Avg net %</th><th class="num">Median net %</th><th class="num">Avg win %</th><th class="num">Avg loss %</th><th class="num">Profit factor</th><th class="num">Avg bars held</th></tr></thead><tbody>' +
+      S.map(g => { const s = stats(g[1]); return s ? "<tr><td>" + g[0] + '</td><td class="num">' + s.n + '</td><td class="num">' + s.win.toFixed(0) + '%</td><td class="num" style="' + col(s.gross) + '">' + sg(s.gross) + '</td><td class="num" style="' + col(s.net) + '"><b>' + sg(s.net) + '</b></td><td class="num">' + sg(s.med) + '</td><td class="num">' + sg(s.aw) + '</td><td class="num">' + sg(s.al) + '</td><td class="num">' + (isFinite(s.pf) ? s.pf.toFixed(2) : "-") + '</td><td class="num">' + s.bars.toFixed(0) + "</td></tr>" : "<tr><td>" + g[0] + '</td><td colspan="9" style="color:var(--mute)">No closed trades yet</td></tr>'; }).join("") + "</tbody></table></div>" +
+      '<p class="note" style="margin:8px 0 0">Replays the same rules over the 15-minute history the feed holds (about ' + lens + " bars per stock, roughly " + Math.round(lens / 25) + " trading days). Entries and exits are filled at the next bar's open. Costs are subtracted per trade. This is a short window, so a few trades from one strong or weak market phase can swing every number. Trades that are still open are not counted. Treat it as a sanity check, not proof of an edge.</p></div></details>";
+    host.innerHTML = h;
+    const d = host.querySelector("details.pbtd"); if (d) d.addEventListener("toggle", () => { F.btOpen = d.open; save(); });
+  }
+  function build() {
+    const host = document.getElementById("stbody"); if (!host || built) return; built = true;
+    host.innerHTML = '<div class="znhead" style="background:linear-gradient(120deg,#0e7490,#1d4ed8)"><div><h2>SUPERTREND SCREENER</h2><span>Three SuperTrends vote on 15-minute bars, a slower SuperTrend must agree</span></div><div class="znpills"><span>8 / 15 / 22 at 2.0</span><span>Filter 20 at 3.0</span><span>~200 F&amp;O stocks</span></div></div>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 10px">' + VIEWS.map(v => '<button type="button" class="cbtn" data-stv="' + v[0] + '">' + v[1] + "</button>").join("") + '<label>Search <input id="stq" type="search" placeholder="symbol" style="width:110px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="strl">&#8635; Reload</button></div><div class="note" id="ststat" style="margin:8px 0 0"></div>' +
+      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">How the signal works</summary><p class="note" style="margin:6px 0 0">Three SuperTrends (ATR 8, 15, 22, factor 2.0) each say whether the close is above or below their line. The majority proposes a direction, and it must hold for two bars in a row. A separate SuperTrend(20, 3.0) must agree and be moving that way (its line higher than 3 bars ago for a LONG, lower for a SHORT), otherwise the stock shows BLOCKED wrong regime or WAITING filter not advancing. An open position exits when the filter flips or the vote turns the other way. Stop is the slowest line (22). This is my own reading of the published description of the open-source Ostri scanner, so it may differ from its code in the details.</p></details></div><div id="stres"></div>';
+    host.addEventListener("click", ev => {
+      const t = ev.target; if (!t || !t.closest) return; let b;
+      if ((b = t.closest("[data-stv]"))) { F.view = b.dataset.stv; F.shown = 100; save(); sync(); view(); return; }
+      if (t.closest("#strl")) { load(true); return; }
+      if (t.closest("#stmore")) { F.shown += 100; view(); return; }
+      if ((b = t.closest("[data-stk]"))) { const k = b.dataset.stk; F.dir = F.sort === k ? -F.dir : (k === "sym" ? 1 : -1); F.sort = k; save(); view(); }
+    });
+    host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "stq") { F.q = t.value; F.shown = 100; save(); view(); } });
+    host.addEventListener("change", ev => { const t = ev.target; if (t && t.id === "stcost") { const v = parseFloat(t.value); F.cost = isFinite(v) && v >= 0 ? v : 0; save(); view(); } });
+  }
+  function sync() { document.querySelectorAll("#stbody [data-stv]").forEach(b => b.setAttribute("aria-pressed", b.dataset.stv === F.view ? "true" : "false")); }
+  function open() { build(); sync(); if (RES) view(); else view(); load(false); }
+  setInterval(() => { try { if (typeof current !== "undefined" && current === "st" && !document.hidden) load(false); } catch (e) {} }, 120e3);
+  return {open, _test: {superTrend, replay, CFG}};
+})();
+const stPaint = () => stApi.open();
 /* ===== CUP & HANDLE TAB: scans the Nifty 500 on daily, weekly or monthly candles for a cup and handle base that is forming or breaking out, with entry/stop/target, an inline chart and a past-data accuracy table ===== */
 const cuApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
@@ -4936,6 +5081,7 @@ function show(id) {
   if (id === "tc") { try { tcPaint(); } catch (e) {} }
   if (id === "rm") { try { rmPaint(); } catch (e) {} }
   if (id === "cb") { try { cbPaint(); } catch (e) {} }
+  if (id === "st") { try { stPaint(); } catch (e) {} }
   if (id === "n5") { try { n5Paint(); } catch (e) {} }
   if (id === "cu") { try { cuPaint(); } catch (e) {} }
   if (id === "op") { try { opPaint(); } catch (e) {} }
@@ -5004,7 +5150,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="st" aria-selected="false" style="--a:#0e7490;--b:#1d4ed8">SuperTrend</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -5036,6 +5182,10 @@ function render(stocks) {
   if (!document.getElementById("cb")) {
     const cb = document.createElement("section"); cb.className = "stock"; cb.id = "cb"; cb.style.cssText = "--a:#be123c;--b:#f59e0b";
     cb.innerHTML = '<div id="cbbody"></div>'; views.appendChild(cb);
+  }
+  if (!document.getElementById("st")) {
+    const st = document.createElement("section"); st.className = "stock"; st.id = "st"; st.style.cssText = "--a:#0e7490;--b:#1d4ed8";
+    st.innerHTML = '<div id="stbody"></div>'; views.appendChild(st);
   }
   if (!document.getElementById("n5")) {
     const n5 = document.createElement("section"); n5.className = "stock"; n5.id = "n5"; n5.style.cssText = "--a:#0f766e;--b:#2563eb";
@@ -5082,7 +5232,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "n5" || current === "cu" || current === "op" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "st" || current === "n5" || current === "cu" || current === "op" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
