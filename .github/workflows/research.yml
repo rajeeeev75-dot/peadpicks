@@ -22,7 +22,9 @@ jobs:
       - run: pip install yfinance pandas requests numpy
       - run: python pead_features.py
       - run: python pead_research.py
-      - run: |
+        continue-on-error: true
+      - if: always()
+        run: |
           git config user.name "pead-bot"; git config user.email "bot@users.noreply.github.com"
           git add pead_features.csv features_cache.json pead_research.md pead_research.json
           git diff --staged --quiet || (git commit -m "Update PEAD research" && git pull --rebase && git push)
