@@ -3480,14 +3480,15 @@ const ppApi = (function () {
       '<label>Result quality <select id="ppQ"><option value="any">Any</option><option value="exc">Excellent only</option><option value="vg">Very good or better</option><option value="good">Good or better</option><option value="weak">Weak or poor only</option></select></label>' +
       '<label>Results within <select id="ppDays"><option value="15">15 days</option><option value="30">30 days</option><option value="60">60 days</option><option value="cq">Current quarter</option><option value="pq">Previous quarter</option><option value="999">any</option></select></label>' +
       '<label>Stocks <select id="ppU"><option value="all">All stocks</option><option value="fno">F&amp;O stocks</option></select></label>' +
+      '<label title="BUY means the stock passes the rules that held up when past results were back-tested. It ignores the score, quality and days filters">Show <select id="ppSig"><option value="all">All results</option><option value="buy">BUY signals only</option></select></label>' +
       '<label>Min mcap (Rs cr) <input id="ppCap" type="number" style="width:84px" value="' + E(F.cap) + '"></label>' +
       '<label>Fwd P/E method <select id="ppMode"><option value="auto">Auto</option><option value="runrate">Run rate x4</option><option value="pead">Original PEAD</option></select></label>' +
       '<button type="button" class="cbtn" id="ppReload">↻ Reload</button></div><div class="note" id="ppstat" style="margin:8px 0 0"></div></div>' +
       '<div id="ppres"></div>';
-    $e("#ppDays").value = String(F.days); $e("#ppU").value = F.u || "all"; $e("#ppQ").value = F.q || "any"; $e("#ppMode").value = F.mode;
+    $e("#ppDays").value = String(F.days); $e("#ppU").value = F.u || "all"; $e("#ppSig").value = F.sig || "all"; $e("#ppQ").value = F.q || "any"; $e("#ppMode").value = F.mode;
     host.addEventListener("toggle", ev => { const t = ev.target; if (t && t.classList && t.classList.contains("pbtd")) PBT_OPEN = t.open; }, true);
     host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return;
-      if (t.id === "ppMin") F.min = num(t.value) || 0; else if (t.id === "ppCap") F.cap = num(t.value) || 0; else if (t.id === "ppDays") F.days = /^[a-z]/.test(t.value) ? t.value : +t.value; else if (t.id === "ppU") F.u = t.value; else if (t.id === "ppQ") F.q = t.value; else if (t.id === "ppMode") F.mode = t.value; else return;
+      if (t.id === "ppMin") F.min = num(t.value) || 0; else if (t.id === "ppCap") F.cap = num(t.value) || 0; else if (t.id === "ppDays") F.days = /^[a-z]/.test(t.value) ? t.value : +t.value; else if (t.id === "ppU") F.u = t.value; else if (t.id === "ppSig") F.sig = t.value; else if (t.id === "ppQ") F.q = t.value; else if (t.id === "ppMode") F.mode = t.value; else return;
       try { localStorage.setItem("ppF", JSON.stringify(F)); } catch (e) {} view(); });
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest || t.closest("a")) return;
@@ -3495,6 +3496,64 @@ const ppApi = (function () {
       const th = t.closest("th[data-k]"); if (th && th.dataset.k) { const k = th.dataset.k; sortDir = sortKey === k ? -sortDir : (k === "fwdPe" || k === "d" || k === "ticker" ? 1 : -1); sortKey = k; view(); return; }
       const row = t.closest("[data-tk]"); if (row) { openTk = openTk === row.dataset.tk ? null : row.dataset.tk; view(); }
     });
+  }
+
+  /* ===== BUY signal: the rules that held up when past results were back-tested (pead_research.md, about 3,500 results) =====
+     A: score 55+, price within 15% of its 52-week high before the result, first-session reaction 3%+, daily turnover Rs 2 crore+   (20-day average +6.1% over the Nifty, 57% beat it)
+     B: score 55+, price within 15% of its 52-week high before the result, 6-month return 20%+, daily turnover Rs 2 crore+          (+4.7%, 62% beat it)
+     Entry is the close of the first session after the result, stop 10% below it on a close, exit after 20 trading days. */
+  const BK = {score: 55, react: 3, hi: -15, turn: 2, mom: 20, win: 4, late: 25, stop: 10, ext: 5};
+  const BKC = {}; let bkBusy = false;
+  function bkCalc(rows, ad) {
+    const bars = rows.map(x => ({t: String(x[0]).slice(0, 10), c: +x[4], v: +x[5] || 0})).filter(b => isFinite(b.c)), n = bars.length;
+    let j0 = -1, i1 = -1; bars.forEach((b, i) => { if (b.t < ad) j0 = i; else if (b.t > ad && i1 < 0) i1 = i; });
+    if (j0 < 130) return {ad, t: Date.now(), fail: true};
+    let hi = 0; for (let i = Math.max(0, j0 - 251); i <= j0; i++) if (bars[i].c > hi) hi = bars[i].c;
+    let tv = 0, k = 0; for (let i = Math.max(0, j0 - 19); i <= j0; i++) { tv += bars[i].c * bars[i].v; k++; }
+    return {ad, t: Date.now(), pre: bars[j0].c, dist: (bars[j0].c / hi - 1) * 100, ret6m: (bars[j0].c / bars[j0 - 126].c - 1) * 100, turn: tv / k / 1e7,
+      react: i1 >= 0 ? (bars[i1].c / bars[j0].c - 1) * 100 : NaN, entry: i1 >= 0 ? bars[i1].c : NaN, edate: i1 >= 0 ? bars[i1].t : "", last: bars[n - 1].c};
+  }
+  async function bkLoad(rows) {
+    if (bkBusy || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
+    const need = []; rows.forEach(x => { if (x.P.total >= BK.score && x.ad && isFinite(x.d) && x.d >= 0 && x.d <= BK.late) { const sym = symOfTk(x.s.ticker), c = BKC[sym]; if (!c || c.ad !== x.ad || Date.now() - c.t > 20 * 60e3) need.push([sym, x.ad]); } });
+    if (!need.length) return; bkBusy = true;
+    const chunks = []; for (let i = 0; i < need.length; i += 12) chunks.push(need.slice(i, i + 12));
+    let ix = 0; const worker = async () => { while (ix < chunks.length) { const ch = chunks[ix++];
+      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.map(a => a[0]).join(",")) + "&tf=D", {cache: "no-store"}), j = await r.json();
+        ch.forEach(a => { const rows2 = j && j.bars && j.bars[a[0]]; BKC[a[0]] = rows2 && rows2.length > 140 ? bkCalc(rows2, a[1]) : {ad: a[1], t: Date.now(), fail: true}; }); }
+      catch (e) { ch.forEach(a => { BKC[a[0]] = {ad: a[1], t: Date.now(), fail: true}; }); } } };
+    try { await Promise.all([worker(), worker(), worker()]); } finally { bkBusy = false; }
+    try { view(); } catch (e) {}
+  }
+  function bkEval(x) {
+    if (!(x.P.total >= BK.score) || !x.ad) return {st: "no"};
+    if (!isFinite(x.d) || x.d < 0 || x.d > BK.late) return {st: "no"};
+    const sym = symOfTk(x.s.ticker), c = BKC[sym]; if (!c || c.ad !== x.ad) return {st: "wait"};
+    if (c.fail) return {st: "no"};
+    if (!isFinite(c.entry)) return {st: "pend", c};
+    const near = c.dist >= BK.hi, liq = c.turn >= BK.turn, rules = []; if (near && liq && c.react >= BK.react) rules.push("A"); if (near && liq && c.ret6m >= BK.mom) rules.push("B");
+    if (!rules.length) return {st: "no", c};
+    const px = num(x.s.price) > 0 ? num(x.s.price) : c.last, st = px <= c.entry * (1 - BK.stop / 100) ? "stop" : x.d > BK.win ? "late" : px >= c.entry * (1 + BK.ext / 100) ? "ext" : "buy";
+    return {st, rules, c, px};
+  }
+  const bkAdd = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  function bkCell(x) {
+    const b = bkEval(x);
+    if (b.st === "no") return '<td class="note">-</td>';
+    if (b.st === "wait") return '<td class="note" title="Loading price history to check the rules">checking...</td>';
+    if (b.st === "pend") return '<td class="note" title="The rules use the close of the first session after the result">awaiting first session</td>';
+    const L = {buy: ["BUY", "g"], ext: ["BUY, price has run", "w"], stop: ["Stopped out", "r"], late: ["Rules met, entry window passed", "n"]}[b.st], c = b.c;
+    return '<td style="white-space:nowrap"><span class="chip ' + L[1] + '" style="font-weight:700" title="Rule ' + b.rules.join(" and ") + ' from the back-test">' + L[0] + "</span>" +
+      (b.st === "buy" || b.st === "ext" ? "<br><small>Rule " + b.rules.join("+") + " &middot; entry " + pf(c.entry, 2) + " &middot; stop " + pf(c.entry * (1 - BK.stop / 100), 2) + "</small>" : "") + "</td>";
+  }
+  function bkPanel(x) {
+    const b = bkEval(x); if (!b.c || !b.rules) return "";
+    const c = b.c, st = {A: "+6.1% over the Nifty on average after 20 days, 57% beat it", B: "+4.7% over the Nifty on average after 20 days, 62% beat it"};
+    return '<div class="card" style="margin:12px 0 0;border-left:4px solid var(--good)"><b>Back-test rule ' + b.rules.join(" and ") + ': ' + (b.st === "buy" ? "BUY" : b.st === "ext" ? "BUY (price has run " + pf((b.px / c.entry - 1) * 100) + "% above the entry)" : b.st === "stop" ? "stopped out" : "entry window passed") + "</b>" +
+      '<ul class="note" style="margin:6px 0 0;padding-left:18px"><li>Score ' + pf(x.P.total, 0) + " (needs " + BK.score + "), price " + pf(Math.max(0, -c.dist)) + "% below its 52-week high before the result (needs within " + (-BK.hi) + "%), daily turnover Rs " + pf(c.turn) + " crore (needs " + BK.turn + "+)</li>" +
+      "<li>First-session reaction " + sg(c.react) + (b.rules.indexOf("A") >= 0 ? " (rule A needs +" + BK.react + "%+)" : "") + ", 6-month return before the result " + sg(c.ret6m) + (b.rules.indexOf("B") >= 0 ? " (rule B needs +" + BK.mom + "%+)" : "") + "</li>" +
+      "<li><b>Plan:</b> buy near the close of " + E(c.edate) + " (" + pf(c.entry, 2) + "), exit if it closes below " + pf(c.entry * (1 - BK.stop / 100), 2) + " (" + BK.stop + "% stop), otherwise sell after 20 trading days (about " + E(bkAdd(c.edate, 28)) + ").</li>" +
+      "<li>History: " + b.rules.map(r => "rule " + r + ": " + st[r]).join("; ") + ". Early data (about 430 stocks, mostly 2024 to 2026), before costs. It was flat in 2025. Not advice.</li></ul></div>";
   }
   function view() {
     const host = $e("#ppres"); if (!host) return;
@@ -3506,7 +3565,9 @@ const ppApi = (function () {
     const daysOk = x => (F.days === "cq" || F.days === "pq" ? String(x.s.quarter_end || "").slice(0, 7) === String(qe[F.days]).slice(0, 7) : (!isFinite(x.d) || x.d <= F.days));
     const uOk = x => (F.u !== "fno" || fnoSet.has(symOfTk(x.s.ticker)));
     const qOk = x => { const r = String(x.P.rec[0]), q = F.q || "any"; return q === "any" || (q === "exc" ? /EXCELLENT/.test(r) : q === "vg" ? /EXCELLENT|VERY GOOD/.test(r) : q === "good" ? /EXCELLENT|GOOD/.test(r) : /WEAK|POOR/.test(r)); };
-    rows = rows.filter(x => qOk(x) && uOk(x) && daysOk(x) && x.P.total >= F.min && (!(num(x.s.mcap) >= 0) || num(x.s.mcap) >= F.cap));
+    const allRows = rows;
+    rows = F.sig === "buy" ? rows.filter(x => uOk(x) && ["buy", "ext"].indexOf(bkEval(x).st) >= 0) : rows.filter(x => qOk(x) && uOk(x) && daysOk(x) && x.P.total >= F.min && (!(num(x.s.mcap) >= 0) || num(x.s.mcap) >= F.cap));
+    bkLoad(allRows);
     const key = {total: x => x.P.total, fwdPe: x => x.P.fwdPe || 1e9, revY: x => x.P.revY, npY: x => x.P.npY, d: x => x.d, rd: x => x.ad || "", ticker: x => String(x.s.ticker), react: x => { const v = num(x.s.react_pct); return isFinite(v) ? v : -1e9; }};
     rows.sort((a, b) => { const A = key[sortKey](a), B = key[sortKey](b); return (A > B ? 1 : A < B ? -1 : 0) * sortDir; });
     let h = "";
@@ -3516,15 +3577,15 @@ const ppApi = (function () {
         pend.slice(0, 40).map(x => '<a class="ppchip' + (x.fno ? " f" : "") + '" href="' + tv(x.sym) + '" target="_blank" rel="noopener" title="' + E(x.n) + " | " + (x.age === 0 ? "today" : x.age === 1 ? "yesterday" : x.age + " days ago") + '">' + E(x.sym) + " <i>" + (x.age === 0 ? "today" : x.age === 1 ? "yest." : x.age + "d") + "</i></a>").join("") + (pend.length > 40 ? '<span class="note">+' + (pend.length - 40) + " more</span>" : "") + "</div></div>";
     }
     h += '<div class="dtiles">' + rows.slice(0, 4).map(x => '<div class="dtile" data-tk="' + E(x.s.ticker) + '" style="cursor:pointer"><small>' + E(symOfTk(x.s.ticker)) + '</small><b>' + pf(x.P.total, 0) + '</b><span><span class="tag" style="background:' + x.P.rec[1] + '">' + x.P.rec[0] + "</span> Fwd P/E " + pf(x.P.fwdPe) + "x</span></div>").join("") + "</div>";
-    const th = [["ticker", "Stock"], ["rd", "Result date"], ["total", "Score"], ["", "Result quality"], ["react", "Market reaction"], ["revY", "Sales YoY"], ["npY", "Profit YoY"], ["fwdPe", "Fwd P/E"], ["", "From 52w high"], ["d", "Days since result"]];
+    const th = [["ticker", "Stock"], ["rd", "Result date"], ["total", "Score"], ["", "Result quality"], ["react", "Market reaction"], ["", "BUY signal"], ["revY", "Sales YoY"], ["npY", "Profit YoY"], ["fwdPe", "Fwd P/E"], ["", "From 52w high"], ["d", "Days since result"]];
     h += '<div class="wrap"><table class="pptbl"><thead><tr>' + th.map(a => '<th data-k="' + a[0] + '"' + (a[0] ? ' style="cursor:pointer"' : "") + ">" + a[1] + (a[0] === sortKey ? (sortDir < 0 ? " ▼" : " ▲") : "") + "</th>").join("") + "</tr></thead><tbody>";
     h += rows.length ? rows.map(x => {
       const P = x.P, s = x.s, sy = symOfTk(s.ticker), o = openTk === s.ticker;
       const rec = x.ad && x.d >= 0 && x.d <= 3;
-      let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer' + (rec ? ";background:color-mix(in srgb,#16a34a 13%,var(--card));box-shadow:inset 4px 0 0 #16a34a" : "") + '"><td><b>' + E(sy) + '</b> <a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener" title="Open on TradingView">TV &#8599;</a> <span class="note">' + E(s.name) + '</span></td><td style="white-space:nowrap">' + (x.ad ? (rec ? '<span class="chip g" style="font-weight:700">Results ' + dTxt(x.ad) + "</span>" : E(dTxt(x.ad, true))) : '<span class="note" title="Not in the data file or the results calendar">not known</span>') + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td>' + rxCell(x) + '<td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td></tr>';
-      if (o) r += '<tr class="det"><td colspan="10"><div style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px))"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Result date in data file", E(s.result_date || "not given")], ["Quarter ended", E(s.quarter_end)], ["Announcement date used", x.ad ? E(x.ad) : "not known"]].concat((() => { const r = reactOf(sy); return r ? [["Market reaction", r.label + " (" + sg(r.react) + " in the first session)"], ["Opening gap", sg(r.gap)], ["Price since result", sg(r.since)], ["Close before result", pf(r.pre, 2)]] : []; })()).map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + '</dl><div class="charttools" style="margin-top:12px">' + indBtns() + '</div><div id="ppchbox" data-sym="' + E(sy) + '" data-ad="' + E(x.ad || "") + '" style="height:360px;margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="ppchnote" class="note" style="margin:6px 0 0">Loading chart...</div></div></td></tr>';
+      let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer' + (rec ? ";background:color-mix(in srgb,#16a34a 13%,var(--card));box-shadow:inset 4px 0 0 #16a34a" : "") + '"><td><b>' + E(sy) + '</b> <a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener" title="Open on TradingView">TV &#8599;</a> <span class="note">' + E(s.name) + '</span></td><td style="white-space:nowrap">' + (x.ad ? (rec ? '<span class="chip g" style="font-weight:700">Results ' + dTxt(x.ad) + "</span>" : E(dTxt(x.ad, true))) : '<span class="note" title="Not in the data file or the results calendar">not known</span>') + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td>' + rxCell(x) + bkCell(x) + '<td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td></tr>';
+      if (o) r += '<tr class="det"><td colspan="11"><div style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px))"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Result date in data file", E(s.result_date || "not given")], ["Quarter ended", E(s.quarter_end)], ["Announcement date used", x.ad ? E(x.ad) : "not known"]].concat((() => { const r = reactOf(sy); return r ? [["Market reaction", r.label + " (" + sg(r.react) + " in the first session)"], ["Opening gap", sg(r.gap)], ["Price since result", sg(r.since)], ["Close before result", pf(r.pre, 2)]] : []; })()).map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + '</dl>' + bkPanel(x) + '<div class="charttools" style="margin-top:12px">' + indBtns() + '</div><div id="ppchbox" data-sym="' + E(sy) + '" data-ad="' + E(x.ad || "") + '" style="height:360px;margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="ppchnote" class="note" style="margin:6px 0 0">Loading chart...</div></div></td></tr>';
       return r;
-    }).join("") : '<tr><td colspan="11" class="note">No stocks match these filters. Lower the minimum score or widen the results window.</td></tr>';
+    }).join("") : '<tr><td colspan="12" class="note">' + (F.sig === "buy" ? (bkBusy ? "Checking price history for the rules..." : "No stock meets the BUY rules right now.") : "No stocks match these filters. Lower the minimum score or widen the results window.") + '</td></tr>';
     h += '</tbody></table></div><p class="note">Cash-flow quality (10 pts in your Pine indicator) needs 3-year operating cash flow, which the free data feed does not carry, so scores here can be up to 10 points lower than the dashboard. Check the filing before buying.</p>';
     try { h += '<details class="pbtd" style="margin-top:18px"' + (PBT_OPEN ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how past results performed after the announcement (tap to open)</summary>' + pbtHTML() + "</details>"; } catch (e) {}
     host.innerHTML = h; paintStatus();
