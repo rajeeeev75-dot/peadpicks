@@ -1547,7 +1547,7 @@ function znAccuracy(items, rr) {
   items.forEach(it => {
     const b = it.bars, n = b.length;
     it.zones.forEach(z => {
-      if (!(z.prox > 0 && z.dist > 0 && z.target > 0) || !(rr > 0)) return;
+      if (!(z.prox > 0 && z.dist > 0 && z.target > 0) || !(rr > 0) || Math.abs(z.prox - z.dist) < Math.max(2 * (+ZO.tick || 0.05), 0.002 * z.prox)) return;
       const D = z.type === "D"; let e = -1, res = "";
       const tgt = D ? z.prox + (z.prox - z.dist) * rr : z.prox - (z.dist - z.prox) * rr;
       for (let j = z.sig + 1; j < n; j++) { if (D ? b[j].low <= z.prox : b[j].high >= z.prox) { e = j; break; } }
@@ -1572,6 +1572,160 @@ function znAccHTML(items) {
   return pick + accTable("Accuracy of these zones on past data", ["Group", "Zones found", "Price came back", "Finished trades", "Win rate", "Average per trade", "Still open"], rows,
     "Every zone found on the candles above was replayed, including zones that have since been broken (those are not hidden here). A trade starts when price first returns to the proximal line after the zone formed. It wins if price reaches the target (" + rr + "R, that is " + rr + " times the distance from the proximal to the distal line) before the distal line breaks, and loses if the distal line breaks first; when one candle touches both, it counts as a loss. Average per trade = (wins x " + rr + " - losses) / trades, in R, before brokerage and slippage. Past results only, not a promise.");
 }
+
+/* ===== Zone profitability lab: which extra rules and which of the indicator's own settings make the zone trades earn more (in R) ===== */
+var ZLF = []; try { ZLF = JSON.parse(localStorage.getItem("znLabF") || "[]") || []; } catch (e) { ZLF = []; }
+var ZLAB = {html: "", solid: null, busy: false};
+const ZLX = [2, 3, 4, 5], zlTick = () => new Promise(r => setTimeout(r, 0));
+const zlT = t => (typeof t === "number" ? t : Date.parse(String(t).slice(0, 10) + "T00:00:00Z") / 1000);
+function zlRsi(c, n) {
+  const N = c.length, o = new Array(N).fill(NaN); if (N <= n) return o; let ag = 0, al = 0;
+  for (let i = 1; i <= n; i++) { const d = c[i] - c[i - 1]; ag += Math.max(d, 0); al += Math.max(-d, 0); } ag /= n; al /= n; o[n] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+  for (let i = n + 1; i < N; i++) { const d = c[i] - c[i - 1]; ag = (ag * (n - 1) + Math.max(d, 0)) / n; al = (al * (n - 1) + Math.max(-d, 0)) / n; o[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al); }
+  return o;
+}
+const ZLCX = new WeakMap();
+function zlCtx(bars) {
+  let c = ZLCX.get(bars); if (c) return c; const n = bars.length, H = bars.map(b => b.high), L = bars.map(b => b.low), C = bars.map(b => b.close);
+  const A = znAtr(H, L, C, 14).ATR, e50 = new Array(n).fill(NaN), k = 2 / 51; let e = NaN;
+  for (let i = 0; i < n; i++) { e = i === 0 ? C[0] : k * C[i] + (1 - k) * e; if (i >= 49) e50[i] = e; }
+  const av = new Array(n).fill(NaN); for (let i = 19; i < n; i++) { let s = 0; for (let j = i - 19; j <= i; j++) s += bars[j].vol || 0; av[i] = s / 20; }
+  c = {A, e50, rsi: zlRsi(C, 14), av}; ZLCX.set(bars, c); return c;
+}
+/* what was known when the zone formed (its signal candle) */
+function zlFeat(it, z) {
+  const b = it.bars, c = zlCtx(b), t = z.sig, d = z.type === "D" ? 1 : -1, a = c.A[t], f = {d, pat: z.pat, bc: z.baseCount, prob: z.prob, tf: it.tf};
+  f.w = a > 0 ? Math.abs(z.prox - z.dist) / a : NaN;
+  const o0 = b[Math.min(t, z.trig + 1)]; f.leg = a > 0 ? d * (b[t].close - o0.open) / a : NaN;
+  let vm = 0, cnt = 0; for (let i = z.trig + 1; i <= t; i++) { vm += b[i].vol || 0; cnt++; } const av = c.av[z.trig]; f.lv = cnt && av > 0 && vm > 0 ? vm / cnt / av : NaN;
+  f.tr = isFinite(c.e50[t]) ? (d * (b[t].close - c.e50[t]) > 0 ? 1 : -1) : 0;
+  f.sl = isFinite(c.e50[t]) && t >= 10 && isFinite(c.e50[t - 10]) ? (d * (c.e50[t] - c.e50[t - 10]) > 0 ? 1 : -1) : 0;
+  f.rsi = c.rsi[t]; return f;
+}
+const ZL_HTF = ["60", "120", "240", "D", "W"], ZL_INTRA = ["1", "5", "15"];
+const ZL_RULES = [
+  ["Type of zone", "h"],
+  ["rev", "Reversal zones only (DBR demand, RBD supply)", f => f.pat === "DBR" || f.pat === "RBD"], ["cont", "Continuation zones only (RBR demand, DBD supply)", f => f.pat === "RBR" || f.pat === "DBD"],
+  ["dem", "Demand zones only", f => f.d === 1], ["sup", "Supply zones only", f => f.d === -1],
+  ["Shape of the zone", "h"],
+  ["bc1", "Base of one candle", f => f.bc <= 1], ["bc2", "Base of one or two candles", f => f.bc <= 2],
+  ["wt", "Tight zone (proximal to distal within 1.5 ATR)", f => !isFinite(f.w) || f.w <= 1.5],
+  ["p70", "The tab's own zone score 70 or more", f => f.prob >= 70], ["p85", "The tab's own zone score 85 or more", f => f.prob >= 85],
+  ["How the price left the zone", "h"],
+  ["leg", "Strong leg-out (2.5 ATR or more)", f => !isFinite(f.leg) || f.leg >= 2.5],
+  ["lv", "Leg-out volume at least 1.5x the 20-candle average", f => !isFinite(f.lv) || f.lv >= 1.5],
+  ["Trend and momentum when the zone formed", "h"],
+  ["trw", "With the trend (close on the zone's side of the 50 EMA)", f => f.tr !== -1], ["trc", "Against the trend (price still below the 50 EMA for demand)", f => f.tr !== 1],
+  ["slw", "50 EMA sloping the zone's way", f => f.sl !== -1],
+  ["rsi", "RSI 60 or more for demand, 40 or less for supply (momentum into the zone)", f => !isFinite(f.rsi) || (f.d === 1 ? f.rsi >= 60 : f.rsi <= 40)],
+  ["Timeframe", "h"],
+  ["tfd", "Daily candles only", f => f.tf === "D"], ["tfh", "Hourly and slower (1H, 2H, 4H, Daily, Weekly)", f => ZL_HTF.indexOf(f.tf) >= 0], ["tfi", "Fast candles only (1m, 5m, 15m)", f => ZL_INTRA.indexOf(f.tf) >= 0]
+];
+const ZLMAP = {}; ZL_RULES.forEach(r => { if (r[1] !== "h") ZLMAP[r[0]] = r; });
+function zlOk(it, z) {
+  if (!ZLF.length) return true; const key = ZLF.join(",") + "|" + it.bars.length; if (z._zk === key) return z._zo;
+  let ok = true; try { const f = zlFeat(it, z); ZLF.forEach(id => { if (ZLMAP[id] && !ZLMAP[id][2](f)) ok = false; }); } catch (e) {}
+  z._zk = key; z._zo = ok; return ok;
+}
+/* replay one zone: entry at the first return to the proximal line after the zone formed, stop at the distal line, target rr times the risk; null if never entered or still open */
+function zlTrade(b, z, rr) {
+  if (!(z.prox > 0 && z.dist > 0) || !(rr > 0) || Math.abs(z.prox - z.dist) < Math.max(2 * (+ZO.tick || 0.05), 0.002 * z.prox)) return null; const D = z.type === "D", n = b.length; let e = -1;
+  const tgt = D ? z.prox + (z.prox - z.dist) * rr : z.prox - (z.dist - z.prox) * rr;
+  for (let j = z.sig + 1; j < n; j++) { if (D ? b[j].low <= z.prox : b[j].high >= z.prox) { e = j; break; } }
+  if (e < 0) return null; if (D ? b[e].low < z.dist : b[e].high > z.dist) return {e, r: -1};
+  for (let k = e + 1; k < n; k++) { const st = D ? b[k].low < z.dist : b[k].high > z.dist, tg = D ? b[k].high >= tgt : b[k].low <= tgt; if (st) return {e, r: -1}; if (tg) return {e, r: rr}; }
+  return null;
+}
+/* the indicator's own settings, switched one at a time (this needs a fresh scan of the stocks) */
+function zlVariants() {
+  const V = []; ZN_FILTERS.slice(0, 7).forEach(f => { if (ZO.f[f[0]]) V.push({id: "f_" + f[0], name: "Switch OFF: " + f[1], set: o => { o.f[f[0]] = 0; }, ap: () => { ZO.f[f[0]] = 0; }}); });
+  if (ZO.prox !== "Body") V.push({id: "p_body", name: "Proximal line at the base body instead of the wicks", set: o => { o.prox = "Body"; }, ap: () => { ZO.prox = "Body"; }});
+  if (ZO.maxBase > 3) V.push({id: "mb3", name: "Base of at most 3 candles (now " + ZO.maxBase + ")", set: o => { o.maxBase = 3; }, ap: () => { ZO.maxBase = 3; }});
+  if (ZO.maxLeg > 2) V.push({id: "ml2", name: "Leg-out of at most 2 candles (now " + ZO.maxLeg + ")", set: o => { o.maxLeg = 2; }, ap: () => { ZO.maxLeg = 2; }});
+  return V;
+}
+async function zlRun() {
+  if (ZLAB.busy) return; ZLAB.busy = true; const box = () => document.getElementById("zllabres"), say = t => { const b = box(); if (b) b.innerHTML = '<p class="note">' + t + "</p>"; };
+  try {
+    const items = znData().items; if (!items.length) { ZLAB.html = '<p class="note">No zones loaded yet.</p>'; return; }
+    const rr = ZACC_RR || +ZO.rr || 2; say("Replaying the zones..."); await zlTick();
+    const mkT = (its, zonesOf, feat) => { const T = []; its.forEach(it => zonesOf(it).forEach(z => { const tr = zlTrade(it.bars, z, rr); if (!tr) return; const t = zlT(it.bars[tr.e].time), o = {r: tr.r, t, y: new Date(t * 1000).getUTCFullYear()};
+      if (feat) { o.f = zlFeat(it, z); o.ex = {}; ZLX.forEach(x => { if (x === rr) return; const q = zlTrade(it.bars, z, x); o.ex[x] = q ? q.r : NaN; }); } T.push(o); })); return T; };
+    const T = mkT(items, it => it.zones, true);
+    if (T.length < 40) { ZLAB.html = '<p class="note">Too few finished trades to test (' + T.length + ").</p>"; return; }
+    const msd = a => { const n = a.length, m = a.reduce((x, y) => x + y, 0) / n; return {n, m, sd: n > 1 ? Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / (n - 1)) : NaN}; };
+    const med = T.map(x => x.t).sort((a, b) => a - b)[T.length >> 1], f2 = (v, d) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d == null ? 2 : d) : "-");
+    const meanOf = (a, g) => { const q = a.filter(g); return q.length >= 8 ? msd(q.map(x => x.r)).m : NaN; };
+    const yearsOf = a => Array.from(new Set(a.map(x => x.y))).sort();
+    /* sub against base (both arrays of {r,t,y}) */
+    const cmp = (sub, base, needShare) => {
+      const s = msd(sub.map(x => x.r)), b = msd(base.map(x => x.r)), z = (s.m - b.m) / Math.sqrt(s.sd * s.sd / s.n + b.sd * b.sd / b.n);
+      const h1 = meanOf(sub, x => x.t < med), h2 = meanOf(sub, x => x.t >= med), b1 = meanOf(base, x => x.t < med), b2 = meanOf(base, x => x.t >= med);
+      let yb = 0, ym = 0; yearsOf(base).forEach(y => { const sa = sub.filter(x => x.y === y), ba = base.filter(x => x.y === y); if (sa.length >= 15 && ba.length >= 15) { ym++; if (msd(sa.map(x => x.r)).m > msd(ba.map(x => x.r)).m) yb++; } });
+      const better = s.m > b.m && isFinite(h1) && isFinite(h2) && h1 > b1 && h2 > b2 && (ym < 2 || yb >= Math.ceil(ym * 0.6)), enough = !needShare || sub.length >= base.length * 0.2;
+      return {s, z, h1, h2, yb, ym, win: sub.filter(x => x.r > 0).length / sub.length * 100, tot: sub.reduce((p, q) => p + q.r, 0), v: s.n < 30 ? "few" : better && z >= 2.5 && enough ? "solid" : s.m > b.m && z >= 1.5 && enough ? "maybe" : "no"};
+    };
+    const E0 = cmp(T, T, false), B0 = msd(T.map(x => x.r));
+    const rowsF = ZL_RULES.filter(r => r[1] !== "h").map(r => { const sub = T.filter(x => r[2](x.f)); return {id: r[0], name: r[1], sub, c: sub.length >= 8 ? cmp(sub, T, true) : null}; });
+    /* exits: same zones, different target (paired) */
+    const rowsX = ZLX.filter(x => x !== rr).map(x => {
+      const ps = T.filter(t => isFinite(t.ex[x])), df = ps.map(t => ({r: t.ex[x] - t.r, t: t.t, y: t.y})), d = msd(df.map(q => q.r)), r2 = ps.map(t => t.ex[x]), s = msd(r2);
+      const h1 = meanOf(df, q => q.t < med), h2 = meanOf(df, q => q.t >= med); let yb = 0, ym = 0; yearsOf(ps).forEach(y => { const q = df.filter(a => a.y === y); if (q.length >= 15) { ym++; if (msd(q.map(a => a.r)).m > 0) yb++; } });
+      const z = d.m / (d.sd / Math.sqrt(d.n)), better = d.m > 0 && h1 > 0 && h2 > 0 && (ym < 2 || yb >= Math.ceil(ym * 0.6));
+      return {x, c: {s, z, h1: meanOf(ps.map(t => ({r: t.ex[x], t: t.t})), q => q.t < med), h2: meanOf(ps.map(t => ({r: t.ex[x], t: t.t})), q => q.t >= med), yb, ym, win: r2.filter(v => v > 0).length / r2.length * 100, tot: r2.reduce((p, q) => p + q, 0), v: s.n < 30 ? "few" : better && z >= 2.5 ? "solid" : d.m > 0 && z >= 1.5 ? "maybe" : "no"}};
+    });
+    /* the indicator's own settings: fresh scans, on the same sample for both sides */
+    const V = zlVariants(), step = Math.max(1, Math.ceil(items.length / 500)), sample = items.filter((_, i) => i % step === 0), TV = mkT(sample, it => it.zones, false), rowsV = [];
+    for (let k = 0; k < V.length; k++) {
+      say("Re-scanning the stocks with a changed setting: " + (k + 1) + " of " + V.length + "..."); await zlTick();
+      const o2 = JSON.parse(JSON.stringify(ZO)); V[k].set(o2); let Tv = [];
+      try { Tv = mkT(sample, it => { let zs = []; try { zs = znScan(it.bars, o2, it.u.mc, null); } catch (e) {} return zs; }, false); } catch (e) {}
+      rowsV.push({v: V[k], n: Tv.length, c: Tv.length >= 30 ? cmp(Tv, TV, false) : null});
+    }
+    const solidF = rowsF.filter(r => r.c && r.c.v === "solid"), solidX = rowsX.filter(r => r.c.v === "solid").sort((a, b) => b.c.s.m - a.c.s.m), solidV = rowsV.filter(r => r.c && r.c.v === "solid");
+    let comb = null;
+    if (solidF.length || solidX.length) { const sub = T.filter(t => solidF.every(r => ZLMAP[r.id][2](t.f))), vals = solidX.length ? sub.filter(t => isFinite(t.ex[solidX[0].x])).map(t => ({r: t.ex[solidX[0].x], t: t.t, y: t.y})) : sub, s = msd(vals.map(x => x.r));
+      comb = {ids: solidF.map(r => r.id), rr: solidX.length ? solidX[0].x : null, n: vals.length, s, win: vals.filter(x => x.r > 0).length / vals.length * 100, tot: vals.reduce((p, q) => p + q.r, 0), names: solidF.map(r => r.name).concat(solidX.length ? ["Target 1 : " + solidX[0].x] : [])}; }
+    ZLAB.solid = {comb, vars: solidV.map(r => r.v)};
+    const vt = {baseline: "baseline", combined: "combined", solid: "solid improvement", maybe: "better, could be luck", no: "no improvement", few: "too few trades"};
+    const row = (name, n, c, hi, base) => '<tr' + (hi ? ' style="background:color-mix(in srgb,var(--a) 8%,var(--card))"' : "") + "><td>" + name + '</td><td class="num">' + n + '</td><td class="num">' + (c ? c.win.toFixed(0) + "%" : "-") + '</td><td class="num" style="color:var(--' + (c && c.s.m > 0 ? "good" : "bad") + ')"><b>' + (c ? f2(c.s.m) + "R" : "-") + '</b> <small>&plusmn;' + (c && c.s.n > 1 ? (1.96 * c.s.sd / Math.sqrt(c.s.n)).toFixed(2) : "-") + '</small></td><td class="num">' + (c ? f2(c.tot, 0) + "R" : "-") + '</td><td class="num">' + (c ? f2(c.h1) : "-") + '</td><td class="num">' + (c ? f2(c.h2) : "-") + '</td><td class="num">' + (c && c.ym ? c.yb + " of " + c.ym : "-") + '</td><td class="num">' + (c && !base && isFinite(c.z) ? f2(c.z, 1) : "-") + "</td><td>" + (c ? vt[base ? "baseline" : c.v] || c.v : "too few trades") + "</td></tr>";
+    const hdr = t => '<tr><td colspan="10" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">' + t + "</td></tr>";
+    let h = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule</th><th class="num">Trades</th><th class="num">Win</th><th class="num">Avg per trade (&plusmn; range)</th><th class="num">Total</th><th class="num">Earlier half</th><th class="num">Later half</th><th class="num">Years better</th><th class="num">vs baseline (z)</th><th>Verdict</th></tr></thead><tbody>';
+    h += row("Baseline: all zones as they are now, target 1 : " + rr, T.length, E0, true, true);
+    h += hdr("Target (same zones, different target)"); rowsX.forEach(r => { h += row("Target 1 : " + r.x, r.c.s.n, r.c, false); });
+    let ri = 0; ZL_RULES.forEach(r => { if (r[1] === "h") { h += hdr(r[0]); return; } const q = rowsF[ri++]; h += row(esc(r[1]), q.sub.length, q.c, false); });
+    h += hdr("The indicator's own settings (tested on " + sample.length + " of " + items.length + " stock and timeframe series, " + TV.length + " baseline trades)");
+    rowsV.forEach(r => { h += row(esc(r.v.name), r.n, r.c, false); });
+    if (comb) h += hdr("All solid improvements together") + row(esc(comb.names.join(" + ")), comb.n, {s: comb.s, win: comb.win, tot: comb.tot, h1: NaN, h2: NaN, yb: 0, ym: 0, z: NaN, v: "combined"}, true);
+    h += "</tbody></table></div>";
+    const e0 = 1.96 * B0.sd / Math.sqrt(B0.n);
+    h += '<p class="note" style="margin:8px 0 0"><b>Baseline:</b> ' + f2(B0.m) + "R per trade (&plusmn;" + e0.toFixed(2) + ") over " + T.length + " finished trades, which is " + (Math.abs(B0.m) <= e0 ? "not clearly different from zero" : B0.m > 0 ? "profitable" : "losing money") + ". " + (comb || solidV.length ? "" : "<b>No rule or setting clearly beats the baseline.</b> ") +
+      "R is the risk of the trade (proximal to distal line); zones narrower than 0.2% of the price or 2 ticks are skipped, since costs would swamp them; results are before costs. A trade starts when price first returns to the proximal line and ends at the target or the distal line; trades still open are left out. \"Solid\" needs z of 2.5 or more, better in both halves of the history and in most years, and (for the rules) at least 20% of the trades. About " + (rowsF.length + rowsX.length + rowsV.length) + " tests run at once, so one or two can look good by luck. Zone features are measured when the zone formed, so they can also be used on live zones. Settings rows turn off a rule that is on today: a \"solid\" there means the rule hurts.</p>";
+    if (comb || solidV.length) h += '<div style="margin-top:8px"><button type="button" class="cbtn" data-zlapply="1">Use the solid rules and settings</button> <span class="note" style="margin:0">Filters the zones above' + (comb && comb.rr ? ", sets the target to 1 : " + comb.rr : "") + (solidV.length ? ", and changes " + solidV.length + " indicator setting(s) (the stocks are re-scanned)" : "") + "</span></div>";
+    ZLAB.html = h;
+  } catch (e) { ZLAB.html = '<p class="note">The lab could not run: ' + esc(String((e && e.message) || e)) + "</p>"; }
+  finally { ZLAB.busy = false; const b = document.getElementById("zllabres"); if (b) b.innerHTML = ZLAB.html; }
+}
+function zlBar() {
+  if (!ZLF.length) return '<div style="margin-bottom:10px;padding:8px 12px;border-radius:10px;border:1px dashed color-mix(in srgb,var(--a,#888) 45%,transparent)"><b>Zone profit filters: off.</b> <span class="note" style="margin:0">The Profitability lab at the bottom of this page tests which extra rules make the zones earn more.</span></div>';
+  return '<div style="margin-bottom:10px;padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--a,#888) 10%,var(--card));border:1px solid color-mix(in srgb,var(--a,#888) 35%,transparent)"><b>Zone profit filters on:</b> ' + ZLF.map(id => esc((ZLMAP[id] || [0, id])[1])).join("; ") + '. <span class="note" style="margin:0">Target used in the back-test: 1 : ' + (ZACC_RR || +ZO.rr || 2) + '.</span> <button type="button" class="cbtn" data-zlclear="1">Turn off</button></div>';
+}
+function zlLabHTML() {
+  return '<details class="pbtd" style="margin-top:14px"' + (ZLAB.html ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Profitability lab: which extra rules improve the demand and supply zones</summary><div class="card" style="margin-top:6px">' +
+    '<p class="note" style="margin:0 0 8px">Replays every zone on its own candles and tests one extra rule at a time (zone type, base size, zone width, departure strength, volume, trend, RSI, timeframe), other targets, and the indicator\'s own settings, to see what raises the average R per trade.</p><button type="button" class="cbtn" data-zlab="1">Run profitability lab</button><div id="zllabres" style="margin-top:10px">' + ZLAB.html + "</div></div></details>";
+}
+document.addEventListener("click", ev => {
+  const t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
+  if (t.closest("[data-zlab]")) { zlRun(); return; }
+  if (t.closest("[data-zlclear]")) { ZLF = []; try { localStorage.setItem("znLabF", "[]"); } catch (e) {} try { znPaintRes(); } catch (e) {} return; }
+  if (t.closest("[data-zlapply]")) {
+    const S = ZLAB.solid; if (!S) return; let rescan = false;
+    if (S.comb) { ZLF = S.comb.ids.slice(); if (S.comb.rr) { ZACC_RR = S.comb.rr; ZO.rr = S.comb.rr; try { localStorage.setItem("znAccRR", String(ZACC_RR)); } catch (e) {} } }
+    S.vars.forEach(v => { v.ap(); rescan = true; });
+    try { localStorage.setItem("znLabF", JSON.stringify(ZLF)); } catch (e) {} if (rescan || (S.comb && S.comb.rr)) znSave();
+    try { znPaintRes(); } catch (e) {}
+  }
+});
 
 /* ===== Bollinger Bands and RSI switches shared by every chart (Intraday, Zone, PEAD Picks, watchlist) ===== */
 var IND = {bb: false, rsi: false}; try { Object.assign(IND, JSON.parse(localStorage.getItem("indOn") || "{}")); } catch (e) {}
@@ -3240,7 +3394,7 @@ function znPaintRes() {
   }
   const near = +ZO.near > 0 ? +ZO.near : 0;
   const all = [];
-  items.forEach(it => it.zones.forEach(z => { if (!znShown(z)) return; const away = znActive(z) ? znAway(z, it.px) : NaN; if (near && !(isFinite(away) && Math.abs(away) <= near)) return; all.push({it, z, away}); }));
+  items.forEach(it => it.zones.forEach(z => { if (!znShown(z) || !zlOk(it, z)) return; const away = znActive(z) ? znAway(z, it.px) : NaN; if (near && !(isFinite(away) && Math.abs(away) <= near)) return; all.push({it, z, away}); }));
   const act = all.filter(x => znActive(x.z)), dem = act.filter(x => x.z.type === "D"), sup = act.filter(x => x.z.type === "S");
   /* confluence: how many timeframes have an active zone within 3% of the price, per stock and side */
   const CN = 3, conf = {};
@@ -3251,7 +3405,7 @@ function znPaintRes() {
   const tile = (small, big, sub) => '<div class="dtile"><small>' + small + "</small><b>" + big + "</b><span>" + sub + "</span></div>";
   const nm = x => esc(x.it.u.name);
   const stocksWith = new Set(items.map(i => i.u.sym)).size;
-  let h = '<div class="dtiles">' +
+  let h = zlBar() + '<div class="dtiles">' +
     tile("Demand zones", dem.length, "active, matching your filters") + tile("Supply zones", sup.length, "active, matching your filters") +
     tile("Nearest demand", nd ? fmt(nd.z.prox) : "—", nd ? nm(nd) + " · " + znTfName(nd.it.tf) + " · " + fmt(nd.away, 1) + "% away" : "none") +
     tile("Nearest supply", ns ? fmt(ns.z.prox) : "—", ns ? nm(ns) + " · " + znTfName(ns.it.tf) + " · " + fmt(ns.away, 1) + "% away" : "none") +
@@ -3298,7 +3452,8 @@ function znPaintRes() {
     '<span class="csep"></span>' + avail.map(tf => '<button type="button" class="cbtn" data-zntfc="' + tf + '" aria-pressed="' + (tf === ZTFSEL) + '">' + znTfName(tf) + "</button>").join("") +
     '<span class="csep"></span>' + rngs.map(r => '<button type="button" class="cbtn" data-znrange="' + r[0] + '" aria-pressed="' + (r[0] === rcur) + '">' + r[1] + "</button>").join("") +
     '<span class="csep"></span>' + indBtns() + '</div><div class="chartbox" id="znbox"></div><div class="chartbar"><span>Green boxes are demand, red boxes are supply, grey boxes are mitigated. Boxes run from the leg-in to now. Dashed line is the distal (stop) side.</span><a href="https://www.tradingview.com/chart/?symbol=NSE%3A' + encodeURIComponent(String(ZSEL || "").replace(/[&-]/g, "_")) + '&interval=' + ZTFSEL + '" target="_blank" rel="noopener">Open on TradingView</a></div></div>';
-  try { h += accWrap("zn", "Back-test: accuracy of these zones on past data", znAccHTML(items)); } catch (e) {}
+  try { h += accWrap("zn", "Back-test: accuracy of these zones on past data", znAccHTML(ZLF.length ? items.map(it => Object.assign({}, it, {zones: it.zones.filter(z => zlOk(it, z))})) : items)); } catch (e) {}
+  try { h += zlLabHTML(); } catch (e) {}
   host.innerHTML = h;
   if (ZOPEN && chartH) {
     const tmp = document.createElement("div"); tmp.innerHTML = chartH; const el = tmp.firstElementChild, k = ZOPEN.split("|"); let row = null;
@@ -4442,7 +4597,7 @@ const cbApi = (function () {
     ((OI && OI.rows) || []).forEach(r => { const sym = String(r.s).toUpperCase(), q = px[sym]; if (!q || !oiStrong(r, q)) return; const sd = +q.pct >= 0 ? 1 : -1; give(sym, sd, "oi", (sd === 1 ? "Long" : "Short") + " build-up, OI " + pct(+r.pct, 0), sgn(+r.pct, 0), {r, q}); });
     try {
       const D = znData(), near = {};
-      D.items.forEach(it => it.zones.forEach(z => { if (!znActive(z)) return; const a = znAway(z, it.px); if (!isFinite(a) || Math.abs(a) > 3) return; const k = it.u.sym + "|" + z.type, o = near[k] = near[k] || {sym: it.u.sym, t: z.type, tfs: new Set(), best: 1e9, z: null, tf: "", away: NaN}; o.tfs.add(znTfName(it.tf)); if (Math.abs(a) < o.best) { o.best = Math.abs(a); o.z = z; o.tf = znTfName(it.tf); o.away = a; } }));
+      D.items.forEach(it => it.zones.forEach(z => { if (!znActive(z) || !zlOk(it, z)) return; const a = znAway(z, it.px); if (!isFinite(a) || Math.abs(a) > 3) return; const k = it.u.sym + "|" + z.type, o = near[k] = near[k] || {sym: it.u.sym, t: z.type, tfs: new Set(), best: 1e9, z: null, tf: "", away: NaN}; o.tfs.add(znTfName(it.tf)); if (Math.abs(a) < o.best) { o.best = Math.abs(a); o.z = z; o.tf = znTfName(it.tf); o.away = a; } }));
       Object.keys(near).forEach(k => { const o = near[k], tf = Array.from(o.tfs); give(String(o.sym).toUpperCase(), o.t === "D" ? 1 : -1, "zone", (o.t === "D" ? "Demand" : "Supply") + " zone within " + o.best.toFixed(1) + "% (" + tf.join(", ") + ")", tf.length + " TF", {z: o.z, tf: o.tf, tfs: tf, away: o.away}); });
     } catch (e) {}
     let rmTf = "";
@@ -5590,7 +5745,7 @@ const cuApi = (function () {
   }
   /* shown above the list while profit filters are on */
   function activeBar() {
-    if (!F.flt || !F.flt.length) return "";
+    if (!F.flt || !F.flt.length) return '<div style="padding:8px 12px;border-radius:10px;border:1px dashed color-mix(in srgb,var(--a) 45%,transparent)"><b>Profit filters: off.</b> <span class="note" style="margin:0">Your lab found cup score 85+, stop at least 4% away and a 1 : 3 target worked best.</span> <button type="button" class="cbtn" data-cupreset="1">Turn them on</button></div>';
     const ex = F.xm === "tr" ? "trailing stop, no target" : "target 1 : " + F.rr + (F.xm === "be" ? ", stop to entry after +1R" : "");
     return '<div style="padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--a) 10%,var(--card));border:1px solid color-mix(in srgb,var(--a) 35%,transparent)"><b>Profit filters on:</b> ' + F.flt.map(id => E((RMAP[id] || [0, id])[1])).join("; ") + '. <span class="note" style="margin:0">Exit used in the back-test: ' + ex + '.</span> <button type="button" class="cbtn" data-cuclear="1">Turn off</button></div>';
   }
@@ -5659,6 +5814,7 @@ const cuApi = (function () {
       if (t.closest("#cumore")) { F.shown += 80; view(); return; }
       if (t.closest("[data-culab]")) { runLab(); return; }
       if (t.closest("[data-cuclear]")) { F.flt = []; save(); view(); return; }
+      if (t.closest("[data-cupreset]")) { F.flt = ["s85", "rk4"]; F.rr = 3; F.xm = ""; save(); view(); return; }
       if (t.closest("[data-cuapply]")) { if (CUSOLID) { F.flt = CUSOLID.ids.slice(); if (CUSOLID.ex) { F.rr = CUSOLID.ex.rr; F.xm = CUSOLID.ex.xm; } save(); view(); } return; }
       let b = t.closest("[data-curr]"); if (b) { F.rr = +b.dataset.curr; save(); const d = $e("#cubt"); if (d) d.innerHTML = btHTML(); return; }
       if (t.closest("[data-cux]")) { OPEN = null; panel(); view(); return; }
