@@ -4062,7 +4062,7 @@ function rmRun(bars, o) {
       if (risk >= RM_MT && (entry - stop) * sd > 0) {
         const t1 = entry + sd * risk, mm = neck + sd * Math.abs(aP2 - aP1), mmOk = (mm - entry) * sd > risk, t2 = mmOk ? mm : entry + sd * 2 * risk;
         plan = {sd, entry, stop, risk, t1, t2, t2R: Math.abs(t2 - entry) / risk, mmOk, neck, p1: aP1, p2: aP2, p3: aP3, p1B: aP1B, p2B: aP2B, p3B: aP3B};
-        if (tlDir === 0) { tlDir = sd; tlEntry = entry; tlStop = stop; tlTgt = o.target === "T2" ? t2 : t1; tlEntryBar = i; tlRisk = risk; }
+        if (tlDir === 0) { tlDir = sd; tlEntry = entry; tlStop = stop; tlTgt = o.target === "T2" ? t2 : o.target === "R15" ? entry + sd * 1.5 * risk : o.target === "R2" ? entry + sd * 2 * risk : o.target === "R3" ? entry + sd * 3 * risk : t1; tlEntryBar = i; tlRisk = risk; }
       }
       sigs.push({i, dir: sd, kind: (buyB || sellB) ? "Break" : "Retest", px: C[i], score, plan});
     } else if (buy || sell) sigs.push({i, dir: buy ? 1 : -1, kind: (buyB || sellB) ? "Break" : "Retest", px: C[i], score, plan: null});
@@ -4144,7 +4144,7 @@ const rmApi = (function () {
     });
     return out;
   }
-  const freshOf = x => x.r.lastSig && (x.r.n - 1 - x.r.lastSig.i) <= O.fresh ? x.r.lastSig : null;
+  const freshOf = x => x.r.lastSig && (x.r.n - 1 - x.r.lastSig.i) <= O.fresh && liveOk(x, x.r.lastSig) ? x.r.lastSig : null;
   const dirOk = d => O.dir === "Both" || (O.dir === "Long" ? d === 1 : d === -1);
   const toNeck = r => r.aDir === 1 ? (r.neck / r.close - 1) * 100 : r.aDir === -1 ? (r.close / r.neck - 1) * 100 : NaN;
   const sideTag = d => d === 1 ? '<span class="rmg" style="background:#15803d">BUY</span>' : d === -1 ? '<span class="rmg" style="background:#b91c1c">SELL</span>' : "—";
@@ -4204,7 +4204,7 @@ const rmApi = (function () {
       '<label>Trigger <select id="rmMode"><option>Break + Retest</option><option>Neckline Break</option><option>Retest Hold</option></select></label>' +
       '<label>Min quality <input id="rmMin" type="number" min="0" max="100" style="width:60px" value="' + O.min + '"></label>' +
       '<label>Signal within <input id="rmFresh" type="number" min="0" max="30" style="width:52px" value="' + O.fresh + '"> bars</label>' +
-      '<label>Trade log exit <select id="rmTgt"><option value="T1">T1 (1R)</option><option value="T2">T2 (MM / 2R)</option></select></label>' +
+      '<label>Trade log exit <select id="rmTgt"><option value="T1">T1 (1R)</option><option value="R15">1.5R</option><option value="R2">2R</option><option value="R3">3R</option><option value="T2">T2 (MM / 2R)</option></select></label>' +
       '<button type="button" class="cbtn" id="rmReload">&#8635; Rescan</button></div><div class="note" id="rmstat" style="margin:8px 0 0"></div></div><div id="rmres"></div>';
     $e("#rmMode").value = O.mode; $e("#rmTgt").value = O.target;
     host.addEventListener("click", ev => {
@@ -4214,6 +4214,9 @@ const rmApi = (function () {
       if ((b = t.closest("[data-rmd]"))) { O.dir = b.dataset.rmd; host.querySelectorAll("[data-rmd]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.rmd === O.dir))); save(); view(); return; }
       if (t.closest("#rmReload")) { Object.keys(MEMO).forEach(k => delete MEMO[k]); load(true); return; }
       if (t.closest("#rmMore")) { SHOWN += 60; view(); return; }
+      if (t.closest("[data-rmlab]")) { runLab(); return; }
+      if (t.closest("[data-rmclear]")) { O.flt = []; save(); view(); return; }
+      if (t.closest("[data-rmapply]")) { if (RMSOLID) { O.flt = RMSOLID.ids.slice(); if (RMSOLID.tg) { O.target = RMSOLID.tg; const sl = $e("#rmTgt"); if (sl) sl.value = O.target; } save(); Object.keys(MEMO).forEach(k => delete MEMO[k]); try { if (O.flt.indexOf("sec") >= 0 && typeof tcApi !== "undefined" && tcApi.load) tcApi.load(false).then(() => view()); } catch (e) {} view(); } return; }
       const row = t.closest("[data-sym]"); if (row) { openSym = openSym === row.dataset.sym ? null : row.dataset.sym; view(); }
     });
     host.addEventListener("input", ev => {
@@ -4257,23 +4260,159 @@ const rmApi = (function () {
     h += "</tbody></table></div>" + (rows.length > SHOWN ? '<p><button type="button" class="cbtn" id="rmMore">Show 60 more (' + (rows.length - SHOWN) + " left)</button></p>" : "");
     h += '<p class="note"><b>How this works.</b> Each stock is run through the same rules as the 1-2-3 Reversal Map in your Pine script: swing pivots (2 bars left and right), a bullish 1-2-3 is low, high, higher low (bearish is the mirror), with leg size, hold and retrace checked against ATR 14. The high or low at point 2 is the neckline. A close beyond the neckline (plus 0.05 ATR) is the break, and a pullback into the 0.30 ATR pocket that holds is the retest. Quality is the same 0-100 score. A BUY or SELL signal needs the chosen trigger and the minimum quality. Entry is the signal close, the stop sits 0.15 ATR beyond point 3, T1 is 1R and T2 is the measured move (or 2R). Break Proof is how often past breaks reached 1 ATR before failing. Trade log replays every signal as one trade at a time, exiting at stop (assumed first if both are touched), target, day end or 15:15 on intraday charts, shown in R. Only closed candles are used. General information, not buy or sell advice.</p>';
     try { h += accWrap("rm", "Back-test: accuracy of the 123 signals on past candles", accHTML(R)); } catch (e) {}
+    try { h += labHTML(); } catch (e) {}
     host.innerHTML = h;
   }
 
   /* Accuracy of the 1-2-3 signals: the indicator's own trade log (entry on the signal bar, stop under the 3rd point, exit at the chosen target) over all stocks scanned */
   function accHTML(R) {
-    const T = [], op = {1: 0, "-1": 0}; R.forEach(x => { (x.r.trades || []).forEach(t => T.push(t)); if (x.r.open) op[x.r.open.dir]++; });
+    const T = [], op = {1: 0, "-1": 0}, fl = O.flt && O.flt.length; R.forEach(x => { (x.r.trades || []).forEach(t => { if (fl) { const sg = (x.r.sigs || []).find(z => z.i === t.i0); if (!sg || !liveOk(x, sg)) return; } T.push(t); }); if (x.r.open) op[x.r.open.dir]++; });
     if (!T.length) return "";
     const grp = (name, a) => { const n = a.length, w = a.filter(t => t.R > 0).length, sum = a.reduce((s, t) => s + t.R, 0), tg = a.filter(t => t.why === "target").length, st = a.filter(t => t.why === "stop").length; return {c: [name, n + accFew(n), "<b>" + accPc(w, n) + "</b>", accR(n ? sum / n : NaN), accR(sum), accPc(tg, n), accPc(st, n), accPc(n - tg - st, n)]}; };
     const rows = [grp("<b>All signals</b>", T), grp("Buy (bullish 1-2-3)", T.filter(t => t.dir === 1)), grp("Sell (bearish 1-2-3)", T.filter(t => t.dir === -1))];
     return accTable("Accuracy of these signals on past candles", ["Group", "Finished trades", "Win rate", "Average per trade", "Total", "Hit target", "Hit stop", "Closed otherwise"], rows,
       "Every past 1-2-3 signal on the " + ((RM_TFS.find(t => t[0] === O.tf) || [0, O.tf])[1]) + " candles of the stocks scanned was followed to its exit with the indicator's own rules: entry on the signal bar, stop beyond the third point, exit at " + (O.target === "T2" ? "T2 (measured move / 2R)" : "T1 (1R)") + ", or at day end on intraday charts. Trades still open are not counted (" + (op[1] + op[-1]) + " open now). Results are in R (1R = the risk of the trade), before brokerage and slippage. Past results only, not a promise.");
   }
+
+  /* ---- profitability lab: which extra rules make the 123 trades earn more per trade (in R), tested on the past trades above ---- */
+  const msd = a => { const n = a.length, m = a.reduce((x, y) => x + y, 0) / n; return {m, n, sd: n > 1 ? Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / (n - 1)) : NaN}; };
+  const dayOf = t => (typeof t === "number" ? new Date(t * 1000).toISOString().slice(0, 10) : String(t).slice(0, 10));
+  const tsec = t => (typeof t === "number" ? t : Date.parse(String(t).slice(0, 10) + "T00:00:00Z") / 1000);
+  function rsiA(c, n) {
+    const N = c.length, o = new Array(N).fill(NaN); if (N <= n) return o; let ag = 0, al = 0;
+    for (let i = 1; i <= n; i++) { const d = c[i] - c[i - 1]; ag += Math.max(d, 0); al += Math.max(-d, 0); } ag /= n; al /= n; o[n] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+    for (let i = n + 1; i < N; i++) { const d = c[i] - c[i - 1]; ag = (ag * (n - 1) + Math.max(d, 0)) / n; al = (al * (n - 1) + Math.max(-d, 0)) / n; o[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al); }
+    return o;
+  }
+  const CX = new WeakMap(), NFC = {}, SECR = {};
+  function ctxOf(bars) {
+    let c = CX.get(bars); if (c) return c; const si = stApi.ind, av = new Array(bars.length).fill(NaN);
+    for (let i = 19; i < bars.length; i++) { let sm = 0; for (let k = i - 19; k <= i; k++) sm += bars[k].vol || 0; av[i] = sm / 20; }
+    c = {e50: si.emaArr(bars, 50), atr: si.atrArr(bars, 14), adx: si.adxArr(bars, 14), rsi: rsiA(bars.map(b => b.close), 14), av}; CX.set(bars, c); return c;
+  }
+  function niftyFn() {
+    const nb = RB[O.tf] && RB[O.tf].NIFTY; if (!nb || !nb.bars || nb.bars.length < 60) return null;
+    const bars = closed(nb.bars, O.tf), k = O.tf + "|" + bars.length + "|" + (bars[bars.length - 1] || {}).time; if (NFC.k === k) return NFC.f;
+    const c = ctxOf(bars), m = new Map(); bars.forEach((b, i) => { if (isFinite(c.e50[i])) m.set(String(b.time), b.close > c.e50[i] ? 1 : -1); });
+    NFC.k = k; NFC.f = t => (m.has(String(t)) ? m.get(String(t)) : NaN); return NFC.f;
+  }
+  function secCall(sym, ds) {
+    const sec = secOf(sym); if (!sec || typeof tcApi === "undefined" || !tcApi.secAt) return NaN;
+    if (!SECR[ds]) { let m = {}; try { m = tcApi.secAt(ds) || {}; } catch (e) {} SECR[ds] = m; }
+    const S = SECR[ds][sec]; if (!S || !isFinite(S.prob)) return NaN; return S.prob >= 58 && S.avg > 0 ? 1 : S.prob <= 42 && S.avg < 0 ? -1 : 0;
+  }
+  /* what was known on the signal bar */
+  function featOf(x, sg, nf) {
+    const bars = x.bars, i = sg.i, b = bars[i], c = ctxOf(bars), d = sg.dir, pl = sg.plan; if (!b || !pl) return null;
+    const rng = b.high - b.low, a = c.atr[i], leg = Math.abs(pl.p2 - pl.p1), f = {score: sg.score, kind: sg.kind, d};
+    f.tr = isFinite(c.e50[i]) ? (d * (b.close - c.e50[i]) > 0 ? 1 : -1) : 0;
+    f.sl = isFinite(c.e50[i]) && i >= 10 && isFinite(c.e50[i - 10]) ? (d * (c.e50[i] - c.e50[i - 10]) > 0 ? 1 : -1) : 0;
+    f.rsi = c.rsi[i]; f.adx = c.adx[i]; f.vr = c.av[i] > 0 && b.vol > 0 ? b.vol / c.av[i] : NaN;
+    f.cs = rng > 0 ? (d === 1 ? b.close - b.low : b.high - b.close) / rng : NaN;
+    f.rk = a > 0 ? pl.risk / a : NaN; f.t2R = pl.t2R; f.leg = a > 0 ? leg / a : NaN; f.rt = leg > 0 ? Math.abs(pl.p2 - pl.p3) / leg : NaN;
+    f.nf = nf ? nf(b.time) : NaN; f.sec = secCall(x.sym, dayOf(b.time));
+    return f;
+  }
+  /* the tests: id, label, test on the features (a missing number never blocks) */
+  const RULES = [
+    ["Signal quality", "h"],
+    ["q70", "Quality score 70 or more", f => f.score >= 70], ["q80", "Quality score 80 or more", f => f.score >= 80],
+    ["Type of entry", "h"],
+    ["brk", "Neckline break entries only", f => f.kind === "Break"], ["ret", "Retest entries only", f => f.kind === "Retest"],
+    ["Trend", "h"],
+    ["trw", "With the trend (close on the trade's side of the 50 EMA)", f => f.tr !== -1], ["trc", "Against the trend (a true reversal)", f => f.tr !== 1],
+    ["slw", "50 EMA sloping the trade's way", f => f.sl !== -1],
+    ["nif", "Nifty trend agrees (above its 50 EMA for BUY)", f => !isFinite(f.nf) || f.nf === f.d],
+    ["sec", "Sector season agrees (Time Cycle)", f => !isFinite(f.sec) || f.sec === f.d],
+    ["Momentum and strength", "h"],
+    ["rsi", "RSI agrees (BUY 50 or more, SELL 50 or less)", f => !isFinite(f.rsi) || (f.d === 1 ? f.rsi >= 50 : f.rsi <= 50)],
+    ["adx", "ADX 20 or more (trending)", f => !isFinite(f.adx) || f.adx >= 20], ["adxl", "ADX under 20 (no trend yet)", f => !isFinite(f.adx) || f.adx < 20],
+    ["vol", "Signal volume at least 1.5x its 20-bar average", f => !isFinite(f.vr) || f.vr >= 1.5],
+    ["cs", "Signal candle closes in its strong third", f => !isFinite(f.cs) || f.cs >= 0.67],
+    ["Shape of the pattern and the plan", "h"],
+    ["rk2", "Stop within 2 ATR of the entry", f => !isFinite(f.rk) || f.rk <= 2], ["rk1", "Stop at least 1 ATR from the entry", f => !isFinite(f.rk) || f.rk >= 1],
+    ["room", "Room to T2 (T2 at 2R or more)", f => f.t2R >= 2],
+    ["leg", "Big first leg (2.5 ATR or more)", f => !isFinite(f.leg) || f.leg >= 2.5], ["shal", "Shallow pullback (point 3 retraces 62% or less)", f => !isFinite(f.rt) || f.rt <= 0.62]
+  ];
+  const RMAP = {}; RULES.forEach(r => { if (r[1] !== "h") RMAP[r[0]] = r; });
+  function liveOk(x, sg) {
+    const fl = O.flt; if (!fl || !fl.length) return true;
+    const key = fl.join(",") + "|" + O.tf + "|" + x.bars.length; if (sg._k === key) return sg._ok;
+    const f = featOf(x, sg, niftyFn()); let ok = true; if (f) fl.forEach(id => { if (RMAP[id] && !RMAP[id][2](f)) ok = false; });
+    sg._k = key; sg._ok = ok; return ok;
+  }
+  /* follow a trade from the signal bar to a target at tg (stop as the indicator has it); NaN if still open */
+  function simExit(bars, i0, d, pl, tg, intr) {
+    const N = bars.length, ep = pl.entry, risk = pl.risk, tod = i => { const q = new Date(bars[i].time * 1000); return {day: q.getUTCFullYear() * 10000 + q.getUTCMonth() * 100 + q.getUTCDate(), h: q.getUTCHours(), m: q.getUTCMinutes()}; };
+    for (let i = i0 + 1; i < N; i++) {
+      const b = bars[i]; let nd = false, eod = false;
+      if (intr) { const a = tod(i), q = tod(i - 1); nd = a.day !== q.day; eod = a.h === 15 && a.m >= 15; }
+      if (nd) return d * (bars[i - 1].close - ep) / risk;
+      if (d === 1 ? b.low <= pl.stop : b.high >= pl.stop) return -1;
+      if (d === 1 ? b.high >= tg : b.low <= tg) return d * (tg - ep) / risk;
+      if (eod) return d * (b.close - ep) / risk;
+    }
+    return NaN;
+  }
+  let RMLAB = "", RMSOLID = null, RMBUSY = false;
+  const XV = [["r15", "Target 1.5R", 1.5, "R15"], ["r2", "Target 2R", 2, "R2"], ["r3", "Target 3R", 3, "R3"], ["t2", "Target T2 (measured move, or 2R)", 0, "T2"]];
+  async function runLab() {
+    if (RMBUSY) return; RMBUSY = true; const box = () => $e("#rmlabres");
+    try {
+      const R = results(); if (!R.length) { RMLAB = '<p class="note">No candles loaded yet.</p>'; return; }
+      if (box()) box().innerHTML = '<p class="note">Loading sector history...</p>';
+      Object.keys(SECR).forEach(k => delete SECR[k]); try { if (typeof tcApi !== "undefined" && tcApi.load) await tcApi.load(false); } catch (e) {}
+      if (box()) box().innerHTML = '<p class="note">Running the tests...</p>'; await new Promise(r => setTimeout(r, 30));
+      const nf = niftyFn(), intr = O.tf !== "D" && O.tf !== "W", T = [];
+      R.forEach(x => { const sg = {}; (x.r.sigs || []).forEach(s => { sg[s.i] = s; }); (x.r.trades || []).forEach(t => {
+        const s = sg[t.i0]; if (!s || !s.plan) return; const f = featOf(x, s, nf); if (!f) return;
+        const pl = s.plan, ex = {base: t.R};
+        XV.forEach(e => { ex[e[0]] = simExit(x.bars, t.i0, t.dir, pl, e[2] ? pl.entry + t.dir * e[2] * pl.risk : pl.t2, intr); });
+        T.push({f, ex, t: tsec(x.bars[t.i0].time)}); }); });
+      if (T.length < 30) { RMLAB = '<p class="note">Too few finished trades to test (' + T.length + ").</p>"; return; }
+      const sorted = T.map(x => x.t).sort((a, b) => a - b), cut = sorted[sorted.length >> 1], base = T.map(x => x.ex.base), b0 = msd(base), half = (arr, e) => { const q = arr.filter(x => (e ? x.t < cut : x.t >= cut)).map(x => x.ex.base); return q.length >= 8 ? msd(q).m : NaN; };
+      const bh1 = half(T, 1), bh2 = half(T, 0), f2 = (v, d) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d == null ? 2 : d) : "-");
+      const evalSub = (sub, key) => {
+        const arr = sub.map(x => x.ex[key]).filter(isFinite), s = msd(arr);
+        let z, a, c, better;
+        if (key === "base") { z = (s.m - b0.m) / Math.sqrt(s.sd * s.sd / s.n + b0.sd * b0.sd / b0.n); a = half(sub, 1); c = half(sub, 0); better = s.m > b0.m && isFinite(a) && isFinite(c) && a > bh1 && c > bh2; }
+        else { const ps = sub.filter(x => isFinite(x.ex[key])), df = ps.map(x => x.ex[key] - x.ex.base), d = msd(df); z = d.m / (d.sd / Math.sqrt(d.n)); const h = e => { const q = ps.filter(x => (e ? x.t < cut : x.t >= cut)).map(x => x.ex[key] - x.ex.base); return q.length >= 8 ? msd(q).m : NaN; }; a = h(1); c = h(0); better = d.m > 0 && a > 0 && c > 0; }
+        const win = arr.filter(v => v > 0).length / arr.length * 100, enough = key !== "base" || sub.length >= T.length * 0.2;
+        return {s, z, a, c, win, tot: arr.reduce((p, q) => p + q, 0), v: s.n < 8 ? "few" : better && z >= 2.5 && enough ? "solid" : s.m > b0.m && z >= 1.5 && enough ? "maybe" : "no"};
+      };
+      const E0 = evalSub(T, "base"), rowsF = RULES.filter(r => r[1] !== "h").map(r => ({id: r[0], name: r[1], sub: T.filter(x => r[2](x.f))})), resF = rowsF.map(r => evalSub(r.sub, "base"));
+      const resX = XV.map(e => evalSub(T, e[0]));
+      const solidF = rowsF.filter((r, i) => resF[i].v === "solid"), solidX = XV.map((e, i) => [e, resX[i]]).filter(q => q[1].v === "solid").sort((a, b) => b[1].s.m - a[1].s.m);
+      let comb = null;
+      if (solidF.length || solidX.length) { const sub = T.filter(x => solidF.every(r => RMAP[r.id][2](x.f))), key = solidX.length ? solidX[0][0][0] : "base", arr = sub.map(x => x.ex[key]).filter(isFinite), s = msd(arr); comb = {ids: solidF.map(r => r.id), tg: solidX.length ? solidX[0][0][3] : null, n: arr.length, s, win: arr.filter(v => v > 0).length / arr.length * 100, tot: arr.reduce((p, q) => p + q, 0), names: solidF.map(r => r.name).concat(solidX.length ? [solidX[0][0][1]] : [])}; }
+      RMSOLID = comb;
+      const vt = {baseline: "baseline", combined: "combined", solid: "solid improvement", maybe: "better, could be luck", no: "no improvement", few: "too few trades"};
+      const rowHTML = (name, n, win, s, tot, a, c, z, v, hi) => '<tr' + (hi ? ' style="background:color-mix(in srgb,var(--a) 8%,var(--card))"' : "") + "><td>" + name + '</td><td class="num">' + n + '</td><td class="num">' + (isFinite(win) ? win.toFixed(0) + "%" : "-") + '</td><td class="num" style="color:var(--' + (s && s.m > 0 ? "good" : "bad") + ')"><b>' + (s ? f2(s.m) + "R" : "-") + '</b> <small>&plusmn;' + (s && s.n > 1 ? (1.96 * s.sd / Math.sqrt(s.n)).toFixed(2) : "-") + '</small></td><td class="num">' + f2(tot, 0) + 'R</td><td class="num">' + f2(a) + '</td><td class="num">' + f2(c) + '</td><td class="num">' + (isFinite(z) ? f2(z, 1) : "-") + "</td><td>" + (vt[v] || v) + "</td></tr>";
+      const hdr = t => '<tr><td colspan="9" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">' + t + "</td></tr>";
+      let h = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule</th><th class="num">Trades</th><th class="num">Win</th><th class="num">Avg per trade (&plusmn; range)</th><th class="num">Total</th><th class="num">Earlier half</th><th class="num">Later half</th><th class="num">vs baseline (z)</th><th>Verdict</th></tr></thead><tbody>';
+      h += rowHTML("Baseline: the 123 signals as they are now (quality " + O.min + "+, exit at " + (O.target === "T2" ? "T2" : O.target === "R15" ? "1.5R" : O.target === "R2" ? "2R" : O.target === "R3" ? "3R" : "1R") + ")", T.length, E0.win, E0.s, E0.tot, bh1, bh2, NaN, "baseline", true);
+      h += hdr("Exits (same trades, different target)"); XV.forEach((e, i) => { const r = resX[i]; h += rowHTML(e[1], r.s.n, r.win, r.s, r.tot, r.a, r.c, r.z, r.v); });
+      let ri = 0; RULES.forEach(r => { if (r[1] === "h") { h += hdr(r[0]); return; } const q = resF[ri], row = rowsF[ri]; h += rowHTML(r[1], row.sub.length, q.win, q.s, q.tot, q.a, q.c, q.z, q.v); ri++; });
+      if (comb) h += hdr("All solid improvements together") + rowHTML(comb.names.join(" + "), comb.n, comb.win, comb.s, comb.tot, NaN, NaN, NaN, "combined", true);
+      h += "</tbody></table></div>";
+      const e0 = 1.96 * b0.sd / Math.sqrt(b0.n), anyProfit = [E0].concat(resF, resX).some(r => r.s && r.s.n >= 30 && r.s.m - 1.96 * r.s.sd / Math.sqrt(r.s.n) > 0);
+      h += '<p class="note" style="margin:8px 0 0"><b>Baseline:</b> ' + f2(b0.m) + "R per trade (&plusmn;" + e0.toFixed(2) + ") over " + T.length + " finished trades, which is " + (Math.abs(b0.m) <= e0 ? "not clearly different from zero" : b0.m > 0 ? "profitable" : "losing money") + ". " + (comb ? "" : "<b>No rule clearly beats the baseline.</b> ") + (anyProfit ? "" : "<b>No row has an average above zero beyond its range yet.</b> ") +
+        "R is the risk of the trade (entry to stop); results are before costs. Every row uses the same past trades, so one phase of the market can move all of them together. About " + (rowsF.length + XV.length) + " tests run at once, so one or two can look good by luck; \"solid\" needs z of 2.5 or more, better in both halves, and at least 20% of the trades. Missing data never blocks a trade. Nifty and sector rows use the same timeframe and past years only.</p>";
+      if (comb) h += '<div style="margin-top:8px"><button type="button" class="cbtn" data-rmapply="1">Use the solid rules on this tab</button> <span class="note" style="margin:0">Filters the signals and the accuracy table above' + (comb.tg ? ", and sets the exit" : "") + "</span></div>";
+      RMLAB = h;
+    } catch (e) { RMLAB = '<p class="note">The lab could not run: ' + E(String((e && e.message) || e)) + "</p>"; }
+    finally { RMBUSY = false; if (box()) box().innerHTML = RMLAB; }
+  }
+  function labHTML() {
+    const on = O.flt && O.flt.length ? '<p class="note" style="margin:0 0 8px"><b>Profit filters on:</b> ' + O.flt.map(id => E((RMAP[id] || [0, id])[1])).join("; ") + ' <button type="button" class="cbtn" data-rmclear="1">Turn off</button></p>' : "";
+    return '<details class="pbtd" style="margin-top:14px"' + (RMLAB || on ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Profitability lab: which extra rules improve the 123 trades</summary><div class="card" style="margin-top:6px">' + on +
+      '<p class="note" style="margin:0 0 8px">Takes the finished trades in the table above and tests one extra rule at a time (trend, RSI, ADX, volume, pattern shape, Nifty, sector season) and different targets, to see what raises the average R per trade.</p><button type="button" class="cbtn" data-rmlab="1">Run profitability lab</button><div id="rmlabres" style="margin-top:10px">' + RMLAB + "</div></div></details>";
+  }
   function paint() { build(); view(); }
   function open() { build(); paint(); const S = ST[O.tf]; if (!busy && (!S || !S.t || Date.now() - S.t > (ZN_TTL[O.tf] || 6e5))) load(false); }
   setInterval(() => { try { if (current === "rm" && !document.hidden && !busy) { const S = ST[O.tf]; if (!S || !S.t || Date.now() - S.t > (ZN_TTL[O.tf] || 6e5)) load(false); } } catch (e) {} }, 60 * 1000);
   function signals() { const m = {}; results().forEach(x => { const f = freshOf(x); if (f) m[x.sym] = {dir: f.dir, kind: f.kind, age: x.r.n - 1 - f.i, st: "fresh", score: f.score, plan: f.plan || null, neck: x.r.neck}; else if (x.r.aDir !== 0 && !x.r.broken) m[x.sym] = {dir: x.r.aDir, st: "armed", score: x.r.score, plan: null, neck: x.r.neck}; }); return {m, tf: (RM_TFS.find(t => t[0] === O.tf) || [0, O.tf])[1]}; }
-  return {open, load, view, signals};
+  return {open, load, view, signals, _t: {simExit, results}};
 })();
 const rmPaint = () => rmApi.open();
 
@@ -5133,7 +5272,7 @@ const stApi = (function () {
   function open() { build(); sync(); if (RES) view(); else view(); load(false); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "st" && !document.hidden) load(false); } catch (e) {} }, 120e3);
   setInterval(() => { try { if (OPEN && TF !== "D" && typeof current !== "undefined" && current === "st" && !document.hidden) drawChart(); } catch (e) {} }, 60e3);
-  return {open, signals, load, _test: {superTrend, replay, CFG, buildCtx, DB, htfOne, rmCtx, closedOnly}};
+  return {open, signals, load, ind: {adxArr, atrArr, emaArr}, _test: {superTrend, replay, CFG, buildCtx, DB, htfOne, rmCtx, closedOnly}};
 })();
 const stPaint = () => stApi.open();
 /* ===== CUP & HANDLE TAB: scans the Nifty 500 on daily, weekly or monthly candles for a cup and handle base that is forming or breaking out, with entry/stop/target, an inline chart and a past-data accuracy table ===== */
