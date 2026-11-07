@@ -4715,11 +4715,13 @@ const n5Paint = () => n5Api.open();
 const stApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
   const CFG = {ladder: [[8, 2], [15, 2], [22, 2]], filt: [20, 3], confirm: 2, adv: 1, warm: 30, ema: 200};
-  let F = {view: "sig", q: "", sort: "since", dir: -1, shown: 100, cost: 0.1, v: 2, ema: true};
+  let F = {view: "sig", q: "", sort: "since", dir: -1, shown: 100, cost: 0.1, v: 2, ema: true, flt: {}, xit: "base"};
   try { const sv = JSON.parse(localStorage.getItem("stF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 100}); } catch (e) {}
   if (F.v !== 2) { F.sort = "since"; F.dir = -1; F.v = 2; }
+  F.flt = F.flt || {}; F.xit = XIT_OK(F.xit) ? F.xit : "base";
   const save = () => { try { localStorage.setItem("stF", JSON.stringify(F)); } catch (e) {} };
   const B = {}, STAT = {t: 0, busy: false, done: 0, total: 0, fail: 0, err: ""}; let built = false, PT = null, RES = null, BT = null, OPEN = null, TF = "15", PN = null, CH = null, LONGTF = true;
+  function XIT_OK(k) { return ["base", "xfilt", "xfast", "sq", "tgt15", "tgt2", "trail", "time12"].indexOf(k) >= 0; }
   const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
   const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
   const sg = (v, d = 2) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) : "-");
@@ -4751,11 +4753,115 @@ const stApi = (function () {
   /* The signal is decided on closed bars only, so drop a bar that is still forming */
   function closedOnly(b, mins) { const nowIst = Date.now() / 1000 + 19800; let n = b.length; while (n && typeof b[n - 1].time === "number" && b[n - 1].time + mins * 60 > nowIst) n--; return n === b.length ? b : b.slice(0, n); }
   /* Replay the rules bar by bar. Signals are decided at a bar's close; trades fill at the next bar's open. */
+  /* ---- indicators for the optional filters ---- */
+  function rsiArr(b, n) {
+    const N = b.length, o = new Array(N).fill(NaN); if (N <= n) return o; let ag = 0, al = 0;
+    for (let i = 1; i <= n; i++) { const d = b[i].close - b[i - 1].close; ag += Math.max(d, 0); al += Math.max(-d, 0); } ag /= n; al /= n; o[n] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
+    for (let i = n + 1; i < N; i++) { const d = b[i].close - b[i - 1].close; ag = (ag * (n - 1) + Math.max(d, 0)) / n; al = (al * (n - 1) + Math.max(-d, 0)) / n; o[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al); }
+    return o;
+  }
+  function trOf(b, i) { const pc = i ? b[i - 1].close : b[i].close; return Math.max(b[i].high - b[i].low, Math.abs(b[i].high - pc), Math.abs(b[i].low - pc)); }
+  function atrArr(b, n) { const N = b.length, o = new Array(N).fill(NaN); if (N < n) return o; let a = 0; for (let i = 0; i < n; i++) a += trOf(b, i); a /= n; o[n - 1] = a; for (let i = n; i < N; i++) { a = (a * (n - 1) + trOf(b, i)) / n; o[i] = a; } return o; }
+  function adxArr(b, n) {
+    const N = b.length, o = new Array(N).fill(NaN); if (N < 2 * n + 2) return o; let tr = 0, pd = 0, md = 0; const dx = [];
+    for (let i = 1; i <= n; i++) { const up = b[i].high - b[i - 1].high, dn = b[i - 1].low - b[i].low; tr += trOf(b, i); pd += up > dn && up > 0 ? up : 0; md += dn > up && dn > 0 ? dn : 0; }
+    const dxv = () => { const p = 100 * pd / tr, m = 100 * md / tr; return p + m === 0 ? 0 : 100 * Math.abs(p - m) / (p + m); };
+    dx[n] = dxv(); let adx = NaN;
+    for (let i = n + 1; i < N; i++) { const up = b[i].high - b[i - 1].high, dn = b[i - 1].low - b[i].low; tr = tr - tr / n + trOf(b, i); pd = pd - pd / n + (up > dn && up > 0 ? up : 0); md = md - md / n + (dn > up && dn > 0 ? dn : 0); dx[i] = dxv();
+      if (i === 2 * n - 1) { let s = 0; for (let k = n; k <= 2 * n - 1; k++) s += dx[k]; adx = s / n; o[i] = adx; } else if (i > 2 * n - 1) { adx = (adx * (n - 1) + dx[i]) / n; o[i] = adx; } }
+    return o;
+  }
+  function vwapArr(b) { const o = new Array(b.length).fill(NaN); let d = null, pv = 0, v = 0; b.forEach((x, i) => { const dd = Math.floor(x.time / 86400); if (dd !== d) { d = dd; pv = 0; v = 0; } const vol = x.vol || 0; pv += (x.high + x.low + x.close) / 3 * vol; v += vol; o[i] = v > 0 ? pv / v : NaN; }); return o; }
+  function chgArr(b) { const o = new Array(b.length).fill(NaN); let d = null, pc = NaN, lc = NaN; b.forEach((x, i) => { const dd = Math.floor(x.time / 86400); if (dd !== d) { pc = lc; d = dd; } o[i] = isFinite(pc) ? (x.close / pc - 1) * 100 : NaN; lc = x.close; }); return o; }
+  /* Nifty's move since the previous close, by bar time, for the "Nifty agrees" filters */
+  let NFK = "", NFM = null;
+  function niftyMap() {
+    const nb = B.NIFTY && B.NIFTY.bars ? closedOnly(B.NIFTY.bars, 15) : null; if (!nb || !nb.length) return null;
+    const k = nb.length + "|" + nb[nb.length - 1].time; if (k === NFK) return NFM;
+    const c = chgArr(nb), m = new Map(); nb.forEach((x, i) => m.set(x.time, c[i])); NFK = k; NFM = m; return m;
+  }
+  /* Fundamentals from pead.csv: a reduced Durability / Valuation score (no cash-flow data, so not the full DVM) */
+  const FUND = {}; let FUND_STATE = "";
+  const nz = x => { const v = parseFloat(x); return isFinite(v) ? v : NaN; };
+  function fundOf(r) {
+    const revY = nz(r.rev_yoy), npY = nz(r.np_yoy), ebY = nz(r.ebitda_yoy), eq = nz(r.equity), debt = nz(r.debt), npT = nz(r.np_ttm), rc = nz(r.rev_cur), nc = nz(r.np_cur), pe = nz(r.pe), px = nz(r.price), bv = nz(r.bvps), cl = (v, a, b) => Math.min(b, Math.max(a, v));
+    let d = 0, mx = 0;
+    if (isFinite(revY) && isFinite(npY)) { d += cl((cl(revY, -20, 60) + cl(npY, -20, 60)) / 2, 0, 40) / 40 * 20; mx += 20; }
+    const ps = [revY, npY, ebY].filter(isFinite); if (ps.length) { d += ps.filter(x => x > 0).length / ps.length * 15; mx += 15; }
+    if (isFinite(debt) && isFinite(eq) && eq > 0) { const de = debt / eq; d += de < 0.25 ? 10 : de < 0.5 ? 8 : de < 1 ? 5 : de < 1.5 ? 2 : 0; mx += 10; }
+    if (isFinite(npT) && isFinite(eq) && eq > 0) { const roe = npT / eq * 100; d += roe >= 20 ? 20 : roe >= 15 ? 16 : roe >= 10 ? 11 : roe >= 5 ? 6 : roe >= 0 ? 2 : 0; mx += 20; }
+    if (isFinite(nc) && isFinite(rc) && rc > 0) { const m = nc / rc * 100; d += m >= 30 ? 20 : m >= 20 ? 16 : m >= 12 ? 11 : m >= 6 ? 6 : m > 0 ? 3 : 0; mx += 20; }
+    let V = NaN; if (pe > 0) { const fpe = cl(75.2 - 20.3 * Math.log10(pe), 0, 100), pb = px > 0 && bv > 0 ? px / bv : NaN; V = pb > 0 ? 0.7 * fpe + 0.3 * cl(60 - 28 * Math.log10(pb), 0, 100) : fpe; } else if (isFinite(pe)) V = 10;
+    return {D: mx >= 45 ? d / mx * 100 : NaN, V};
+  }
+  async function loadFund() {
+    if (FUND_STATE === "ok" || FUND_STATE === "loading") return; FUND_STATE = "loading";
+    try { const r = await fetch(PEAD_CSV_DIRECT + "?t=" + Math.floor(Date.now() / 6e5), {cache: "no-store"}); if (!r.ok) throw new Error("HTTP " + r.status); const tab = parseCSV(await r.text()), hd = tab[0] || []; tab.slice(1).map(a => { const o = {}; hd.forEach((k, i) => { o[k] = a[i]; }); return o; }).forEach(x => { const sy = String(x.ticker || "").replace(/^[A-Z]+:/, "").toUpperCase(); if (sy) FUND[sy] = fundOf(x); }); FUND_STATE = "ok"; } catch (e) { FUND_STATE = "error"; }
+  }
+  /* Daily candles, used point-in-time for the DVM momentum score */
+  const DB = {}; let DB_STATE = "";
+  async function loadDaily() {
+    if (DB_STATE === "loading") return; const need = Object.keys(B).filter(sy => !DB[sy]); if (!need.length || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) { DB_STATE = "ok"; return; }
+    DB_STATE = "loading"; const chunks = []; for (let i = 0; i < need.length; i += 12) chunks.push(need.slice(i, i + 12)); let nx = 0;
+    const run = async () => { while (nx < chunks.length) { const ch = chunks[nx++]; try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=D", {cache: "no-store"}), j = await r.json(); Object.keys(j.bars || {}).forEach(sy => { DB[sy] = j.bars[sy].map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0})); }); } catch (e) {} } };
+    await Promise.all([run(), run(), run()]); DB_STATE = "ok";
+  }
+  const dstr = t => new Date(t * 1000).toISOString().slice(0, 10);
+  function buildCtx(sym, b) {
+    const c = {rsi: rsiArr(b, 14), adx: adxArr(b, 14), atr: atrArr(b, 14), vw: vwapArr(b), chg: chgArr(b), isIdx: !!ZN_IDXN[sym]}, nm = niftyMap();
+    c.nc = nm && sym !== "NIFTY" ? b.map(x => (nm.has(x.time) ? nm.get(x.time) : NaN)) : b.map(() => NaN);
+    const f = FUND[sym] || {}; c.D = f.D; c.V = f.V; c.dvm = null;
+    if (DB[sym] && DB[sym].length >= 60) { const cache = {}; c.dvm = b.map(x => { const ds = dstr(x.time); if (!(ds in cache)) { const hist = DB[sym].filter(y => y.time < ds), M = dvmMomentum(hist); cache[ds] = M ? M.score : NaN; } return cache[ds]; }); }
+    return c;
+  }
+  /* The optional filters. key, label, options handed to the replay */
+  const FLT = [
+    ["w30", "Skip the first 30 minutes", {win30: true}],
+    ["late", "No entries after 14:30", {late: true}],
+    ["rsiMom", "RSI agrees (LONG 55+, SHORT 45 or less)", {rsiMom: true}],
+    ["rsiOk", "RSI not stretched (LONG 70 or less, SHORT 30+)", {rsiOk: true}],
+    ["adx", "Trend strength: ADX 20+", {adx: 20}],
+    ["vwap", "Right side of VWAP", {vwap: true}],
+    ["nifty", "Nifty agrees", {nifty: true}],
+    ["rs", "Stronger (LONG) or weaker (SHORT) than Nifty", {rs: true}],
+    ["atr", "Moves enough: ATR 0.3% or more", {atr: 0.3}],
+    ["dvmM", "DVM momentum agrees (LONG 55+, SHORT 45 or less)", {dvmM: true}],
+    ["dvmF", "DVM fundamentals agree (LONG: durability 50+, valuation 30+)", {dvmF: true}]
+  ];
+  const XIT = {base: ["Standard exits", null], xfilt: ["Exit only when the filter flips", {xfilt: true}], xfast: ["Exit when the fast line (8) flips", {xfast: true}], sq: ["Close at the end of the day", {sq: true}], tgt15: ["Slow-line stop, target 1.5R", {tgt: 1.5}], tgt2: ["Slow-line stop, target 2R", {tgt: 2}], trail: ["Trail 2.5 ATR from the best close", {trail: 2.5}], time12: ["Time stop: 12 bars (3 hours)", {maxBars: 12}]};
+  const needCtx = o => !!(o.rsiMom || o.rsiOk || o.adx || o.vwap || o.nifty || o.rs || o.atr || o.dvmM || o.dvmF || o.trail);
+  const CTXC = {};
+  function ctxFor(sym, bars) { const k = bars.length + "|" + (bars[bars.length - 1] || {}).time + "|" + FUND_STATE + DB_STATE + (DB[sym] ? 1 : 0); let c = CTXC[sym]; if (!c || c.k !== k) { c = buildCtx(sym, bars); c.k = k; CTXC[sym] = c; } return c; }
+  function liveOpt(sym, bars) {
+    const o = {}; FLT.forEach(f => { if (F.flt && F.flt[f[0]]) Object.assign(o, f[2]); }); const x = XIT[F.xit || "base"]; if (x && x[1]) Object.assign(o, x[1]);
+    if (needCtx(o)) o.ctx = ctxFor(sym, bars); return o;
+  }
+  const STC = new WeakMap();
+  /* Replay the rules bar by bar. Signals are decided at a bar's close; trades fill at the next bar's open. opt holds the optional filters and exit rules. */
   function replay(bars, opt) {
-    opt = opt || {}; const useEma = opt.ema !== undefined ? opt.ema : F.ema, tod = i => (bars[i].time % 86400) / 60, day = i => Math.floor(bars[i].time / 86400);
-    const N = bars.length, L = CFG.ladder.map(x => superTrend(bars, x[0], x[1])), fl = superTrend(bars, CFG.filt[0], CFG.filt[1]), em = useEma ? emaArr(bars, CFG.ema) : null;
+    opt = opt || {}; const useEma = opt.ema !== undefined ? opt.ema : F.ema, tod = i => (bars[i].time % 86400) / 60, day = i => Math.floor(bars[i].time / 86400), cx = opt.ctx || null;
+    const N = bars.length; let sc = STC.get(bars); if (!sc) { sc = {L: CFG.ladder.map(x => superTrend(bars, x[0], x[1])), fl: superTrend(bars, CFG.filt[0], CFG.filt[1]), em: emaArr(bars, CFG.ema)}; STC.set(bars, sc); }
+    const L = sc.L, fl = sc.fl, em = useEma ? sc.em : null;
     const out = {n: N, trades: [], cur: null, emaApprox: !!em && N < CFG.ema};
     if (N < CFG.warm + 5) return out;
+    const block = (i, prop) => {
+      if (opt.win30 && tod(i) < 585) return "first 30 minutes";
+      if (opt.late && tod(i) >= 870) return "after 14:30";
+      if (opt.sq && i + 1 < N && day(i + 1) !== day(i)) return "end of the day";
+      if (!cx) return "";
+      const c = bars[i].close, r = cx.rsi[i], a = cx.adx[i], v = cx.vw[i], n = cx.nc[i], s = cx.chg[i], t = cx.atr[i], m = cx.dvm ? cx.dvm[i] : NaN;
+      if (opt.rsiMom && isFinite(r) && (prop === 1 ? r < 55 : r > 45)) return "RSI " + r.toFixed(0);
+      if (opt.rsiOk && isFinite(r) && (prop === 1 ? r > 70 : r < 30)) return "RSI stretched " + r.toFixed(0);
+      if (opt.adx && isFinite(a) && a < opt.adx) return "ADX " + a.toFixed(0);
+      if (opt.vwap && isFinite(v) && (prop === 1 ? c <= v : c >= v)) return "wrong side of VWAP";
+      if (opt.nifty && isFinite(n) && (prop === 1 ? n <= 0 : n >= 0)) return "Nifty disagrees";
+      if (opt.rs && isFinite(n) && isFinite(s) && (prop === 1 ? s <= n : s >= n)) return "relative strength";
+      if (opt.atr && isFinite(t) && t / c * 100 < opt.atr) return "too quiet";
+      if (opt.dvmM && isFinite(m) && (prop === 1 ? m < 55 : m > 45)) return "DVM momentum " + m.toFixed(0);
+      if (opt.dvmF) { if (prop === 1 ? ((isFinite(cx.D) && cx.D < 50) || (isFinite(cx.V) && cx.V < 30)) : (isFinite(cx.D) && cx.D >= 50)) return "DVM fundamentals"; }
+      return "";
+    };
+    const closeTrade = (i, xi, xp) => { out.trades.push({side: pos, ei: e.i, xi, ep: e.p, xp, ret: pos * (xp / e.p - 1) * 100, bars: xi - e.i, t: bars[e.i].time}); pos = 0; e = null; };
     let pos = 0, e = null, last = null;
     for (let i = CFG.warm; i < N; i++) {
       const dr = L.map(s => s.dir[i]); if (dr.some(d => !d) || !fl.dir[i]) continue;
@@ -4765,23 +4871,26 @@ const stApi = (function () {
       const eok = !em ? true : (prop === 1 ? bars[i].close > em[i] : bars[i].close < em[i]);
       let gate;
       if (pos) gate = "in position"; else if (fd !== prop) gate = "BLOCKED wrong regime"; else if (!fa) gate = "WAITING filter not advancing"; else if (!eok) gate = "BLOCKED by " + CFG.ema + " EMA"; else if (!conf) gate = "WAITING confirm"; else gate = "OK";
-      /* extra rules, used only by the signal quality lab */
-      let vok = true;
-      if (!pos && (opt.v3 || opt.noOpen || opt.noLate || opt.rv || opt.risk || opt.sq)) {
-        if (opt.v3 && up !== 3 && up !== 0) vok = false;
-        if (opt.noOpen && tod(i) < 555 + opt.noOpen) vok = false;
-        if (opt.noLate && tod(i) >= opt.noLate) vok = false;
-        if (opt.sq && i + 1 < N && day(i + 1) !== day(i)) vok = false;
-        if (opt.rv && i >= 21) { let sv = 0; for (let k = i - 20; k < i; k++) sv += bars[k].vol || 0; if (!(sv > 0 && (bars[i].vol || 0) >= opt.rv * sv / 20)) vok = false; }
-        if (opt.risk && !(Math.abs(bars[i].close - L[2].line[i]) / bars[i].close * 100 <= opt.risk)) vok = false;
+      if (!pos && gate === "OK") { const bk = block(i, prop); if (bk) gate = "BLOCKED by filter: " + bk; }
+      /* exits that act inside a bar: fixed stop and target from the slow line */
+      if (pos && e.i <= i) {
+        if (opt.tgt && e.stop0) {
+          const b = bars[i], R = Math.abs(e.p - e.stop0), tg = e.p + pos * opt.tgt * R;
+          if (pos === 1 ? b.low <= e.stop0 : b.high >= e.stop0) { closeTrade(i, i, pos === 1 ? Math.min(b.open, e.stop0) : Math.max(b.open, e.stop0)); last = {i, up, prop, conf, fd, fa, gate: "stopped out", dr}; continue; }
+          if (pos === 1 ? b.high >= tg : b.low <= tg) { closeTrade(i, i, pos === 1 ? Math.max(b.open, tg) : Math.min(b.open, tg)); last = {i, up, prop, conf, fd, fa, gate: "target reached", dr}; continue; }
+        }
+        if (opt.trail && cx && isFinite(cx.atr[i])) { e.best = pos === 1 ? Math.max(e.best, bars[i].close) : Math.min(e.best, bars[i].close); }
       }
-      if (pos && opt.sq && i + 1 < N && day(i + 1) !== day(i)) {
-        const xp = bars[i].close; out.trades.push({side: pos, ei: e.i, xi: i, ep: e.p, xp, ret: pos * (xp / e.p - 1) * 100, bars: i - e.i, t: bars[e.i].time}); pos = 0; e = null; last = {i, up, prop, conf, fd, fa, gate: "closed for the day", dr}; continue;
-      }
+      if (pos && opt.sq && i + 1 < N && day(i + 1) !== day(i)) { closeTrade(i, i, bars[i].close); last = {i, up, prop, conf, fd, fa, gate: "closed for the day", dr}; continue; }
       if (pos) {
-        const exit = fd !== pos || prop !== pos || (opt.slow && L[2].dir[i] !== pos);
-        if (exit && i + 1 < N) { const xp = bars[i + 1].open; out.trades.push({side: pos, ei: e.i, xi: i + 1, ep: e.p, xp, ret: pos * (xp / e.p - 1) * 100, bars: i + 1 - e.i, t: bars[e.i].time}); pos = 0; e = null; }
-      } else if (gate === "OK" && vok && i + 1 < N) { pos = prop; e = {i: i + 1, p: bars[i + 1].open, sig: i}; }
+        let exit = fd !== pos || (!opt.xfilt && prop !== pos);
+        if (opt.xfast && L[0].dir[i] !== pos) exit = true;
+        if (opt.trail && cx && isFinite(cx.atr[i]) && (pos === 1 ? bars[i].close < e.best - opt.trail * cx.atr[i] : bars[i].close > e.best + opt.trail * cx.atr[i])) exit = true;
+        if (opt.maxBars && i - e.i + 1 >= opt.maxBars) exit = true;
+        if (exit && i + 1 < N) closeTrade(i, i + 1, bars[i + 1].open);
+      } else if (gate === "OK" && i + 1 < N) {
+        pos = prop; e = {i: i + 1, p: bars[i + 1].open, sig: i, best: bars[i].close}; const s0 = L[2].line[i]; if (isFinite(s0) && (prop === 1 ? s0 < e.p : s0 > e.p)) e.stop0 = s0;
+      }
       last = {i, up, prop, conf, fd, fa, gate: pos && gate === "OK" ? "in position" : gate, dr};
     }
     if (pos && e) {
@@ -4789,46 +4898,79 @@ const stApi = (function () {
       out.cur = {side: pos, since: bars[e.sig].time, bars: N - 1 - e.sig, entry: bars[e.sig].close, fill: e.p, pl: pos * (c / bars[e.sig].close - 1) * 100, stop: lastSt, risk: isFinite(lastSt) ? Math.abs(c - lastSt) / c * 100 : NaN};
     }
     out.last = last; out.close = bars[N - 1].close; out.t = bars[N - 1].time; out.fline = fl.line[N - 1];
-    if (out.cur === null && last && !pos && last.i === N - 1) out.cur = null;
     return out;
   }
-  /* ---- signal quality lab: re-runs the rules with one extra filter at a time and compares the results ---- */
+  /* ---- signal quality lab: one rule at a time against the baseline, with a check for luck ---- */
   const LAB = [
-    ["Current rules (baseline)", {}],
-    ["Without the 200 EMA filter", {ema: false}],
-    ["Only when all 3 lines agree (3/0 or 0/3)", {v3: true}],
-    ["Skip signals in the first 30 minutes", {noOpen: 30}],
-    ["No new entries after 14:30", {noLate: 870}],
-    ["Intraday only: close the trade at the end of the day", {sq: true}],
-    ["Signal bar volume at least 1.2 times the 20-bar average", {rv: 1.2}],
-    ["Stop (slow line) no more than 1.5% away", {risk: 1.5}],
-    ["Also exit when the slow line (22) flips", {slow: true}],
-    ["Intraday set: skip first 30 min, none after 14:30, close at day end", {noOpen: 30, noLate: 870, sq: true}],
-    ["Intraday set plus volume 1.2 and all 3 lines agree", {noOpen: 30, noLate: 870, sq: true, rv: 1.2, v3: true}]
+    ["Baseline: standard entries and exits", null, {}],
+    ["Entry timing", "h"],
+    ["Skip signals in the first 30 minutes", "e", {win30: true}],
+    ["No new entries after 14:30", "e", {late: true}],
+    ["Both: only 09:45 to 14:30", "e", {win30: true, late: true}],
+    ["Exits", "h"],
+    ["Exit only when the filter flips (ignore vote flips)", "x", {xfilt: true}],
+    ["Exit when the fast line (8) flips", "x", {xfast: true}],
+    ["Close at the end of the day", "x", {sq: true}],
+    ["Slow-line stop, target 1.5R", "x", {tgt: 1.5}],
+    ["Slow-line stop, target 2R", "x", {tgt: 2}],
+    ["Trail 2.5 ATR from the best close", "x", {trail: 2.5}],
+    ["Time stop after 12 bars (3 hours)", "x", {maxBars: 12}],
+    ["Entry filters", "h"],
+    ["RSI agrees (LONG 55+, SHORT 45 or less)", "e", {rsiMom: true}],
+    ["RSI not stretched (LONG 70 or less, SHORT 30+)", "e", {rsiOk: true}],
+    ["ADX 20 or more (trending)", "e", {adx: 20}],
+    ["ADX 25 or more", "e", {adx: 25}],
+    ["Right side of the day's VWAP", "e", {vwap: true}],
+    ["Nifty agrees (its move since yesterday's close)", "e", {nifty: true}],
+    ["Stronger / weaker than Nifty today", "e", {rs: true}],
+    ["ATR at least 0.3% of price (enough movement)", "e", {atr: 0.3}],
+    ["DVM momentum agrees (LONG 55+, SHORT 45 or less)", "e", {dvmM: true}],
+    ["DVM fundamentals agree (LONG: durability 50+, valuation 30+)", "e", {dvmF: true}]
   ];
-  let LABRES = "";
-  function runLab() {
-    const syms = Object.keys(B).filter(sy => B[sy].bars && B[sy].bars.length > CFG.warm + 5);
-    if (!syms.length) { LABRES = '<p class="note">No 15-minute data loaded yet.</p>'; return; }
-    const data = syms.map(sy => closedOnly(B[sy].bars, 15)), res = LAB.map(v => { const ts = []; data.forEach(b => { replay(b, v[1]).trades.forEach(t => ts.push(t)); }); return ts; });
-    const base = res[0], cut = base.length ? base.map(t => t.t).sort((a, b) => a - b)[base.length >> 1] : 0;
-    const half = (ts, a) => { const q = ts.filter(t => (a ? t.t < cut : t.t >= cut)).map(t => t.ret - F.cost); return q.length >= 5 ? q.reduce((x, y) => x + y, 0) / q.length : NaN; };
-    const bs = stats(base), b1 = half(base, 1), b2 = half(base, 0), days = data.length ? Math.round(data.reduce((a, b) => a + b.length, 0) / data.length / 25) : 0;
-    let h = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule set</th><th class="num">Trades</th><th class="num">Win rate</th><th class="num">Avg net %</th><th class="num">Median net %</th><th class="num">Profit factor</th><th class="num">Earlier half avg %</th><th class="num">Later half avg %</th><th>Verdict</th></tr></thead><tbody>';
-    LAB.forEach((v, i) => {
-      const s2 = stats(res[i]); if (!s2) { h += "<tr><td>" + v[0] + '</td><td colspan="8" style="color:var(--mute)">No trades</td></tr>'; return; }
-      const a = half(res[i], 1), c = half(res[i], 0);
-      let verdict = "baseline"; if (i) { const better = bs && s2.net > bs.net, both = isFinite(a) && isFinite(c) && isFinite(b1) && isFinite(b2) && a > b1 && c > b2, enough = s2.n >= bs.n * 0.3; verdict = better && both && enough ? "better in both halves" : better && enough ? "better overall, not in both halves" : better ? "better but few trades" : "no improvement"; }
-      h += "<tr" + (i === 0 ? ' style="background:color-mix(in srgb,var(--a) 8%,var(--card))"' : "") + "><td>" + v[0] + '</td><td class="num">' + s2.n + '</td><td class="num">' + s2.win.toFixed(0) + '%</td><td class="num" style="' + col(s2.net) + '"><b>' + sg(s2.net) + '</b></td><td class="num">' + sg(s2.med) + '</td><td class="num">' + (isFinite(s2.pf) ? s2.pf.toFixed(2) : "-") + '</td><td class="num">' + sg(a) + '</td><td class="num">' + sg(c) + '</td><td style="font-size:.82rem;' + (verdict === "better in both halves" ? "color:var(--good);font-weight:700" : "color:var(--mute)") + '">' + verdict + "</td></tr>";
-    });
-    h += '</tbody></table></div><p class="note" style="margin:8px 0 0">Based on about ' + days + " trading days of 15-minute candles for " + syms.length + " stocks, costs of " + F.cost + "% per trade included. The data is split at the middle trade date into an earlier and a later half. Only trust a rule that is better in both halves and still keeps a good share of the trades. With this little history, a rule that wins by a small margin is probably luck.</p>";
-    LABRES = h;
+  let LABRES = "", LAB_SOLID = null, LABBUSY = false;
+  const meanSd = a => { const n = a.length, m = a.reduce((x, y) => x + y, 0) / n; return {m, sd: n > 1 ? Math.sqrt(a.reduce((x, y) => x + (y - m) * (y - m), 0) / (n - 1)) : NaN}; };
+  async function runLab() {
+    if (LABBUSY) return; LABBUSY = true; const box = () => $e("#stlabres");
+    try {
+      const syms = Object.keys(B).filter(sy => B[sy].bars && B[sy].bars.length > CFG.warm + 5);
+      if (!syms.length) { LABRES = '<p class="note">No 15-minute data loaded yet.</p>'; return; }
+      if (box()) box().innerHTML = '<p class="note">Loading daily candles and fundamentals for the DVM filters...</p>';
+      await Promise.all([loadFund(), loadDaily()]);
+      if (box()) box().innerHTML = '<p class="note">Running the tests...</p>'; await new Promise(r => setTimeout(r, 30));
+      const data = syms.map(sy => closedOnly(B[sy].bars, 15)), ctxs = syms.map((sy, i) => buildCtx(sy, data[i]));
+      const run = o => { const ts = []; data.forEach((b, i) => { replay(b, Object.assign({ctx: ctxs[i]}, o)).trades.forEach(t => ts.push(t)); }); return ts; };
+      const rows = LAB.filter(v => v[1] !== "h").map(v => ({name: v[0], kind: v[1], opt: v[2]})), res = rows.map(r => run(r.opt));
+      const base = res[0], cut = base.length ? base.map(t => t.t).sort((a, b) => a - b)[base.length >> 1] : 0;
+      const net = ts => ts.map(t => t.ret - F.cost), half = (ts, a) => { const q = net(ts.filter(t => (a ? t.t < cut : t.t >= cut))); return q.length >= 5 ? meanSd(q).m : NaN; };
+      const b0 = meanSd(net(base)), b1 = half(base, 1), b2 = half(base, 0), n0 = base.length;
+      const verdictOf = (ts, i) => { const q = net(ts), s = meanSd(q), z = (s.m - b0.m) / Math.sqrt(s.sd * s.sd / q.length + b0.sd * b0.sd / n0), a = half(ts, 1), c = half(ts, 0);
+        const better = s.m > b0.m, both = isFinite(a) && isFinite(c) && a > b1 && c > b2, enough = q.length >= n0 * 0.3;
+        return {s, z, a, c, v: i === 0 ? "baseline" : better && z >= 2.5 && both && enough ? "solid" : better && z >= 1.5 && enough ? "maybe" : "no"}; };
+      const info = rows.map((r, i) => Object.assign({n: res[i].length, st: stats(res[i])}, res[i].length > 5 ? verdictOf(res[i], i) : {v: "few trades"}));
+      /* the solid entry filters together with the best solid exit */
+      const solidE = rows.filter((r, i) => r.kind === "e" && info[i].v === "solid"), solidX = rows.map((r, i) => [r, info[i]]).filter(x => x[0].kind === "x" && x[1].v === "solid").sort((a, b) => b[1].s.m - a[1].s.m);
+      let comb = null;
+      if (solidE.length || solidX.length) { const o = {}; solidE.forEach(r => Object.assign(o, r.opt)); if (solidX.length) Object.assign(o, solidX[0][0].opt); const ts = run(o); comb = {opt: o, n: ts.length, st: stats(ts), ts, names: solidE.map(r => r.name).concat(solidX.length ? [solidX[0][0].name] : [])}; if (ts.length > 5) Object.assign(comb, verdictOf(ts, 1)); }
+      LAB_SOLID = comb ? comb.opt : null;
+      const f2s = (x, d) => (isFinite(x) ? (x > 0 ? "+" : "") + x.toFixed(d || 2) : "-"), days = Math.round(data.reduce((a, b) => a + b.length, 0) / data.length / 25);
+      const vtxt = {baseline: "baseline", solid: "solid improvement", maybe: "better, could be luck", no: "no improvement", "few trades": "too few trades"};
+      const rowHTML = (name, n, st, ci, a, c, z, v, hi) => "<tr" + (hi ? ' style="background:color-mix(in srgb,var(--a) 8%,var(--card))"' : "") + "><td>" + name + '</td><td class="num">' + n + '</td><td class="num">' + (st ? st.win.toFixed(0) + "%" : "-") + '</td><td class="num" style="' + (st ? col(st.net) : "") + '"><b>' + (st ? f2s(st.net) : "-") + '</b> <small style="color:var(--mute)">' + (isFinite(ci) ? "&plusmn;" + ci.toFixed(2) : "") + '</small></td><td class="num">' + (st ? f2s(st.med) : "-") + '</td><td class="num">' + (st && isFinite(st.pf) ? st.pf.toFixed(2) : "-") + '</td><td class="num">' + f2s(a) + '</td><td class="num">' + f2s(c) + '</td><td class="num">' + (isFinite(z) ? f2s(z, 1) : "-") + '</td><td style="font-size:.82rem;' + (v === "solid" ? "color:var(--good);font-weight:700" : v === "maybe" ? "color:var(--warn,#b45309)" : "color:var(--mute)") + '">' + (vtxt[v] || v) + "</td></tr>";
+      let h = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule</th><th class="num">Trades</th><th class="num">Win</th><th class="num">Avg net % (&plusmn; range)</th><th class="num">Median %</th><th class="num">PF</th><th class="num">Earlier half</th><th class="num">Later half</th><th class="num">vs baseline (z)</th><th>Verdict</th></tr></thead><tbody>', ri = 0;
+      LAB.forEach(v => { if (v[1] === "h") { h += '<tr><td colspan="10" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">' + v[0] + "</td></tr>"; return; } const x = info[ri], st = x.st; h += rowHTML(v[0], x.n, st, x.s ? 1.96 * x.s.sd / Math.sqrt(x.n) : NaN, ri === 0 ? b1 : x.a, ri === 0 ? b2 : x.c, ri === 0 ? NaN : x.z, x.v, ri === 0); ri++; });
+      if (comb) h += '<tr><td colspan="10" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">All solid improvements together</td></tr>' + rowHTML(comb.names.join(" + "), comb.n, comb.st, comb.s ? 1.96 * comb.s.sd / Math.sqrt(comb.n) : NaN, comb.a, comb.c, comb.z, comb.v || "few trades", true);
+      h += "</tbody></table></div>";
+      const e0 = 1.96 * b0.sd / Math.sqrt(n0);
+      h += '<p class="note" style="margin:8px 0 0"><b>Baseline edge:</b> ' + f2s(b0.m) + "% per trade (&plusmn;" + e0.toFixed(2) + "), which is " + (Math.abs(b0.m) <= e0 ? "not different from zero" : b0.m > 0 ? "above zero" : "below zero") + ". " + (comb ? "" : "<b>No rule clearly beats the baseline.</b> ") + "Based on about " + days + " trading days of 15-minute candles for " + syms.length + " stocks, with " + F.cost + "% cost per trade. &quot;z&quot; compares each rule with the baseline: 2.5 or more, better in both halves and at least 30% of the trades makes it &quot;solid&quot;. About " + (rows.length - 1) + " rules are tested at once, so one or two can look good by pure luck; trust solid rules that also make sense (for example RSI and VWAP agreeing with the trade direction). The fundamental and DVM rows use today's fundamentals, which is a small look-ahead; they are not the full Trendlyne DVM (no cash-flow data).</p>";
+      if (comb) h += '<div style="margin-top:8px"><button type="button" class="cbtn" data-stapply="1">Use the solid rules as live filters</button> <span class="note" style="margin:0">Turns them on in the filter row above and re-runs the screener</span></div>';
+      LABRES = h;
+    } catch (e) { LABRES = '<p class="note">The lab could not run: ' + E(String((e && e.message) || e)) + "</p>"; }
+    finally { LABBUSY = false; if (box()) box().innerHTML = LABRES; }
   }
   function compute() {
     const rows = [], trades = [], lens = [];
     Object.keys(B).forEach(sym => {
       const bars = closedOnly(B[sym].bars || [], 15); if (!bars || bars.length < CFG.warm + 5) return; lens.push(bars.length);
-      const r = replay(bars); r.trades.forEach(t => { t.sym = sym; trades.push(t); });
+      const r = replay(bars, liveOpt(sym, bars)); r.trades.forEach(t => { t.sym = sym; trades.push(t); });
       if (!r.last) return;
       rows.push({sym, close: r.close, t: r.t, cur: r.cur, last: r.last, n: r.n, nt: r.trades.length, fline: r.fline, ea: r.emaApprox});
     });
@@ -4891,7 +5033,7 @@ const stApi = (function () {
     /* entries and exits from the same rules, and the open position's stop */
     let cur = null;
     try {
-      const R = replay(b), mk = []; cur = R.cur;
+      const R = replay(b, liveOpt(sym, b)), mk = []; cur = R.cur;
       R.trades.slice(-30).forEach(t => { mk.push({time: b[t.ei].time, position: t.side === 1 ? "belowBar" : "aboveBar", color: t.side === 1 ? c.up : c.dn, shape: t.side === 1 ? "arrowUp" : "arrowDown", text: t.side === 1 ? "L" : "S"}); mk.push({time: b[t.xi].time, position: t.side === 1 ? "aboveBar" : "belowBar", color: "#64748b", shape: "circle", text: sg(t.ret, 1) + "%"}); });
       if (R.cur) { const sig = b.length - 1 - R.cur.bars; if (sig >= 0 && sig < b.length - 1 + 1) mk.push({time: b[sig].time, position: R.cur.side === 1 ? "belowBar" : "aboveBar", color: R.cur.side === 1 ? c.up : c.dn, shape: R.cur.side === 1 ? "arrowUp" : "arrowDown", text: R.cur.side === 1 ? "LONG" : "SHORT"}); }
       mk.sort((x, y) => (x.time < y.time ? -1 : x.time > y.time ? 1 : 0)); candle.setMarkers(mk);
@@ -4951,13 +5093,15 @@ const stApi = (function () {
   function build() {
     const host = document.getElementById("stbody"); if (!host || built) return; built = true;
     host.innerHTML = '<div class="znhead" style="background:linear-gradient(120deg,#0e7490,#1d4ed8)"><div><h2>SUPERTREND SCREENER</h2><span>Three SuperTrends vote on 15-minute bars, a slower SuperTrend must agree</span></div><div class="znpills"><span>8 / 15 / 22 at 2.0</span><span>Filter 20 at 3.0</span><span>Indices + ~200 F&amp;O stocks</span></div></div>' +
-      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 10px">' + VIEWS.map(v => '<button type="button" class="cbtn" data-stv="' + v[0] + '">' + v[1] + "</button>").join("") + '<label title="As in the Ostri Pine script: longs only above the 200 EMA, shorts only below it"><input type="checkbox" id="stema"' + (F.ema ? " checked" : "") + '> 200 EMA filter</label><label>Search <input id="stq" type="search" placeholder="symbol" style="width:110px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="strl">&#8635; Reload</button></div><div class="note" id="ststat" style="margin:8px 0 0"></div>' +
-      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">How the signal works</summary><p class="note" style="margin:6px 0 0">Three SuperTrends (ATR 8, 15, 22, factor 2.0) each say whether the close is above or below their line. The majority proposes a direction, and it must hold for two closed bars in a row. A separate SuperTrend(20, 3.0) must agree and be moving that way (its line higher than on the previous bar for a LONG, lower for a SHORT), otherwise the stock shows BLOCKED wrong regime or WAITING filter not advancing. With the 200 EMA filter on, a LONG also needs the close above the 200 EMA and a SHORT needs it below. An open position exits as soon as the filter flips or the majority turns the other way. Stop is the slowest line (22). These rules follow the Ostri Pine script you sent. Signals use closed bars only.</p></details></div><div id="stres"></div>';
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 10px">' + VIEWS.map(v => '<button type="button" class="cbtn" data-stv="' + v[0] + '">' + v[1] + "</button>").join("") + '<label title="As in the Ostri Pine script: longs only above the 200 EMA, shorts only below it"><input type="checkbox" id="stema"' + (F.ema ? " checked" : "") + '> 200 EMA filter</label><label>Search <input id="stq" type="search" placeholder="symbol" style="width:110px" value="' + E(F.q) + '"></label><button type="button" class="cbtn" id="strl">&#8635; Reload</button></div>' + '<div class="charttools" style="border:0;padding:6px 0 0;gap:6px 8px"><span class="note" style="margin:0"><b>Filters:</b></span>' + FLT.map(f => '<button type="button" class="cbtn" data-stf="' + f[0] + '" aria-pressed="' + !!F.flt[f[0]] + '">' + f[1] + "</button>").join("") + '<label><b>Exit rule</b> <select id="stxit">' + Object.keys(XIT).map(k => '<option value="' + k + '"' + (F.xit === k ? " selected" : "") + ">" + XIT[k][0] + "</option>").join("") + '</select></label></div><div class="note" id="ststat" style="margin:8px 0 0"></div>' +
+      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">How the signal works</summary><p class="note" style="margin:6px 0 0">Three SuperTrends (ATR 8, 15, 22, factor 2.0) each say whether the close is above or below their line. The majority proposes a direction, and it must hold for two closed bars in a row. A separate SuperTrend(20, 3.0) must agree and be moving that way (its line higher than on the previous bar for a LONG, lower for a SHORT), otherwise the stock shows BLOCKED wrong regime or WAITING filter not advancing. With the 200 EMA filter on, a LONG also needs the close above the 200 EMA and a SHORT needs it below. An open position exits as soon as the filter flips or the majority turns the other way. Stop is the slowest line (22). These rules follow the Ostri Pine script you sent. Signals use closed bars only. The Filters row adds optional extra entry rules (RSI, ADX, VWAP, Nifty, DVM and others) and the Exit rule menu changes how trades close; the back-test and the lab below show whether each one helps.</p></details></div><div id="stres"></div>';
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest) return; let b;
       if ((b = t.closest("[data-stv]"))) { F.view = b.dataset.stv; F.shown = 100; save(); sync(); view(); return; }
       if (t.closest("#strl")) { load(true); return; }
-      if (t.closest("[data-stlab]")) { const box = $e("#stlabres"); if (box) box.innerHTML = '<p class="note">Running the tests...</p>'; setTimeout(() => { try { runLab(); } catch (e) { LABRES = '<p class="note">The lab could not run: ' + E(String((e && e.message) || e)) + "</p>"; } const bx = $e("#stlabres"); if (bx) bx.innerHTML = LABRES; }, 30); return; }
+      if (t.closest("[data-stlab]")) { runLab(); return; }
+      if (t.closest("[data-stapply]")) { if (LAB_SOLID) { F.flt = {}; FLT.forEach(f => { if (Object.keys(f[2]).every(k => LAB_SOLID[k] === f[2][k])) F.flt[f[0]] = true; }); const xk = Object.keys(XIT).find(k => XIT[k][1] && Object.keys(XIT[k][1]).every(q => LAB_SOLID[q] === XIT[k][1][q])); F.xit = xk || "base"; save(); fltSync(); applyFlt(); } return; }
+      if ((b = t.closest("[data-stf]"))) { const k = b.dataset.stf; F.flt[k] = !F.flt[k]; save(); fltSync(); applyFlt(); return; }
       if ((b = t.closest("[data-sttf]"))) { TF = b.dataset.sttf; panel(); drawChart(); return; }
       if (t.closest("[data-stx]")) { OPEN = null; panel(); view(); return; }
       if (t.closest("a") || t.closest("[data-ind]") || t.closest("#stpanel")) return;
@@ -4966,13 +5110,18 @@ const stApi = (function () {
       if ((b = t.closest("[data-stk]"))) { const k = b.dataset.stk; F.dir = F.sort === k ? -F.dir : (k === "sym" ? 1 : -1); F.sort = k; save(); view(); }
     });
     host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return; if (t.id === "stq") { F.q = t.value; F.shown = 100; save(); view(); } });
-    host.addEventListener("change", ev => { const t = ev.target; if (t && t.id === "stema") { F.ema = !!t.checked; save(); compute(); view(); if (OPEN) drawChart(); return; } if (t && t.id === "stcost") { const v = parseFloat(t.value); F.cost = isFinite(v) && v >= 0 ? v : 0; save(); view(); } });
+    host.addEventListener("change", ev => { const t = ev.target; if (t && t.id === "stxit") { F.xit = t.value; save(); applyFlt(); return; } if (t && t.id === "stema") { F.ema = !!t.checked; save(); compute(); view(); if (OPEN) drawChart(); return; } if (t && t.id === "stcost") { const v = parseFloat(t.value); F.cost = isFinite(v) && v >= 0 ? v : 0; save(); view(); } });
+  }
+  function fltSync() { document.querySelectorAll("#stbody [data-stf]").forEach(b => b.setAttribute("aria-pressed", String(!!F.flt[b.dataset.stf]))); const x = $e("#stxit"); if (x) x.value = F.xit; }
+  function applyFlt() {
+    const dv = F.flt.dvmM || F.flt.dvmF, go = () => { Object.keys(CTXC).forEach(k => delete CTXC[k]); compute(); view(); if (OPEN) drawChart(); };
+    if (dv) { const st = $e("#ststat"); if (st) st.textContent = "Loading daily candles and fundamentals for the DVM filters..."; Promise.all([loadFund(), loadDaily()]).then(go); } else go();
   }
   function sync() { document.querySelectorAll("#stbody [data-stv]").forEach(b => b.setAttribute("aria-pressed", b.dataset.stv === F.view ? "true" : "false")); }
   function open() { build(); sync(); if (RES) view(); else view(); load(false); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "st" && !document.hidden) load(false); } catch (e) {} }, 120e3);
   setInterval(() => { try { if (OPEN && TF !== "D" && typeof current !== "undefined" && current === "st" && !document.hidden) drawChart(); } catch (e) {} }, 60e3);
-  return {open, signals, load, _test: {superTrend, replay, CFG}};
+  return {open, signals, load, _test: {superTrend, replay, CFG, buildCtx, FUND, DB, loadFund, closedOnly}};
 })();
 const stPaint = () => stApi.open();
 /* ===== CUP & HANDLE TAB: scans the Nifty 500 on daily, weekly or monthly candles for a cup and handle base that is forming or breaking out, with entry/stop/target, an inline chart and a past-data accuracy table ===== */
