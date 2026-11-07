@@ -1576,7 +1576,7 @@ function znAccHTML(items) {
 /* ===== Zone profitability lab: which extra rules and which of the indicator's own settings make the zone trades earn more (in R) ===== */
 var ZLF = []; try { ZLF = JSON.parse(localStorage.getItem("znLabF") || "[]") || []; } catch (e) { ZLF = []; }
 var ZLAB = {html: "", solid: null, busy: false};
-const ZLX = [2, 3, 4, 5], zlTick = () => new Promise(r => setTimeout(r, 0));
+const ZLX = [4, 5], zlTick = () => new Promise(r => setTimeout(r, 0));
 const zlT = t => (typeof t === "number" ? t : Date.parse(String(t).slice(0, 10) + "T00:00:00Z") / 1000);
 function zlRsi(c, n) {
   const N = c.length, o = new Array(N).fill(NaN); if (N <= n) return o; let ag = 0, al = 0;
@@ -1605,21 +1605,15 @@ function zlFeat(it, z) {
 const ZL_HTF = ["60", "120", "240", "D", "W"], ZL_INTRA = ["1", "5", "15"];
 const ZL_RULES = [
   ["Type of zone", "h"],
-  ["rev", "Reversal zones only (DBR demand, RBD supply)", f => f.pat === "DBR" || f.pat === "RBD"], ["cont", "Continuation zones only (RBR demand, DBD supply)", f => f.pat === "RBR" || f.pat === "DBD"],
-  ["dem", "Demand zones only", f => f.d === 1], ["sup", "Supply zones only", f => f.d === -1],
+  ["cont", "Continuation zones only (RBR demand, DBD supply)", f => f.pat === "RBR" || f.pat === "DBD"],
   ["Shape of the zone", "h"],
-  ["bc1", "Base of one candle", f => f.bc <= 1], ["bc2", "Base of one or two candles", f => f.bc <= 2],
   ["wt", "Tight zone (proximal to distal within 1.5 ATR)", f => !isFinite(f.w) || f.w <= 1.5],
-  ["p70", "The tab's own zone score 70 or more", f => f.prob >= 70], ["p85", "The tab's own zone score 85 or more", f => f.prob >= 85],
-  ["How the price left the zone", "h"],
-  ["leg", "Strong leg-out (2.5 ATR or more)", f => !isFinite(f.leg) || f.leg >= 2.5],
-  ["lv", "Leg-out volume at least 1.5x the 20-candle average", f => !isFinite(f.lv) || f.lv >= 1.5],
   ["Trend and momentum when the zone formed", "h"],
-  ["trw", "With the trend (close on the zone's side of the 50 EMA)", f => f.tr !== -1], ["trc", "Against the trend (price still below the 50 EMA for demand)", f => f.tr !== 1],
+  ["trw", "With the trend (close on the zone's side of the 50 EMA)", f => f.tr !== -1],
   ["slw", "50 EMA sloping the zone's way", f => f.sl !== -1],
   ["rsi", "RSI 60 or more for demand, 40 or less for supply (momentum into the zone)", f => !isFinite(f.rsi) || (f.d === 1 ? f.rsi >= 60 : f.rsi <= 40)],
   ["Timeframe", "h"],
-  ["tfd", "Daily candles only", f => f.tf === "D"], ["tfh", "Hourly and slower (1H, 2H, 4H, Daily, Weekly)", f => ZL_HTF.indexOf(f.tf) >= 0], ["tfi", "Fast candles only (1m, 5m, 15m)", f => ZL_INTRA.indexOf(f.tf) >= 0]
+  ["tfi", "Fast candles only (1m, 5m, 15m)", f => ZL_INTRA.indexOf(f.tf) >= 0]
 ];
 const ZLMAP = {}; ZL_RULES.forEach(r => { if (r[1] !== "h") ZLMAP[r[0]] = r; });
 function zlOk(it, z) {
@@ -1639,9 +1633,6 @@ function zlTrade(b, z, rr) {
 /* the indicator's own settings, switched one at a time (this needs a fresh scan of the stocks) */
 function zlVariants() {
   const V = []; ZN_FILTERS.slice(0, 7).forEach(f => { if (ZO.f[f[0]]) V.push({id: "f_" + f[0], name: "Switch OFF: " + f[1], set: o => { o.f[f[0]] = 0; }, ap: () => { ZO.f[f[0]] = 0; }}); });
-  if (ZO.prox !== "Body") V.push({id: "p_body", name: "Proximal line at the base body instead of the wicks", set: o => { o.prox = "Body"; }, ap: () => { ZO.prox = "Body"; }});
-  if (ZO.maxBase > 3) V.push({id: "mb3", name: "Base of at most 3 candles (now " + ZO.maxBase + ")", set: o => { o.maxBase = 3; }, ap: () => { ZO.maxBase = 3; }});
-  if (ZO.maxLeg > 2) V.push({id: "ml2", name: "Leg-out of at most 2 candles (now " + ZO.maxLeg + ")", set: o => { o.maxLeg = 2; }, ap: () => { ZO.maxLeg = 2; }});
   return V;
 }
 async function zlRun() {
@@ -5579,7 +5570,7 @@ const cuApi = (function () {
     const rr = F.rr, res = []; BT.sig.forEach(s => { if (!sigOk(s, tf)) return; const o = simulate(B[s.sym].X[tf].A, s.e, s.c, rr, tf, F.xm); if (o && !o.open) res.push(Object.assign({year: s.year, score: s.c.score}, o)); });
     const line = (name, rs) => { const n = rs.length, w = rs.filter(x => x.r > 0).length, tot = rs.reduce((a, x) => a + x.r, 0); return {c: [name, n + accFew(n), n ? "<b>" + accPc(w, n) + "</b>" : "-", accR(n ? tot / n : NaN), accR(n ? tot : NaN)]}; };
     const yrs = Array.from(new Set(res.map(x => x.year))).sort();
-    const pick = '<div class="charttools" style="border:0;padding:0;margin:14px 0 -8px"><b>Target</b>' + [1.5, 2, 3].map(v => '<button type="button" class="cbtn" data-curr="' + v + '" aria-pressed="' + (v === rr) + '">1 : ' + v + "</button>").join("") + "</div>";
+    const pick = '<div class="charttools" style="border:0;padding:0;margin:14px 0 -8px"><b>Target</b>' + [2, 3].map(v => '<button type="button" class="cbtn" data-curr="' + v + '" aria-pressed="' + (v === rr) + '">1 : ' + v + "</button>").join("") + "</div>";
     const P = PR[tf];
     return pick + accTable("Back-test on past " + TFN[tf].toLowerCase() + " candles (about 5 years, " + BT.syms + " stocks)", ["Group", "Trades", "Win rate", "Average per trade", "Total"], [line("<b>All signals</b>", res), line("Score 55 to 69", res.filter(x => x.score >= 55 && x.score < 70)), line("Score 70 to 84", res.filter(x => x.score >= 70 && x.score < 85)), line("Score 85 or more", res.filter(x => x.score >= 85))].concat(yrs.map(y => line(y, res.filter(x => x.year === y)))),
       "Every past " + (tf === "D" ? "day was scanned in steps of 3 candles" : "candle was scanned") + ". Each cup and handle seen within 3% below its pivot counted once. The trade starts only if price reached 0.1% above the pivot within the next " + P.ent + " " + UNIT[tf] + ", with the stop 0.1% under the handle low and " + (F.xm === "tr" ? "no fixed target (once up 1R the stop trails under the lowest low of the last 10 candles)" : "the target " + rr + " times the risk" + (F.xm === "be" ? ", with the stop moved to the entry once up 1R" : "")) + ". It is followed for up to " + P.fol + " " + UNIT[tf] + " (if a candle touches both, it counts as a loss; unfinished trades are left out). Results are in R, before brokerage and slippage. Stocks that no longer exist are missing, which flatters the result a little." + (tf === "M" ? " Five years holds only 60 monthly candles, so expect very few cases: treat monthly results as a rough guide only." : "") + " Past results only, not advice.");
@@ -5643,34 +5634,11 @@ const cuApi = (function () {
   /* the tests: id, label, test on the features (a missing number never blocks) */
   const RULES = [
     ["Quality of the cup", "h"],
-    ["s70", "Cup score 70 or more", f => f.score >= 70], ["s85", "Cup score 85 or more", f => f.score >= 85],
-    ["Trend and strength of the stock", "h"],
-    ["a50", "Above its 50-candle average", f => !isFinite(f.s50) || f.p > f.s50],
-    ["a200", "Above its 200-candle average, and that average rising", f => !isFinite(f.s200) || (f.p > f.s200 && !(f.s200 < f.s200p))],
-    ["hi10", "Within 10% of its 52-week high", f => !isFinite(f.hiD) || f.hiD >= -10],
-    ["r30", "Up 30% or more over 6 months", f => !isFinite(f.ret6) || f.ret6 >= 30],
-    ["rs", "Beating the Nifty over 6 months", f => !isFinite(f.rs) || f.rs > 0],
-    ["rs80", "Relative strength rating 80 or more (top fifth of stocks by 6-month gain)", f => !isFinite(f.rsr) || f.rsr >= 80], ["rs90", "Relative strength rating 90 or more", f => !isFinite(f.rsr) || f.rsr >= 90],
-    ["Earnings backdrop (latest result in the PEAD research file; setups without one are left out)", "h"],
-    ["eg20", "Profit up 20% or more over last year at the latest result", f => f.eg >= 20],
-    ["gr", "Growth stock: profit up 20%+ and sales up 10%+ at the latest result", f => f.eg >= 20 && f.sg >= 10],
-    ["ps55", "PEAD score 55 or more at the latest result", f => f.ps >= 55],
-    ["rcnt", "Result in the last 60 days with a positive first-day reaction", f => f.rage <= 60 && f.rc >= 0],
-    ["Shape of the base", "h"],
-    ["hd8", "Handle no deeper than 8%", f => f.hd <= 0.08],
-    ["hw3", "Handle no longer than 3 weeks", f => f.hweeks <= 3],
-    ["dry", "Volume drying up in the handle (under 80% of average)", f => !isFinite(f.dry) || f.dry < 0.8],
-    ["dep", "Cup depth between 15% and 33%", f => f.depth >= 0.15 && f.depth <= 0.33],
-    ["wk12", "Cup at least 12 weeks long", f => f.weeks >= 12],
-    ["near", "Within 1.5% of the pivot", f => f.away <= 1.5],
+    ["s85", "Cup score 85 or more", f => f.score >= 85],
     ["The plan", "h"],
-    ["rk8", "Stop within 8% of the entry", f => f.risk <= 8], ["rk4", "Stop at least 4% away from the entry", f => f.risk >= 4],
-    ["liq", "Turnover Rs 5 crore a day or more", f => !isFinite(f.tv) || f.tv >= 5],
+    ["rk4", "Stop at least 4% away from the entry", f => f.risk >= 4],
     ["Market backdrop on the signal day", "h"],
-    ["n50", "Nifty above its 50-day average", f => !isFinite(f.n50) || f.n50 === 1],
-    ["n200", "Nifty above its 200-day average", f => !isFinite(f.n200) || f.n200 === 1],
-    ["br", "More than half of the stocks above their 50-day average", f => !isFinite(f.br) || f.br >= 50],
-    ["sec", "Sector season agrees (up bias, Time Cycle)", f => !isFinite(f.sec) || f.sec === 1]
+    ["n200", "Nifty above its 200-day average", f => !isFinite(f.n200) || f.n200 === 1]
   ];
   const RMAP = {}; RULES.forEach(r => { if (r[1] !== "h") RMAP[r[0]] = r; });
   const FC = {};
@@ -5682,7 +5650,7 @@ const cuApi = (function () {
     return fl.every(id => !RMAP[id] || RMAP[id][2](f));
   }
   function sigOk(s, tf) { const fl = F.flt; if (!fl || !fl.length) return true; const k = (MKT ? 1 : 0); if (s.fk !== k) { s.f = featOf(s.sym, tf, s.e, s.c); s.fk = k; } return fl.every(id => !RMAP[id] || RMAP[id][2](s.f)); }
-  const XRM = [[1.5], [2], [3]], XMODES = [["", "Fixed stop and target"], ["be", "Stop moves to the entry once up 1R"], ["tr", "Trail the stop under the 10-candle low once up 1R (no target)"]];
+  const XRM = [[2], [3]], XMODES = [["", "Fixed stop and target"], ["tr", "Trail the stop under the 10-candle low once up 1R (no target)"]];
   const exitList = () => { const L = []; if (F.xm !== "tr") XRM.forEach(q => { if (q[0] !== F.rr) L.push({k: "x" + q[0], name: "Target 1 : " + q[0] + (F.xm === "be" ? " (stop to entry after +1R)" : ""), rr: q[0], xm: F.xm}); }); XMODES.forEach(m => { if (m[0] !== F.xm) L.push({k: "m" + (m[0] || "fx"), name: m[1] + (m[0] === "tr" ? "" : ", target 1 : " + F.rr), rr: F.rr, xm: m[0]}); }); return L; };
   let CULAB = "", CUSOLID = null, CUBUSY = false;
   async function runLab() {
