@@ -3809,7 +3809,14 @@ const ppApi = (function () {
   function open() { build(); paint(); if (META.state !== "ok" || Date.now() - META.fetchedAt > 3 * 60 * 1000) load(false); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "pp" && !document.hidden) load(false); } catch (e) {} }, 3 * 60 * 1000);
   function list() { const AM = annMap(), out = []; DATA.forEach(s => { const P = score(s, F.mode); if (!P) return; const ad = annDate(s, AM); out.push({sym: symOfTk(s.ticker), total: P.total, rec: String(P.rec[0]), react: num(s.react_pct), d: ad ? ageOf(ad) : NaN, ad, revY: P.revY, npY: P.npY, fwdPe: P.fwdPe, pe: P.pe}); }); return out; }
-  return {open, load, pending, score, parseCSV, reactOf, list};
+  function buys() {
+    const AM = annMap(), rows = DATA.map(s => { const ad = annDate(s, AM); return {s, P: score(s, F.mode), ad, d: ad ? ageOf(ad) : NaN}; }).filter(x => x.P);
+    try { bkLoad(rows); } catch (e) {}
+    const list = []; let pending = 0;
+    rows.forEach(x => { const b = bkEval(x); if (b.st === "wait") pending++; if (b.st === "buy" || b.st === "ext") list.push({sym: symOfTk(x.s.ticker), st: b.st, rules: b.rules, entry: b.c.entry, stop: b.c.entry * (1 - BK.stop / 100), px: b.px, edate: b.c.edate, days: x.d, score: x.P.total}); });
+    return {list, pending, loaded: DATA.length > 0};
+  }
+  return {open, load, pending, score, parseCSV, reactOf, list, buys};
 })();
 const ppPaint = () => ppApi.open();
 
@@ -4568,7 +4575,7 @@ const cbApi = (function () {
   let F = {side: "Both", min: 3};
   try { const sv = JSON.parse(localStorage.getItem("cbF") || "null"); if (sv) F = Object.assign(F, sv); } catch (e) {}
   const save = () => { try { localStorage.setItem("cbF", JSON.stringify(F)); } catch (e) {} };
-  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["st", "SuperTrend (15m, started this session)", "ST"], ["mkt", "Market direction agrees", "Mkt"]];
+  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["mkt", "Market direction agrees", "Mkt"]];
   const px2 = v => (isFinite(v) ? fmt(v, v < 100 ? 2 : 1) : "-");
   const sgn = (v, d = 1) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) + "%" : "-");
   let PT = null, last = 0, LASTR = {};
@@ -4595,7 +4602,6 @@ const cbApi = (function () {
     try { const g = rmApi.signals(); rmTf = g.tf; Object.keys(g.m).forEach(sym => { const x = g.m[sym]; give(sym, x.dir, "rm", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 " + (x.st === "fresh" ? x.kind.toLowerCase() + " " + x.age + " bars ago" : "armed") + " (" + g.tf + ")", isFinite(x.score) ? String(Math.round(x.score)) : "", Object.assign({tf: g.tf}, x)); }); } catch (e) {}
     const tcm = {}, tcs = {};
     try { const sn = tcApi.season(14); Object.keys(sn.m).forEach(sym => { const x = sn.m[sym]; tcm[sym] = x; tcs[x.sec] = sn.sm[x.sec]; if (x.prob >= 60 && x.avg > 0) give(sym, 1, "tc", "Rose in " + Math.round(x.prob) + "% of past years over the next 2 weeks", Math.round(x.prob) + "%", {x}); else if (x.prob <= 40 && x.avg < 0) give(sym, -1, "tc", "Fell in " + Math.round(100 - x.prob) + "% of past years over the next 2 weeks", Math.round(100 - x.prob) + "%", {x}); }); } catch (e) {}
-    try { const g = stApi.signals(25); Object.keys(g).forEach(sym => { const x = g[sym]; give(sym, x.side, "st", "SuperTrend " + (x.side === 1 ? "LONG" : "SHORT") + " since " + x.when + " (" + x.bars + " bars, 15m)", x.bars + "b", x); }); } catch (e) {}
     const pdm = {};
     try { ppApi.list().forEach(x => { if (!(x.d <= 60)) return; pdm[x.sym] = x; if (!(x.d <= 30) || !isFinite(x.react)) return; if (/EXCELLENT|VERY GOOD/i.test(x.rec) && x.react >= 0) give(x.sym, 1, "pead", x.rec.toLowerCase() + ", score " + Math.round(x.total) + ", reaction " + pct(x.react, 1), String(Math.round(x.total)), {x}); else if (/POOR/i.test(x.rec) && x.react < 0) give(x.sym, -1, "pead", x.rec.toLowerCase() + ", score " + Math.round(x.total) + ", reaction " + pct(x.react, 1), String(Math.round(x.total)), {x}); }); } catch (e) {}
     const mb = marketBias(), rows = [];
@@ -4611,7 +4617,7 @@ const cbApi = (function () {
     return {rows, mb, rmTf};
   }
   function load(force) {
-    try { znLoad(false); } catch (e) {} try { stApi.load(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {}
+    try { znLoad(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {}
     last = Date.now();
   }
 
@@ -4815,7 +4821,7 @@ const cbApi = (function () {
     const rows = R.rows.filter(r => r.score >= F.min && (F.side === "Both" || (F.side === "Long" ? r.side === 1 : r.side === -1)));
     const st = (name, n) => name + (n ? " <b>" + n + "</b>" : " <i>waiting</i>");
     const cnt = k => R.rows.filter(r => r.has[k]).length;
-    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · " + st("SuperTrend", cnt("st")) + " · Market: " + E(R.mb.t);
+    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · Market: " + E(R.mb.t);
     let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th>' + SRC.map(x => '<th title="' + E(x[1]) + '" style="text-align:center">' + E(x[2]) + "</th>").join("") + '</tr></thead><tbody>';
     h += rows.length ? rows.slice(0, 80).map((r, i) => {
       const q = r.q, chg = q ? +q.pct : NaN, sel = SEL && SEL.sym === r.sym;
@@ -5792,9 +5798,453 @@ const cuApi = (function () {
     });
   }
   function open() { build(); view(); load(false); backtest(); if (F.flt && F.flt.some(id => /^(n50|n200|br|sec)$/.test(id)) && !MKT) { const go = () => buildMkt().then(() => view()); try { if (F.flt.indexOf("sec") >= 0 && typeof tcApi !== "undefined" && tcApi.load) tcApi.load(false).then(go, go); else go(); } catch (e) { go(); } } }
-  return {open, detect, arrOf, ensure, badge};
+  return {open, load, detect, arrOf, ensure, badge, merged: () => mergedRes(), state: () => ({t: ST.t, busy: ST.busy})};
 })();
 const cuPaint = () => cuApi.open();
+
+/* ===== QUICK 1-5 DAY TAB: daily-candle breakout and pullback setups, ranked by a score made only from rules you can verify in the built-in lab ===== */
+const swApi = (function () {
+  const $e = s => document.querySelector(s), E = esc;
+  const f2 = (v, d) => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: d == null ? 2 : d, maximumFractionDigits: d == null ? 2 : d}) : "-");
+  const f2s = v => (isFinite(v) ? (v >= 0 ? "+" : "") + v.toFixed(2) : "-");
+  const NAMES = {BRK: "Breakout", PUL: "Pullback"};
+  /* exits tested: stop in ATRs, target in R (99 = none), longest hold in sessions */
+  const XV = [
+    {n: "Stop 1.5 ATR, target 2R, out after 5 sessions", k: 1.5, rr: 2, H: 5},
+    {n: "Target 1.5R", k: 1.5, rr: 1.5, H: 5}, {n: "Target 3R", k: 1.5, rr: 3, H: 5},
+    {n: "Tighter stop (1 ATR)", k: 1, rr: 2, H: 5}, {n: "Wider stop (2 ATR)", k: 2, rr: 2, H: 5},
+    {n: "Out after 3 sessions", k: 1.5, rr: 2, H: 3}, {n: "No target, out after 5 sessions", k: 1.5, rr: 99, H: 5}, {n: "No target, out after 3 sessions", k: 1.5, rr: 99, H: 3}
+  ];
+  /* id, group, setups it applies to, label, test (a missing number never blocks), on by default for */
+  const nz = (x, fn) => !isFinite(x) || fn(x);
+  const RULES = [
+    ["a200r", "Trend and strength of the stock", "BP", "200-day average rising", f => f.a200r === 1, "BP"],
+    ["a50", "Trend and strength of the stock", "BP", "Above the 50-day average", f => f.a50 === 1, ""],
+    ["hi10", "Trend and strength of the stock", "B", "Within 10% of the 52-week high", f => f.hi >= -10, "B"],
+    ["hi3", "Trend and strength of the stock", "B", "Within 3% of the 52-week high", f => f.hi >= -3, ""],
+    ["hi15", "Trend and strength of the stock", "P", "Within 15% of the 52-week high", f => f.hi >= -15, ""],
+    ["rs20", "Trend and strength of the stock", "BP", "Beating the Nifty over 20 days", f => nz(f.rs20, x => x > 0), "B"],
+    ["rs60", "Trend and strength of the stock", "BP", "Beating the Nifty over 60 days", f => nz(f.rs60, x => x > 0), ""],
+    ["vr15", "The signal candle", "B", "Volume at least 1.5x its 20-day average", f => nz(f.vr, x => x >= 1.5), "B"],
+    ["vr25", "The signal candle", "B", "Volume at least 2.5x its 20-day average", f => nz(f.vr, x => x >= 2.5), ""],
+    ["clv", "The signal candle", "B", "Closes in the top 30% of the day's range", f => f.clv >= 0.7, "B"],
+    ["trx", "The signal candle", "B", "Day's range at least 1.5 ATR", f => nz(f.trx, x => x >= 1.5), ""],
+    ["nr7", "The signal candle", "B", "Quiet day before (narrowest range of the last 7)", f => f.nr7 === 1, ""],
+    ["ext", "The signal candle", "B", "Not stretched (within 2.5 ATR of its 20-day average)", f => nz(f.ext, x => x <= 2.5), ""],
+    ["r25", "How the pullback looks", "P", "RSI(2) under 5", f => f.rsi2 < 5, "P"],
+    ["dn3", "How the pullback looks", "P", "Three lower closes in a row", f => f.dn3 === 1, ""],
+    ["dd2", "How the pullback looks", "P", "Fell 2 ATR or more in 3 sessions", f => nz(f.dd3, x => x >= 2), ""],
+    ["vdry", "How the pullback looks", "P", "Volume on the drop under 0.8x its average", f => nz(f.vr, x => x <= 0.8), ""],
+    ["vspk", "How the pullback looks", "P", "Volume spike on the drop (1.5x or more)", f => nz(f.vr, x => x >= 1.5), ""],
+    ["n50", "Market backdrop", "BP", "Nifty above its 50-day average", f => nz(f.n50, x => x === 1), "BP"],
+    ["n200", "Market backdrop", "BP", "Nifty above its 200-day average", f => nz(f.n200, x => x === 1), ""],
+    ["tv5", "Liquidity", "BP", "Turnover Rs 5 crore a day or more", f => nz(f.tv, x => x >= 5), "BP"],
+    ["tv25", "Liquidity", "BP", "Turnover Rs 25 crore a day or more", f => nz(f.tv, x => x >= 25), ""]
+  ].map(r => ({id: r[0], g: r[1], s: r[2], l: r[3], f: r[4], d: r[5]}));
+  const defOn = su => RULES.filter(r => r.d.indexOf(su === "BRK" ? "B" : "P") >= 0).map(r => r.id);
+  let O = {setup: "all", min: 0, fresh: 0, risk: 2000, cost: 0.15, x: 0, v: 1, on: {BRK: defOn("BRK"), PUL: defOn("PUL")}};
+  try { const sv = JSON.parse(localStorage.getItem("swO") || "null"); if (sv && sv.v === 1) O = Object.assign(O, sv); } catch (e) {}
+  const save = () => { try { localStorage.setItem("swO", JSON.stringify(O)); } catch (e) {} };
+  const letter = su => (su === "BRK" ? "B" : "P");
+  let B = {}, NF = null, SIG = [], ST = {busy: false, t: 0, done: 0, total: 0, err: "", built: 0}, LAB = {}, LABBUSY = false, SIGKEY = "";
+  const tick = () => new Promise(r => setTimeout(r, 0));
+
+  /* ---------- indicators ---------- */
+  function prep(bars) {
+    const n = bars.length, t = new Array(n), o = new Float64Array(n), h = new Float64Array(n), l = new Float64Array(n), c = new Float64Array(n), v = new Float64Array(n);
+    for (let i = 0; i < n; i++) { const b = bars[i]; t[i] = b.time; o[i] = b.open; h[i] = b.high; l[i] = b.low; c[i] = b.close; v[i] = b.vol || 0; }
+    const sma = (a, L) => { const r = new Float64Array(n).fill(NaN); let s = 0; for (let i = 0; i < n; i++) { s += a[i]; if (i >= L) s -= a[i - L]; if (i >= L - 1) r[i] = s / L; } return r; };
+    const tr = new Float64Array(n); for (let i = 0; i < n; i++) tr[i] = i ? Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])) : h[i] - l[i];
+    const atr = new Float64Array(n).fill(NaN); { let a = NaN; for (let i = 0; i < n; i++) { if (i === 13) { let s = 0; for (let k = 0; k < 14; k++) s += tr[k]; a = s / 14; atr[i] = a; } else if (i > 13) { a = (a * 13 + tr[i]) / 14; atr[i] = a; } } }
+    const rsi2 = new Float64Array(n).fill(NaN); { let ag = 0, al = 0; for (let i = 1; i < n; i++) { const d = c[i] - c[i - 1], g = d > 0 ? d : 0, ls = d < 0 ? -d : 0; if (i < 2) { ag += g / 2; al += ls / 2; } else { if (i === 2) { ag += g / 2; al += ls / 2; } else { ag = (ag + g) / 2; al = (al + ls) / 2; } rsi2[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al); } } }
+    const tvv = new Float64Array(n); for (let i = 0; i < n; i++) tvv[i] = c[i] * v[i] / 1e7;
+    const hh20 = new Float64Array(n).fill(NaN), hh252 = new Float64Array(n).fill(NaN);
+    for (let i = 20; i < n; i++) { let m = -Infinity; for (let k = i - 20; k < i; k++) if (h[k] > m) m = h[k]; hh20[i] = m; }
+    for (let i = 251; i < n; i++) { let m = -Infinity; for (let k = i - 251; k <= i; k++) if (h[k] > m) m = h[k]; hh252[i] = m; }
+    return {n, t, o, h, l, c, v, tr, atr, rsi2, s20: sma(c, 20), s50: sma(c, 50), s200: sma(c, 200), vav: sma(v, 20), tv: sma(tvv, 20), hh20, hh252};
+  }
+  function niftyMap(bars) {
+    if (!bars || bars.length < 260) return null; const A = prep(bars), m = {};
+    for (let i = 200; i < A.n; i++) m[A.t[i]] = {n50: A.c[i] > A.s50[i] ? 1 : 0, n200: A.c[i] > A.s200[i] ? 1 : 0, r20: (A.c[i] / A.c[i - 20] - 1) * 100, r60: (A.c[i] / A.c[i - 60] - 1) * 100};
+    return m;
+  }
+  const isBrk = (A, i) => A.c[i] > A.s200[i] && A.c[i] > A.hh20[i];
+  const isPul = (A, i) => A.c[i] > A.s200[i] && A.rsi2[i] < 10;
+  function feat(A, i) {
+    const nf = NF && NF[A.t[i]], c = A.c, atr = A.atr[i], rng = A.h[i] - A.l[i];
+    let nr = 1; for (let k = i - 7; k <= i - 2; k++) if (A.h[k] - A.l[k] < A.h[i - 1] - A.l[i - 1]) { nr = 0; break; }
+    return {
+      a200r: A.s200[i] > A.s200[i - 20] ? 1 : 0, a50: c[i] > A.s50[i] ? 1 : 0, hi: (c[i] / A.hh252[i] - 1) * 100,
+      rs20: nf ? (c[i] / c[i - 20] - 1) * 100 - nf.r20 : NaN, rs60: nf ? (c[i] / c[i - 60] - 1) * 100 - nf.r60 : NaN,
+      vr: A.vav[i - 1] > 0 ? A.v[i] / A.vav[i - 1] : NaN, clv: rng > 0 ? (c[i] - A.l[i]) / rng : 0.5, trx: A.tr[i] / atr, nr7: nr, ext: (c[i] - A.s20[i]) / atr,
+      rsi2: A.rsi2[i], dn3: c[i] < c[i - 1] && c[i - 1] < c[i - 2] && c[i - 2] < c[i - 3] ? 1 : 0, dd3: (c[i - 3] - c[i]) / atr,
+      n50: nf ? nf.n50 : NaN, n200: nf ? nf.n200 : NaN, tv: A.tv[i]
+    };
+  }
+  function scan(sym, A) {
+    const out = [];
+    for (let i = 252; i < A.n; i++) {
+      if (!(A.atr[i] > 0)) continue;
+      [["BRK", isBrk], ["PUL", isPul]].forEach(q => { if (q[1](A, i) && !q[1](A, i - 1)) out.push({sym, i, n: A.n, date: A.t[i], su: q[0], f: feat(A, i), A, rx: {}, sc: NaN}); });
+    }
+    return out;
+  }
+  /* follow a signal: enter at the next open, stop k ATR below, target rr times the risk, out at the close after H sessions; cost is a % of the price taken off every trade */
+  function rOf(sg, xi) {
+    const key = xi + "|" + O.cost; if (sg.rx[key] !== undefined) return sg.rx[key];
+    const X = XV[xi], A = sg.A, i = sg.i, n = A.n; let r = NaN;
+    if (i + 1 < n) {
+      const entry = A.o[i + 1], risk = X.k * A.atr[i];
+      if (entry > 0 && risk > 0 && risk / entry < 0.2) {
+        const stop = entry - risk, tgt = entry + X.rr * risk; let ex = NaN;
+        for (let k = i + 1; k <= Math.min(n - 1, i + X.H); k++) {
+          if (k > i + 1 && A.o[k] <= stop) { ex = A.o[k]; break; }
+          if (A.l[k] <= stop) { ex = stop; break; }
+          if (A.h[k] >= tgt) { ex = tgt; break; }
+          if (k === i + X.H) { ex = A.c[k]; break; }
+        }
+        if (isFinite(ex)) r = (ex - entry) / risk - (O.cost / 100) * entry / risk;
+      }
+    }
+    sg.rx[key] = r; return r;
+  }
+  function scoreOf(sg) {
+    const on = O.on[sg.su] || []; if (!on.length) return 100;
+    const key = on.join(","); if (sg.sk === key) return sg.sc; let p = 0;
+    on.forEach(id => { const r = RULES.find(x => x.id === id); if (r && r.f(sg.f)) p++; });
+    sg.sk = key; sg.sc = Math.round(p / on.length * 100); return sg.sc;
+  }
+
+  /* ---------- statistics: trades on the same day move together, so errors are measured by day ---------- */
+  function stat(L) {
+    const N = L.length; if (!N) return {n: 0, m: NaN, se: NaN, win: NaN, tot: 0};
+    let s = 0, w = 0; const D = {}; L.forEach(x => { s += x.r; if (x.r > 0) w++; const d = D[x.d] || (D[x.d] = {n: 0, s: 0}); d.n++; d.s += x.r; });
+    const m = s / N; let q = 0; Object.keys(D).forEach(k => { const e = D[k].s - m * D[k].n; q += e * e; });
+    return {n: N, m, se: Math.sqrt(q) / N, win: w / N * 100, tot: s};
+  }
+  function zDiff(S, C, mS, mC) {
+    const D = {}; S.forEach(x => { const d = D[x.d] || (D[x.d] = {a: 0, b: 0}); d.a += (x.r - mS) / S.length; }); C.forEach(x => { const d = D[x.d] || (D[x.d] = {a: 0, b: 0}); d.b += (x.r - mC) / C.length; });
+    let q = 0; Object.keys(D).forEach(k => { const e = D[k].a - D[k].b; q += e * e; }); return q > 0 ? (mS - mC) / Math.sqrt(q) : NaN;
+  }
+  const mean = L => (L.length ? L.reduce((p, x) => p + x.r, 0) / L.length : NaN);
+  function verdict(z, both, yb, yn, share, n, c, filt) {
+    if (n < 30 || c < 30) return "few";
+    if (z >= 2.5 && both && (!yn || yb / yn >= 0.6) && (!filt || share >= 0.2)) return "solid";
+    if (z >= 1.5) return "maybe"; if (z <= -2) return "worse"; return "no";
+  }
+  function tradesOf(su, xi) {
+    const L = []; SIG.forEach(sg => { if (sg.su !== su) return; const r = rOf(sg, xi); if (isFinite(r)) L.push({sg, r, d: sg.date, y: +sg.date.slice(0, 4)}); });
+    const ds = L.map(x => x.d).sort(); const med = ds[ds.length >> 1]; L.forEach(x => { x.h = x.d < med ? 0 : 1; }); return L;
+  }
+  function evalFilter(T, ok) {
+    const S = [], C = []; T.forEach((x, i) => (ok[i] ? S : C).push(x)); const s = stat(S), c = stat(C);
+    if (!C.length && S.length >= 30) return {s, n: S.length, v: "all", z: NaN, ha: NaN, hb: NaN, yb: 0, yn: 0};
+    if (S.length < 30 || C.length < 30) return {s, n: S.length, v: "few", z: NaN, ha: NaN, hb: NaN, yb: 0, yn: 0};
+    const z = zDiff(S, C, s.m, c.m), hs = [0, 1].map(h => { const a = S.filter(x => x.h === h), b = C.filter(x => x.h === h); return {m: mean(a), ok: a.length >= 10 && b.length >= 10 ? mean(a) > mean(b) : true}; });
+    let yb = 0, yn = 0; [...new Set(T.map(x => x.y))].forEach(y => { const a = S.filter(x => x.y === y), b = C.filter(x => x.y === y); if (a.length >= 10 && b.length >= 10) { yn++; if (mean(a) > mean(b)) yb++; } });
+    return {s, n: S.length, z, ha: hs[0].m, hb: hs[1].m, yb, yn, v: verdict(z, hs[0].ok && hs[1].ok, yb, yn, S.length / T.length, S.length, C.length, true)};
+  }
+  function evalExit(T, su, xi) {
+    const D = [], V = []; T.forEach(x => { const r = rOf(x.sg, xi); if (isFinite(r)) { D.push({d: x.d, r: r - x.r, h: x.h, y: x.y}); V.push({d: x.d, r, h: x.h, y: x.y}); } });
+    const s = stat(V), dd = stat(D), z = dd.se > 0 ? dd.m / dd.se : NaN, hs = [0, 1].map(h => mean(D.filter(x => x.h === h)));
+    let yb = 0, yn = 0; [...new Set(D.map(x => x.y))].forEach(y => { const a = D.filter(x => x.y === y); if (a.length >= 10) { yn++; if (mean(a) > 0) yb++; } });
+    return {s, n: V.length, z, ha: mean(V.filter(x => x.h === 0)), hb: mean(V.filter(x => x.h === 1)), yb, yn, v: verdict(z, hs[0] > 0 && hs[1] > 0, yb, yn, 1, V.length, V.length, false)};
+  }
+
+  /* ---------- data ---------- */
+  const universe = () => { try { return n5Api.list(); } catch (e) { return []; } };
+  async function fetchSyms(list, progress) {
+    const chunks = []; for (let i = 0; i < list.length; i += 12) chunks.push(list.slice(i, i + 12)); let ix = 0;
+    const run = async () => { while (ix < chunks.length) { const ch = chunks[ix++]; try {
+      const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json();
+      ch.forEach(sy => { const rows = j && j.bars && j.bars[sy]; if (rows && rows.length > 300) B[sy] = {t: Date.now(), bars: rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; });
+    } catch (e) {} if (progress) progress(ch.length); } };
+    await Promise.all([run(), run(), run()]);
+  }
+  async function load(force) {
+    if (ST.busy || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
+    if (!force && ST.t && Date.now() - ST.t < 20 * 60e3) return;
+    ST.busy = true; ST.err = ""; LAB = {};
+    try {
+      const L = universe().map(x => x.s); ST.total = L.length + 1; ST.done = 0; paintStatus();
+      await fetchSyms(["NIFTY"], null); NF = B.NIFTY ? niftyMap(B.NIFTY.bars) : null; ST.done = 1;
+      await fetchSyms(L.filter(s => force || !B[s] || Date.now() - B[s].t > 20 * 60e3), k => { ST.done += k; paintStatus(); });
+      SIG = []; const keys = Object.keys(B).filter(k => k !== "NIFTY"); let q = 0;
+      for (const sym of keys) { try { SIG = SIG.concat(scan(sym, prep(B[sym].bars))); } catch (e) {} if (++q % 25 === 0) { ST.built = q; paintStatus(); await tick(); } }
+      ST.t = Date.now(); ST.built = keys.length; if (!keys.length) ST.err = "no candles came back from the Worker";
+    } catch (e) { ST.err = String((e && e.message) || e); }
+    ST.busy = false; view();
+  }
+
+  /* ---------- screen ---------- */
+  function paintStatus() { const b = $e("#swstat"); if (b) b.innerHTML = statusHTML(); }
+  function statusHTML() {
+    if (ST.busy) return "Loading daily candles: " + Math.min(ST.done, ST.total) + " of " + ST.total + (ST.built ? " · scanning " + ST.built : "") + "...";
+    if (ST.err) return "Problem: " + E(ST.err);
+    const nb = Object.keys(B).filter(k => k !== "NIFTY").length; if (!nb) return "No candles yet.";
+    const last = B.NIFTY ? B.NIFTY.bars[B.NIFTY.bars.length - 1].time : "";
+    return nb + " stocks · last candle " + E(last) + " · " + SIG.length.toLocaleString("en-IN") + " past signals found in about 5 years";
+  }
+  function regimeHTML() {
+    if (!NF || !B.NIFTY) return ""; const last = B.NIFTY.bars[B.NIFTY.bars.length - 1].time, m = NF[last]; if (!m) return "";
+    return '<p class="note" style="margin:8px 0 0"><b>Market:</b> Nifty is ' + (m.n50 ? "above" : "below") + " its 50-day and " + (m.n200 ? "above" : "below") + " its 200-day average. " + (m.n50 && m.n200 ? "Backdrop supports long setups." : "Weak backdrop: be selective, or size down.") + "</p>";
+  }
+  const btn = (attr, key, label, on, tip) => '<button type="button" class="cbtn" ' + attr + '="' + key + '" aria-pressed="' + (on ? "true" : "false") + '" title="' + E(tip || "") + '">' + E(label) + "</button>";
+  function rulesHTML() {
+    let h = "";
+    ["BRK", "PUL"].forEach(su => {
+      h += '<div style="margin:8px 0 2px"><b>' + NAMES[su] + " rules in the score</b></div>"; let g = "";
+      RULES.forEach(r => { if (r.s.indexOf(letter(su)) < 0) return; if (r.g !== g) { g = r.g; h += '<div class="note" style="margin:6px 0 2px">' + E(g) + "</div>"; } h += btn("data-swr", su + ":" + r.id, r.l, (O.on[su] || []).indexOf(r.id) >= 0); });
+    });
+    return h;
+  }
+  function planOf(sg) {
+    const A = sg.A, X = XV[O.x], known = sg.i + 1 < A.n, entry = known ? A.o[sg.i + 1] : A.c[sg.i], risk = X.k * A.atr[sg.i], stop = entry - risk, tgt = X.rr < 90 ? entry + X.rr * risk : NaN;
+    return {entry, stop, tgt, risk, qty: risk > 0 ? Math.floor(O.risk / risk) : 0, known};
+  }
+  function view() {
+    const host = $e("#swbody"); if (!host) return;
+    let h = '<div class="znhead" style="background:linear-gradient(120deg,#0f766e,#1d4ed8)"><div><h2>QUICK 1&ndash;5 DAY</h2><span>Daily breakouts and pullbacks, ranked by a score you can test</span></div><div class="znpills"><span>Daily candles</span><span>Cost-aware back-test</span><span>Built-in lab</span></div></div>' +
+      '<p class="note">Two setups, both on daily candles and only in stocks above their 200-day average: <b>Breakout</b> (close above the prior 20-day high) and <b>Pullback</b> (RSI(2) under 10). The score is the share of the rules switched on below that the signal passes. The starting rules are textbook defaults, <b>not proven</b>: press <b>Run the lab</b> and keep only what is marked solid on your own data. Screening aid, not advice.</p>';
+    h += '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 12px"><b>Setup</b>' + [["all", "Both"], ["BRK", "Breakout"], ["PUL", "Pullback"]].map(x => btn("data-swsetup", x[0], x[1], O.setup === x[0])).join("") +
+      '<span class="csep"></span><b>Signals from</b>' + [[0, "Last session"], [1, "2 sessions"], [2, "3 sessions"]].map(x => btn("data-swfresh", x[0], x[1], O.fresh === x[0])).join("") +
+      '<span class="csep"></span><b>Min score</b>' + [0, 50, 70, 85].map(x => btn("data-swmin", x, x === 0 ? "Any" : x + "+", O.min === x)).join("") + "</div>" +
+      '<div class="charttools" style="border:0;padding:8px 0 0;gap:8px 12px"><label>Risk per trade Rs <input type="number" id="swrisk" style="width:80px" value="' + O.risk + '"></label><label title="Round-trip brokerage, taxes and slippage as a percent of the price; taken off every back-tested trade">Cost % <input type="number" step="0.05" id="swcost" style="width:64px" value="' + O.cost + '"></label>' +
+      '<label>Exit <select id="swx">' + XV.map((x, i) => '<option value="' + i + '"' + (i === O.x ? " selected" : "") + ">" + E(x.n) + "</option>").join("") + "</select></label>" +
+      btn("data-swrescan", "1", "&#8635; Rescan", false) + btn("data-swlab", "1", "Run the lab", false, "Tests every rule and exit on past signals") + "</div>" +
+      '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Rules in the score</summary>' + rulesHTML() + "</details>" +
+      '<div class="note" id="swstat" style="margin:8px 0 0">' + statusHTML() + "</div>" + regimeHTML() + "</div>";
+    const live = SIG.filter(sg => sg.i >= sg.n - 1 - O.fresh && (O.setup === "all" || sg.su === O.setup)).map(sg => ({sg, sc: scoreOf(sg)})).filter(x => x.sc >= O.min).sort((a, b) => b.sc - a.sc || (b.sg.f.vr || 0) - (a.sg.f.vr || 0));
+    h += '<h3 class="tch" style="margin-top:14px">Signals now (' + live.length + ")</h3>";
+    if (!live.length) h += '<div class="card"><p class="note" style="margin:0">' + (ST.busy ? "Scanning..." : "No signals match right now. Try a lower minimum score or 'Both' setups.") + "</p></div>";
+    else {
+      const nm = {}; universe().forEach(x => { nm[x.s] = x.n; });
+      h += '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Stock</th><th>Setup</th><th class="num">Score</th><th>Signal</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th><th class="num">Risk %</th><th class="num">Shares</th><th>Why it scored</th></tr></thead><tbody>';
+      live.slice(0, 120).forEach(x => {
+        const sg = x.sg, p = planOf(sg), on = O.on[sg.su] || [], pass = on.filter(id => RULES.find(r => r.id === id).f(sg.f)).length;
+        h += "<tr><td><a href=\"https://www.tradingview.com/chart/?symbol=NSE%3A" + encodeURIComponent(sg.sym) + '" target="_blank" rel="noopener noreferrer"><b>' + E(sg.sym) + "</b></a><br><small style=\"color:var(--mute)\">" + E(nm[sg.sym] || "") + "</small></td><td>" + NAMES[sg.su] + '</td><td class="num"><b>' + x.sc + "</b></td><td>" + E(sg.date) + '</td><td class="num">' + f2(p.entry) + (p.known ? "" : " <small>(about)</small>") + '</td><td class="num">' + f2(p.stop) + '</td><td class="num">' + (isFinite(p.tgt) ? f2(p.tgt) : "-") + '</td><td class="num">' + f2(p.risk / p.entry * 100, 1) + '</td><td class="num">' + p.qty + "</td><td><small>" + pass + " of " + on.length + " rules" + (sg.f.vr ? " &middot; volume " + f2(sg.f.vr, 1) + "x" : "") + "</small></td></tr>";
+      });
+      h += "</tbody></table></div>";
+    }
+    h += '<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:600">Does a higher score earn more? (past signals)</summary>' + bandsHTML() + "</details>";
+    h += '<div id="swlab" style="margin-top:14px">' + labHTML() + "</div>";
+    host.innerHTML = h;
+  }
+  function bandsHTML() {
+    if (!SIG.length) return '<p class="note">Candles are still loading.</p>';
+    const BANDS = [[85, 101, "85 to 100"], [70, 85, "70 to 84"], [50, 70, "50 to 69"], [0, 50, "Under 50"]];
+    let h = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Setup</th><th>Score</th><th class="num">Trades</th><th class="num">Win</th><th class="num">Average per trade (&plusmn; range)</th><th class="num">Total</th></tr></thead><tbody>';
+    ["BRK", "PUL"].forEach(su => {
+      const T = tradesOf(su, O.x).map(x => ({r: x.r, d: x.d, sc: scoreOf(x.sg)}));
+      [[0, 101, "All signals"]].concat(BANDS).forEach(b => { const s = stat(T.filter(x => x.sc >= b[0] && x.sc < b[1])); h += "<tr><td>" + NAMES[su] + "</td><td>" + b[2] + '</td><td class="num">' + s.n + '</td><td class="num">' + (s.n ? s.win.toFixed(0) + "%" : "-") + '</td><td class="num" style="color:var(--' + (s.m > 0 ? "good" : "bad") + ')"><b>' + (s.n ? f2s(s.m) + "R" : "-") + "</b> <small>&plusmn;" + (s.n > 1 ? (1.96 * s.se).toFixed(2) : "-") + '</small></td><td class="num">' + (s.n ? f2(s.tot, 0) + "R" : "-") + "</td></tr>"; });
+    });
+    return h + '</tbody></table></div><p class="note">R is the risk of a trade (entry to stop). Entry is the next open after the signal, with the cost % above taken off every trade. If the average does not rise from the lower to the higher score bands, the score is not adding anything. Stocks are today\'s list, so very old failures are missing: results are a little flattering.</p>';
+  }
+  /* ---------- lab ---------- */
+  const VT = {baseline: "baseline", combined: "combined", solid: "solid improvement", maybe: "better, could be luck", no: "no improvement", worse: "makes it worse", few: "too few trades", all: "no effect (every signal passes)"};
+  const row = (name, r, hi) => "<tr" + (hi ? ' style="background:color-mix(in srgb,var(--a) 8%,var(--card))"' : "") + "><td>" + name + '</td><td class="num">' + r.n + '</td><td class="num">' + (r.s && r.s.n ? r.s.win.toFixed(0) + "%" : "-") + '</td><td class="num" style="color:var(--' + (r.s && r.s.m > 0 ? "good" : "bad") + ')"><b>' + (r.s && r.s.n ? f2s(r.s.m) + "R" : "-") + "</b> <small>&plusmn;" + (r.s && r.s.n > 1 ? (1.96 * r.s.se).toFixed(2) : "-") + '</small></td><td class="num">' + (r.s ? f2(r.s.tot, 0) + "R" : "-") + '</td><td class="num">' + f2s(r.ha) + '</td><td class="num">' + f2s(r.hb) + '</td><td class="num">' + (r.yn ? r.yb + " of " + r.yn : "-") + '</td><td class="num">' + (isFinite(r.z) ? f2s(r.z) : "-") + '</td><td style="font-size:.82rem;' + (r.v === "solid" ? "color:var(--good);font-weight:700" : r.v === "maybe" ? "color:var(--warn,#b45309)" : "color:var(--mute)") + '">' + (VT[r.v] || r.v) + "</td></tr>";
+  const hdr = t => '<tr><td colspan="10" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">' + t + "</td></tr>";
+  function labHTML() {
+    if (LABBUSY) return '<p class="note">Running the tests...</p>'; const ks = Object.keys(LAB); if (!ks.length) return '<div class="card"><b>Profitability lab</b><p class="note" style="margin:6px 0 0">Press <b>Run the lab</b> above. It replays every past signal (entry next open, cost taken off), tests one rule or exit at a time against the signals it leaves out, and marks only the ones that were better in both halves of the history and in most years. Takes under a minute.</p></div>';
+    let h = '<div class="card"><b>Profitability lab</b>';
+    ["BRK", "PUL"].forEach(su => { if (LAB[su]) h += LAB[su].html; });
+    const any = ["BRK", "PUL"].some(su => LAB[su] && (LAB[su].ids.length || LAB[su].x >= 0));
+    h += '<p class="note" style="margin:8px 0 0"><b>How to read it:</b> "vs the rest (z)" compares the signals passing the rule with the ones that fail it, counting trades on the same day as one piece of evidence. Solid needs z of 2.5+, better in both halves, better in most years and at least 20% of trades. Many rules are tested, so one or two solid rows can still be luck; trust a rule more when it also makes sense. Results are on today\'s stock list and before any trade you could not have filled.</p>';
+    if (any) h += '<div style="margin-top:8px"><button type="button" class="cbtn" data-swapply="1">Use the solid rules in the score</button></div>';
+    return h + "</div>";
+  }
+  async function runLab() {
+    if (LABBUSY || !SIG.length) return; LABBUSY = true; LAB = {}; const box = () => $e("#swlab"); if (box()) box().innerHTML = labHTML(); await tick();
+    try {
+      for (const su of ["BRK", "PUL"]) {
+        const T = tradesOf(su, O.x); if (T.length < 100) { LAB[su] = {html: '<h3 class="tch">' + NAMES[su] + '</h3><p class="note">Only ' + T.length + " finished past signals: too few to test.</p>", ids: [], x: -1}; continue; }
+        const base = stat(T);
+        let h = '<h3 class="tch" style="margin-top:12px">' + NAMES[su] + ' setups</h3><div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule</th><th class="num">Trades</th><th class="num">Win</th><th class="num">Average per trade (&plusmn; range)</th><th class="num">Total</th><th class="num">Earlier half</th><th class="num">Later half</th><th class="num">Years better</th><th class="num">vs the rest (z)</th><th>Verdict</th></tr></thead><tbody>';
+        h += row("Baseline: all " + NAMES[su].toLowerCase() + " signals, " + E(XV[O.x].n), {n: base.n, s: base, ha: mean(T.filter(x => x.h === 0)), hb: mean(T.filter(x => x.h === 1)), yb: 0, yn: 0, z: NaN, v: "baseline"}, true);
+        h += hdr("Exits (same trades, different way of getting out)"); let bestX = -1, bestZ = 0;
+        for (let xi = 0; xi < XV.length; xi++) { if (xi === O.x) continue; const r = evalExit(T, su, xi); if (r.v === "solid" && r.s.m > base.m && r.z > bestZ) { bestZ = r.z; bestX = xi; } h += row(E(XV[xi].n), r); await tick(); }
+        const solid = []; let g = "";
+        for (const rule of RULES) {
+          if (rule.s.indexOf(letter(su)) < 0) continue; if (rule.g !== g) { g = rule.g; h += hdr(g); }
+          const r = evalFilter(T, T.map(x => rule.f(x.sg.f))); if (r.v === "solid") solid.push(rule); h += row(E(rule.l), r); await tick();
+        }
+        if (solid.length) {
+          const sub = T.filter(x => solid.every(rl => rl.f(x.sg.f))), xi = bestX >= 0 ? bestX : O.x, L = sub.map(x => ({r: rOf(x.sg, xi), d: x.d})).filter(x => isFinite(x.r)), s = stat(L);
+          h += hdr("All solid rules together") + row(E(solid.map(r => r.l).join(" + ") + (bestX >= 0 ? " + " + XV[bestX].n : "")), {n: L.length, s, ha: NaN, hb: NaN, yb: 0, yn: 0, z: NaN, v: "combined"}, true);
+        }
+        h += "</tbody></table></div>"; LAB[su] = {html: h, ids: solid.map(r => r.id), x: bestX};
+      }
+    } catch (e) { LAB = {BRK: {html: '<p class="note">The lab could not run: ' + E(String((e && e.message) || e)) + "</p>", ids: [], x: -1}}; }
+    LABBUSY = false; if (box()) box().innerHTML = labHTML();
+  }
+  function open() { view(); if (!ST.t && !ST.busy) load(false); }
+  document.addEventListener("click", ev => {
+    const t = ev.target; if (!t || !t.closest) return; const sec = t.closest("#sw"); if (!sec) return; let b;
+    if ((b = t.closest("[data-swsetup]"))) { O.setup = b.dataset.swsetup; save(); view(); return; }
+    if ((b = t.closest("[data-swfresh]"))) { O.fresh = +b.dataset.swfresh; save(); view(); return; }
+    if ((b = t.closest("[data-swmin]"))) { O.min = +b.dataset.swmin; save(); view(); return; }
+    if ((b = t.closest("[data-swr]"))) { const p = b.dataset.swr.split(":"), a = O.on[p[0]] || (O.on[p[0]] = []), k = a.indexOf(p[1]); if (k >= 0) a.splice(k, 1); else a.push(p[1]); save(); const d = sec.querySelector("details"), was = d && d.open; view(); const d2 = $e("#sw details"); if (d2 && was) d2.open = true; return; }
+    if (t.closest("[data-swrescan]")) { load(true); return; }
+    if (t.closest("[data-swlab]")) { runLab(); return; }
+    if (t.closest("[data-swapply]")) { ["BRK", "PUL"].forEach(su => { if (LAB[su] && LAB[su].ids.length) O.on[su] = LAB[su].ids.slice(); if (LAB[su] && LAB[su].x >= 0) O.x = LAB[su].x; }); save(); LAB = {}; view(); }
+  });
+  document.addEventListener("change", ev => {
+    const t = ev.target; if (!t || !t.closest || !t.closest("#sw")) return;
+    if (t.id === "swrisk") { O.risk = Math.max(100, +t.value || 2000); save(); view(); }
+    if (t.id === "swcost") { O.cost = Math.min(2, Math.max(0, +t.value || 0)); save(); SIG.forEach(sg => { sg.rx = {}; }); LAB = {}; view(); }
+    if (t.id === "swx") { O.x = +t.value || 0; save(); LAB = {}; view(); }
+  });
+  function regime() { if (!NF || !B.NIFTY) return null; const d = B.NIFTY.bars[B.NIFTY.bars.length - 1].time, m = NF[d]; return m ? {n50: m.n50, n200: m.n200, date: d} : null; }
+  function live(minScore, fresh) {
+    return SIG.filter(sg => sg.i >= sg.n - 1 - fresh).map(sg => ({sg, sc: scoreOf(sg)})).filter(x => x.sc >= minScore).map(x => { const p = planOf(x.sg), X = XV[O.x]; return {sym: x.sg.sym, setup: NAMES[x.sg.su], score: x.sc, entry: p.entry, stop: p.stop, tgt: p.tgt, rr: X.rr, H: X.H}; });
+  }
+  return {open, load, regime, live, bars: sym => (B[sym] ? B[sym].bars : null), state: () => ({t: ST.t, busy: ST.busy}), lastDate: () => (B.NIFTY ? B.NIFTY.bars[B.NIFTY.bars.length - 1].time : ""), cost: () => O.cost, _t: {prep, scan, rOf, stat, zDiff, RULES, XV, get SIG() { return SIG; }}};
+})();
+const swPaint = () => swApi.open();
+
+/* ===== COMMAND TAB: one pipeline from market gate to sized, journaled trades ===== */
+const cmApi = (function () {
+  const $e = s => document.querySelector(s), E = esc;
+  const f2 = (v, d) => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: d == null ? 2 : d, maximumFractionDigits: d == null ? 2 : d}) : "-");
+  const f2s = v => (isFinite(v) ? (v >= 0 ? "+" : "") + v.toFixed(2) : "-");
+  const secOf = sym => (typeof STOCK_SECTOR !== "undefined" && STOCK_SECTOR[sym]) || (typeof TC_SECTOR_EXTRA !== "undefined" && TC_SECTOR_EXTRA[sym]) || "";
+  let C = {risk: 2000, maxPos: 5, maxSec: 2, auto: true};
+  try { const sv = JSON.parse(localStorage.getItem("cmO") || "null"); if (sv) C = Object.assign(C, sv); } catch (e) {}
+  const saveC = () => { try { localStorage.setItem("cmO", JSON.stringify(C)); } catch (e) {} };
+  let J = []; try { J = JSON.parse(localStorage.getItem("cmJ") || "[]") || []; } catch (e) {}
+  const saveJ = () => { try { localStorage.setItem("cmJ", JSON.stringify(J)); } catch (e) {} };
+  const TIERS = {A: "A: PEAD + a timing signal", B: "B: PEAD rule alone", C: "C: Cup + Quick agree (unproven)", D: "D: watch only"}, TMULT = {A: 1, B: 1, C: 0.5, D: 0};
+  let PLAN = {rows: [], skip: [], watch: [], gate: null, ready: false, wait: ""}, BUSY = false, TM = null;
+
+  function gate() {
+    const r = swApi.regime(); if (!r) return {k: "unk", m: 0, t: "Nifty history not loaded yet", d: ""};
+    const n = r.n50 + r.n200;
+    return n === 2 ? {k: "go", m: 1, t: "GO: Nifty is above its 50-day and 200-day averages", d: r.date} : n === 1 ? {k: "caution", m: 0.5, t: "CAUTION: Nifty is above only one of its 50-day and 200-day averages. Half size.", d: r.date} : {k: "stop", m: 0, t: "STAND ASIDE: Nifty is below both averages. No new long trades.", d: r.date};
+  }
+  function readiness() {
+    const a = ppApi.buys(), cu = cuApi.state(), sw = swApi.state(), miss = [];
+    if (!a.loaded) miss.push("PEAD results"); else if (a.pending) miss.push("PEAD price checks (" + a.pending + ")");
+    if (!cu.t || cu.busy) miss.push("Cup & Handle scan"); if (!sw.t || sw.busy) miss.push("Quick scan");
+    return {ok: !miss.length, miss, a};
+  }
+  function build() {
+    const rd = readiness(), g = gate(), M = {}, get = s => M[s] || (M[s] = {sym: s});
+    rd.a.list.forEach(b => { if (b.st === "buy") get(b.sym).pead = b; else get(b.sym).ext = b; });
+    const cu = cuApi.merged(); Object.keys(cu).forEach(s => { const r = cu[s]; if (r.score >= 85 && /Breakout|Near breakout/.test(r.status)) get(s).cup = r; });
+    swApi.live(70, 1).forEach(q => { const o = get(q.sym); if (!o.qk || q.score > o.qk.score) o.qk = q; });
+    const L = Object.keys(M).map(s => M[s]);
+    L.forEach(o => {
+      o.tier = o.pead ? (o.cup || o.qk ? "A" : "B") : (o.cup && o.qk ? "C" : "D");
+      o.sector = secOf(o.sym); o.rank = o.pead ? 1000 + o.pead.score : o.cup ? 500 + o.cup.score : (o.qk ? o.qk.score : 0);
+      if (o.pead) { const b = o.pead; o.plan = {src: "PEAD", entry: b.px, stop: b.stop, tgt: NaN, rr: 99, H: 20, closeStop: true, why: "PEAD rule " + b.rules.join("+") + ", result " + b.days + " days ago" + (o.cup ? " · cup " + o.cup.status : "") + (o.qk ? " · quick " + o.qk.score : "")}; }
+      else if (o.cup) { const r = o.cup, e = Math.max(r.pivot * 1.001, r.price || 0), s = r.stop * 0.999, k = e - s; o.plan = {src: "Cup", entry: e, stop: s, tgt: e + 3 * k, rr: 3, H: 60, closeStop: false, why: "Cup score " + r.score + ", " + r.status + (o.qk ? " · quick " + o.qk.score + " (" + o.qk.setup + ")" : "")}; }
+      else if (o.qk) { const q = o.qk; o.plan = {src: "Quick", entry: q.entry, stop: q.stop, tgt: q.tgt, rr: q.rr, H: q.H, closeStop: false, why: q.setup + " score " + q.score}; }
+    });
+    const ord = {A: 0, B: 1, C: 2, D: 3}; L.sort((a, b) => ord[a.tier] - ord[b.tier] || b.rank - a.rank);
+    const d0 = swApi.lastDate(), openJ = J.filter(j => j.state === "open" && j.logDate !== d0), secN = {}; openJ.forEach(j => { if (j.sector) secN[j.sector] = (secN[j.sector] || 0) + 1; });
+    let n = openJ.length; const rows = [], skip = [], watch = [];
+    L.forEach(o => {
+      if (o.tier === "D" || !o.plan) { watch.push(o); return; }
+      const p = o.plan, risk = C.risk * TMULT[o.tier] * g.m, per = p.entry - p.stop; let why = "";
+      if (!(per > 0) || per / p.entry > 0.25) why = "stop too far or invalid";
+      else if (g.m === 0) why = "market gate is off";
+      else if (openJ.some(j => j.sym === o.sym)) why = "already in your journal";
+      else if (n >= C.maxPos) why = "position limit reached";
+      else if (o.sector && (secN[o.sector] || 0) >= C.maxSec) why = "sector limit (" + o.sector + ")";
+      o.qty = per > 0 ? Math.floor(risk / per) : 0; o.risk = o.qty * per;
+      if (!why && o.qty < 1) why = "risk per trade too small for one share";
+      if (why) { o.why = why; skip.push(o); return; }
+      o.rec = J.some(j => j.sym === o.sym && j.logDate === d0); n++; if (o.sector) secN[o.sector] = (secN[o.sector] || 0) + 1; rows.push(o);
+    });
+    PLAN = {rows, skip, watch, gate: g, ready: rd.ok, wait: rd.miss.join(", "), ext: rd.a.list.filter(b => b.st === "ext")};
+  }
+  /* ---------- journal: every selected trade is recorded as a paper trade and followed on daily candles ---------- */
+  function autolog() {
+    if (!C.auto || !PLAN.ready || !PLAN.gate || PLAN.gate.m === 0) return; const d0 = swApi.lastDate(); if (!d0) return; let add = 0;
+    PLAN.rows.forEach(o => {
+      const p = o.plan; if (J.some(j => j.sym === o.sym && (j.state === "open" || j.logDate >= addDays(d0, -15)))) return;
+      J.push({id: o.sym + "|" + d0 + "|" + p.src, sym: o.sym, tier: o.tier, src: p.src, why: p.why, sector: o.sector, logDate: d0, plan: p.entry, stop: p.stop, rr: p.rr, H: p.H, cs: p.closeStop ? 1 : 0, qty: o.qty, state: "open"}); add++;
+    });
+    if (add) saveJ();
+  }
+  const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  function resolve() {
+    let ch = 0; const cost = swApi.cost();
+    J.forEach(j => {
+      if (j.state !== "open") return; const bars = swApi.bars(j.sym); if (!bars) return;
+      let k = -1; for (let q = bars.length - 1; q >= 0; q--) { if (bars[q].time > j.logDate) k = q; else break; } if (k < 0) return;
+      const fill = bars[k].open; if (!(fill > 0)) return; j.fill = fill; j.fillDate = bars[k].time; const risk = fill - j.stop;
+      const tgt = j.rr < 90 ? fill + j.rr * risk : Infinity; let ex = NaN, why = "";
+      if (!(risk > 0)) { ex = fill; why = "stop"; j.r = -1; }
+      else for (let q = k; q < bars.length && q < k + j.H; q++) {
+        const b = bars[q];
+        if (j.cs) { if (b.close < j.stop) { ex = b.close; why = "stop"; break; } }
+        else { if (q > k && b.open <= j.stop) { ex = b.open; why = "stop"; break; } if (b.low <= j.stop) { ex = j.stop; why = "stop"; break; } }
+        if (b.high >= tgt) { ex = tgt; why = "target"; break; }
+        if (q === k + j.H - 1) { ex = b.close; why = "time"; break; }
+      }
+      if (why) { if (!(j.r === -1 && risk <= 0)) j.r = (ex - fill) / risk - (cost / 100) * fill / risk; j.exit = ex; j.exitDate = j.exitDate || ""; j.why2 = why; j.state = "closed"; ch++; }
+      else { j.last = bars[bars.length - 1].close; j.rnow = (j.last - fill) / risk; }
+    });
+    if (ch) saveJ();
+  }
+  function stats(L) { const N = L.length; if (!N) return {n: 0}; const rs = L.map(j => j.r), m = rs.reduce((p, x) => p + x, 0) / N, sd = Math.sqrt(rs.reduce((p, x) => p + (x - m) * (x - m), 0) / Math.max(1, N - 1)); return {n: N, win: rs.filter(x => x > 0).length / N * 100, m, tot: rs.reduce((p, x) => p + x, 0), ci: N > 1 ? 1.96 * sd / Math.sqrt(N) : NaN}; }
+  /* ---------- screen ---------- */
+  function step() { try { build(); resolve(); autolog(); build(); } catch (e) { PLAN.err = String((e && e.message) || e); } }
+  const btn = (attr, label, tip) => '<button type="button" class="cbtn" ' + attr + '="1" title="' + E(tip || "") + '">' + label + "</button>";
+  function view() {
+    const host = $e("#cmbody"); if (!host) return; const g = PLAN.gate || gate();
+    const col = g.k === "go" ? "var(--good)" : g.k === "caution" ? "var(--warn,#b45309)" : g.k === "stop" ? "var(--bad)" : "var(--mute)";
+    let h = '<div class="znhead" style="background:linear-gradient(120deg,#111827,#0f766e)"><div><h2>COMMAND</h2><span>Market gate &rarr; best setups &rarr; position size &rarr; journal</span></div><div class="znpills"><span>PEAD first</span><span>Risk-sized</span><span>Self-checking journal</span></div></div>';
+    h += '<div class="card" style="border-left:6px solid ' + col + '"><b style="color:' + col + '">' + E(g.t) + "</b>" + (g.d ? ' <span class="note">(candle of ' + E(g.d) + ")</span>" : "") +
+      '<p class="note" style="margin:6px 0 0">How it works: the <b>market gate</b> sets your size (full, half or none). <b>PEAD</b> is the only rule your tests proved, so it comes first. A PEAD stock that also has a Cup &amp; Handle or Quick signal is tier A. A stock with only a Cup + Quick agreement is tier C: unproven, so half size. Every trade it lists is saved as a <b>paper trade</b> and followed on daily candles, so in a few weeks you see its real results instead of back-tests. Screening aid, not advice.</p></div>';
+    h += '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 14px"><label>Risk per trade Rs <input type="number" id="cmrisk" style="width:84px" value="' + C.risk + '"></label><label>Max positions <input type="number" id="cmpos" style="width:56px" min="1" max="30" value="' + C.maxPos + '"></label><label>Max per sector <input type="number" id="cmsec" style="width:56px" min="1" max="10" value="' + C.maxSec + '"></label>' +
+      '<label><input type="checkbox" id="cmauto"' + (C.auto ? " checked" : "") + "> Record the plan below as paper trades</label>" + btn("data-cmrefresh", "&#8635; Refresh all", "Reload PEAD, Cup & Handle and Quick data") + "</div>" +
+      '<div class="note" id="cmstat" style="margin:8px 0 0">' + (PLAN.ready ? "All data loaded." : "Loading: " + E(PLAN.wait || "starting") + "...") + (PLAN.err ? " Problem: " + E(PLAN.err) : "") + "</div></div>";
+    h += '<h3 class="tch" style="margin-top:14px">Today\'s plan (' + PLAN.rows.length + ")</h3>";
+    const tr = (o, skipped) => { const p = o.plan; return "<tr" + (skipped ? ' style="opacity:.6"' : "") + "><td><b>" + E(o.sym) + "</b><br><small style=\"color:var(--mute)\">" + E(o.sector) + "</small></td><td>" + o.tier + '</td><td class="num">' + f2(p.entry) + '</td><td class="num">' + f2(p.stop) + '</td><td class="num">' + (isFinite(p.tgt) ? f2(p.tgt) : "none") + '</td><td class="num">' + f2((p.entry - p.stop) / p.entry * 100, 1) + '</td><td class="num">' + (skipped ? "-" : o.qty) + '</td><td class="num">' + (skipped ? "-" : f2(o.risk, 0)) + "</td><td><small>" + E(skipped ? "Skipped: " + o.why : p.why + (o.rec ? " (recorded as a paper trade)" : "")) + " &middot; exit: " + (p.src === "PEAD" ? "close below stop or after 20 sessions" : "stop" + (isFinite(p.tgt) ? ", target" : "") + ", or after " + p.H + " sessions") + "</small></td></tr>"; };
+    const head = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Stock</th><th>Tier</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th><th class="num">Risk %</th><th class="num">Shares</th><th class="num">Rs at risk</th><th>Why and exit</th></tr></thead><tbody>';
+    if (PLAN.rows.length) h += head + PLAN.rows.map(o => tr(o, false)).join("") + "</tbody></table></div>";
+    else h += '<div class="card"><p class="note" style="margin:0">' + (PLAN.ready ? (g.m === 0 ? "The market gate is off, so nothing is sized today." : "No stock qualifies right now. Waiting is a position too.") : "Still loading the data. This page fills in by itself.") + "</p></div>";
+    if (PLAN.skip.length) h += '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Qualified but skipped (' + PLAN.skip.length + ")</summary>" + head + PLAN.skip.map(o => tr(o, true)).join("") + "</tbody></table></div></details>";
+    if (PLAN.watch.length || (PLAN.ext && PLAN.ext.length)) h += '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Watch only, not sized (' + (PLAN.watch.length + (PLAN.ext ? PLAN.ext.length : 0)) + ')</summary><p class="note">Single technical signals have no proven edge here. PEAD stocks that already ran more than 5% above the entry are "extended" and skipped by the PEAD rules.</p><p class="note">' + (PLAN.ext || []).map(b => "<b>" + E(b.sym) + "</b> (PEAD, extended)").concat(PLAN.watch.slice(0, 60).map(o => E(o.sym) + (o.cup ? " (cup)" : "") + (o.qk ? " (quick " + o.qk.score + ")" : ""))).join(" &middot; ") + "</p></details>";
+    /* journal */
+    const open = J.filter(j => j.state === "open"), closed = J.filter(j => j.state === "closed");
+    h += '<h3 class="tch" style="margin-top:18px">Journal (paper trades followed on daily candles)</h3>';
+    if (!J.length) h += '<div class="card"><p class="note" style="margin:0">Empty. Trades from the plan are recorded here once all data has loaded and the gate is on. It is stored in this browser only: use Export to keep a copy.</p></div>';
+    else {
+      const T = [["All", closed], ["A", closed.filter(j => j.tier === "A")], ["B", closed.filter(j => j.tier === "B")], ["C", closed.filter(j => j.tier === "C")]];
+      h += '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Tier</th><th class="num">Closed</th><th class="num">Win</th><th class="num">Average per trade (&plusmn; range)</th><th class="num">Total</th><th>Check</th></tr></thead><tbody>' +
+        T.map(q => { const s = stats(q[1]), flag = s.n >= 15 && s.m + s.ci < 0 ? "Losing: review or stop using" : s.n >= 15 && s.m < 0 ? "Below zero: watch closely" : s.n < 15 ? "Too few to judge (" + s.n + " of 15)" : "On track"; return "<tr><td>" + q[0] + '</td><td class="num">' + s.n + '</td><td class="num">' + (s.n ? s.win.toFixed(0) + "%" : "-") + '</td><td class="num">' + (s.n ? "<b>" + f2s(s.m) + "R</b> <small>&plusmn;" + f2(s.ci) + "</small>" : "-") + '</td><td class="num">' + (s.n ? f2(s.tot, 1) + "R" : "-") + '</td><td style="font-size:.82rem;color:var(--mute)">' + flag + "</td></tr>"; }).join("") + "</tbody></table></div>";
+      h += '<p class="note" style="margin:6px 0">R is the risk of a trade. Paper fills use the next open after the signal, with the Quick tab\'s cost % taken off. Open: ' + open.length + " &middot; closed: " + closed.length + ".</p>";
+      const rowJ = j => "<tr><td><b>" + E(j.sym) + "</b></td><td>" + j.tier + "</td><td>" + E(j.logDate) + '</td><td class="num">' + (j.fill ? f2(j.fill) : "waiting") + '</td><td class="num">' + f2(j.stop) + '</td><td class="num">' + (j.state === "closed" ? "<b>" + f2s(j.r) + "R</b> (" + E(j.why2) + ")" : isFinite(j.rnow) ? f2s(j.rnow) + "R now" : "-") + "</td></tr>";
+      const jh = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Stock</th><th>Tier</th><th>Logged</th><th class="num">Fill</th><th class="num">Stop</th><th class="num">Result</th></tr></thead><tbody>';
+      if (open.length) h += '<details open style="margin-top:6px"><summary style="cursor:pointer;font-weight:600">Open (' + open.length + ")</summary>" + jh + open.map(rowJ).join("") + "</tbody></table></div></details>";
+      if (closed.length) h += '<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:600">Closed (' + closed.length + ")</summary>" + jh + closed.slice().reverse().slice(0, 100).map(rowJ).join("") + "</tbody></table></div></details>";
+      h += '<div class="charttools" style="border:0;padding:8px 0 0">' + btn("data-cmexport", "Export journal (CSV)") + btn("data-cmclear", "Clear journal") + "</div>";
+    }
+    host.innerHTML = h;
+  }
+  function open() { view(); try { ppApi.load(false); } catch (e) {} try { cuApi.load(false); } catch (e) {} try { swApi.load(false); } catch (e) {} step(); view(); if (!TM) TM = setInterval(() => { if (typeof current !== "undefined" && current === "cm" && !document.hidden) { const a = document.activeElement; step(); if (!(a && a.closest && a.closest("#cmbody") && /INPUT|SELECT/.test(a.tagName))) view(); } }, 5000); }
+  document.addEventListener("click", ev => {
+    const t = ev.target; if (!t || !t.closest || !t.closest("#cm")) return;
+    if (t.closest("[data-cmrefresh]")) { try { ppApi.load(true); } catch (e) {} try { cuApi.load(true); } catch (e) {} try { swApi.load(true); } catch (e) {} step(); view(); return; }
+    if (t.closest("[data-cmclear]")) { if (confirm("Delete the whole journal?")) { J = []; saveJ(); step(); view(); } return; }
+    if (t.closest("[data-cmexport]")) {
+      const L = ["symbol,tier,source,logged,fill_date,fill,stop,qty,state,exit,reason,R"].concat(J.map(j => [j.sym, j.tier, j.src, j.logDate, j.fillDate || "", j.fill || "", j.stop, j.qty, j.state, j.exit || "", j.why2 || "", isFinite(j.r) ? j.r.toFixed(3) : ""].join(",")));
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([L.join("\n")], {type: "text/csv"})); a.download = "journal.csv"; document.body.appendChild(a); a.click(); a.remove();
+    }
+  });
+  document.addEventListener("change", ev => {
+    const t = ev.target; if (!t || !t.closest || !t.closest("#cm")) return;
+    if (t.id === "cmrisk") C.risk = Math.max(100, +t.value || 2000); if (t.id === "cmpos") C.maxPos = Math.min(30, Math.max(1, +t.value || 5)); if (t.id === "cmsec") C.maxSec = Math.min(10, Math.max(1, +t.value || 2)); if (t.id === "cmauto") C.auto = t.checked;
+    saveC(); step(); view();
+  });
+  return {open, _t: {build, J: () => J, plan: () => PLAN}};
+})();
+const cmPaint = () => cmApi.open();
+
+
 
 
 
@@ -5815,6 +6265,8 @@ function show(id) {
   if (id === "st") { try { stPaint(); } catch (e) {} }
   if (id === "n5") { try { n5Paint(); } catch (e) {} }
   if (id === "cu") { try { cuPaint(); } catch (e) {} }
+  if (id === "sw") { try { swPaint(); } catch (e) {} }
+  if (id === "cm") { try { cmPaint(); } catch (e) {} }
   if (id === "op") { try { opPaint(); } catch (e) {} }
   ensureChart(sec);
   if (sec) { const cs = getComputedStyle(sec); document.documentElement.style.setProperty("--a", cs.getPropertyValue("--a")); document.documentElement.style.setProperty("--b", cs.getPropertyValue("--b")); }
@@ -5881,7 +6333,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="st" aria-selected="false" style="--a:#0e7490;--b:#1d4ed8">SuperTrend</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="sw" aria-selected="false" style="--a:#0f766e;--b:#1d4ed8">Quick 1&ndash;5 day</button><button role="tab" data-t="cm" aria-selected="false" style="--a:#111827;--b:#0f766e">Command</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -5914,13 +6366,17 @@ function render(stocks) {
     const cb = document.createElement("section"); cb.className = "stock"; cb.id = "cb"; cb.style.cssText = "--a:#be123c;--b:#f59e0b";
     cb.innerHTML = '<div id="cbbody"></div>'; views.appendChild(cb);
   }
-  if (!document.getElementById("st")) {
-    const st = document.createElement("section"); st.className = "stock"; st.id = "st"; st.style.cssText = "--a:#0e7490;--b:#1d4ed8";
-    st.innerHTML = '<div id="stbody"></div>'; views.appendChild(st);
-  }
   if (!document.getElementById("n5")) {
     const n5 = document.createElement("section"); n5.className = "stock"; n5.id = "n5"; n5.style.cssText = "--a:#0f766e;--b:#2563eb";
     n5.innerHTML = '<div id="n5body"></div>'; views.appendChild(n5);
+  }
+  if (!document.getElementById("cm")) {
+    const cm = document.createElement("section"); cm.className = "stock"; cm.id = "cm"; cm.style.cssText = "--a:#111827;--b:#0f766e";
+    cm.innerHTML = '<div id="cmbody"></div>'; views.appendChild(cm);
+  }
+  if (!document.getElementById("sw")) {
+    const sw = document.createElement("section"); sw.className = "stock"; sw.id = "sw"; sw.style.cssText = "--a:#0f766e;--b:#1d4ed8";
+    sw.innerHTML = '<div id="swbody"></div>'; views.appendChild(sw);
   }
   if (!document.getElementById("cu")) {
     const cu = document.createElement("section"); cu.className = "stock"; cu.id = "cu"; cu.style.cssText = "--a:#b45309;--b:#0891b2";
@@ -5963,7 +6419,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "st" || current === "n5" || current === "cu" || current === "op" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "st" || current === "n5" || current === "cu" || current === "sw" || current === "cm" || current === "op" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
