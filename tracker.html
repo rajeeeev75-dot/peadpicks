@@ -1261,7 +1261,85 @@ document.addEventListener("click", ev => {
   else if (b.dataset.gtab) GD_TAB = b.dataset.gtab; else if (b.dataset.gsym) { GD_SYM = b.dataset.gsym; GD_TAB = "sym"; } else if (b.dataset.gstr) { GD_STR = b.dataset.gstr; GD_TAB = "str"; }
   const body = b.closest(".gbody"); if (body) body.innerHTML = guideBody();
 });
-function opPaint() { const b = document.getElementById("opbody"); if (!b) return; b.innerHTML = guideHTML(); }
+/* ===== OPTIONS TAB: Nifty session strip and the strike price selector (rules from the NZD Thulasi sheet) ===== */
+let KS = {itm: 200, buf: 10, step: 100, lot: 65, ov: {}, pos: {}};
+try { const sv = JSON.parse(localStorage.getItem("ksO") || "null"); if (sv) KS = Object.assign(KS, sv); } catch (e) {}
+const ksSave = () => { try { localStorage.setItem("ksO", JSON.stringify(KS)); } catch (e) {} };
+function opN50() { const MM = typeof MARKET !== "undefined" ? MARKET : null; return ((MM && MM.indices) || []).find(x => String(x.name).toUpperCase() === "NIFTY 50") || null; }
+function opStripHTML() {
+  const MM = typeof MARKET !== "undefined" ? MARKET : null, n50 = opN50();
+  if (!n50) return '<p class="note">Waiting for the Nifty prices from your Worker...</p>';
+  let h = niftySessionHTML({p: +n50.last}); const vix = ((MM && MM.indices) || []).find(x => String(x.name).toUpperCase() === "INDIA VIX");
+  if (vix && isFinite(+vix.last)) h = h.replace(/<\/div>\s*$/, '<div class="tile' + tileCls(+vix.pct) + '"><small>India VIX</small><b>' + fmt(+vix.last, 2) + "</b><span>" + (isFinite(+vix.pct) ? pct(+vix.pct, 2) + " today" : "") + "</span></div></div>");
+  return h;
+}
+function opStrip() { const b = document.getElementById("opstrip"); if (b) b.innerHTML = opStripHTML(); }
+let KSW = null, ksBusy = false;
+function ksBars() {
+  if (typeof HIST !== "undefined" && HIST) {
+    if (HIST[BENCH_TICKER] && HIST[BENCH_TICKER].length > 30) return HIST[BENCH_TICKER];
+    const k = Object.keys(HIST).find(x => /NIFTY_?50$/.test(x) && HIST[x].length > 30); if (k) return HIST[k];
+  }
+  if (!KSW && !ksBusy && typeof MARKET_API_URL !== "undefined" && MARKET_API_URL) {
+    ksBusy = true;
+    fetch(MARKET_API_URL + "?bars=NIFTY&tf=DF", {cache: "no-store"}).then(r => r.json()).then(j => { const rows = j && j.bars && j.bars.NIFTY; if (rows && rows.length > 30) KSW = rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0})); }).catch(() => {}).then(() => { ksBusy = false; if (KSW) ksPaint(); });
+  }
+  return KSW;
+}
+const ksIso = d => d.toISOString().slice(0, 10), ksAdd = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return ksIso(d); };
+function ksRange(bars, a, b) { let hi = -Infinity, lo = Infinity, n = 0; bars.forEach(x => { if (x.time >= a && x.time <= b) { n++; if (x.high > hi) hi = x.high; if (x.low < lo) lo = x.low; } }); return n ? {hi, lo, n, a, b} : null; }
+function ksLevels() {
+  const bars = ksBars(); if (!bars) return null; const today = new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Kolkata"});
+  const y = +today.slice(0, 4), m = +today.slice(5, 7), pm = m === 1 ? 12 : m - 1, py = m === 1 ? y - 1 : y, pmS = py + "-" + String(pm).padStart(2, "0");
+  const month = ksRange(bars, pmS + "-01", pmS + "-31");
+  const dow = (new Date(today + "T00:00:00Z").getUTCDay() + 6) % 7, mon = ksAdd(today, -dow), wk0 = dow >= 5 ? mon : ksAdd(mon, -7), week = ksRange(bars, wk0, ksAdd(wk0, 6));
+  const prev = bars.filter(x => x.time < today).pop(), day = prev ? {hi: prev.high, lo: prev.low, a: prev.time, b: prev.time, n: 1} : null;
+  return {month, week, day};
+}
+const ksFloor = (v, s) => Math.floor(v / s + 1e-9) * s, ksCeil = (v, s) => Math.ceil(v / s - 1e-9) * s;
+function ksRows() {
+  const L = ksLevels() || {}, rows = [], S = KS.step || 100;
+  const mk = (id, grp, side, rng, which, rule) => { const auto = rng ? (which === "hi" ? rng.hi : rng.lo) : NaN, lvl = isFinite(+KS.ov[id]) && KS.ov[id] !== "" && KS.ov[id] != null ? +KS.ov[id] : auto; rows.push({id, grp, side, rng, auto, lvl, rule}); };
+  mk("mCE", "Monthly: " + KS.itm + "-point ITM", "CE", L.month, "hi", "ITM"); mk("mPE", "Monthly: " + KS.itm + "-point ITM", "PE", L.month, "lo", "ITM");
+  mk("wCE", "Weekly: " + KS.buf + "-point buffer", "CE", L.week, "hi", "BUF"); mk("wPE", "Weekly: " + KS.buf + "-point buffer", "PE", L.week, "lo", "BUF");
+  rows.forEach(r => {
+    if (!isFinite(r.lvl)) { r.strike = NaN; return; }
+    if (r.rule === "ITM") r.strike = r.side === "CE" ? ksFloor(r.lvl - KS.itm, S) : ksCeil(r.lvl + KS.itm, S);
+    else r.strike = r.side === "CE" ? ksCeil(r.lvl + KS.buf, S) : ksFloor(r.lvl - KS.buf, S);
+  });
+  return rows;
+}
+function ksHTML() {
+  const n50 = opN50(), bars = ksBars(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars ? bars[bars.length - 1].close : NaN), rows = ksRows();
+  const inp = (id, key, v, w) => '<input type="number" step="any" data-ksp="' + id + ":" + key + '" value="' + (v == null || v === "" ? "" : v) + '" style="width:' + (w || 70) + 'px">';
+  let h = '<h2 class="hb hbn">&#127919; Strike price selector</h2><div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 14px">' +
+    '<label>ITM points <input type="number" data-kss="itm" value="' + KS.itm + '" style="width:64px"></label><label>Buffer points <input type="number" data-kss="buf" value="' + KS.buf + '" style="width:56px"></label><label>Strike step <input type="number" data-kss="step" value="' + KS.step + '" style="width:64px"></label><label>Lot size <input type="number" data-kss="lot" value="' + KS.lot + '" style="width:56px"></label>' +
+    '<span class="note" style="margin:0">Nifty now ' + fmt(spot, 2) + "</span></div>" +
+    '<p class="note" style="margin:8px 0">Your sheet\'s rules. <b>Monthly:</b> call strike = the month\'s high minus ' + KS.itm + " points, rounded down; put strike = the month's low plus " + KS.itm + " points, rounded up. <b>Weekly:</b> call strike = high plus " + KS.buf + " points, rounded up; put strike = low minus " + KS.buf + " points, rounded down. Levels come from the previous month, week and day of your Nifty history; type over any level to use your own, and clear the box to go back to the automatic one.</p>" +
+    '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule</th><th>Type</th><th class="num">Level</th><th class="num">Strike</th><th class="num">From Nifty</th><th class="num">Entry</th><th class="num">Qty</th><th class="num">Exit at 80%</th><th class="num">Current</th><th class="num">Open P&amp;L</th><th class="num">Exit price</th><th class="num">Net P&amp;L</th></tr></thead><tbody>';
+  let g = "";
+  rows.forEach(r => {
+    const P = KS.pos[r.id] || {}, qty = P.qty != null && P.qty !== "" ? +P.qty : KS.lot, en = P.entry != null && P.entry !== "" ? +P.entry : NaN, cu = P.cur != null && P.cur !== "" ? +P.cur : NaN, ex = P.exit != null && P.exit !== "" ? +P.exit : NaN;
+    const itm = isFinite(r.strike) && isFinite(spot) ? (r.side === "CE" ? r.strike < spot : r.strike > spot) : null, dist = isFinite(r.strike) && isFinite(spot) ? r.strike - spot : NaN;
+    const pl = v => (isFinite(v) ? '<span style="color:var(--' + (v >= 0 ? "good" : "bad") + ')"><b>' + (v >= 0 ? "+" : "") + fmt(v, 0) + "</b></span>" : "—");
+    if (r.grp !== g) { g = r.grp; h += '<tr><td colspan="12" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">' + esc(r.grp) + "</td></tr>"; }
+    h += "<tr><td>" + (r.side === "CE" ? "Resistance" : "Support") + (r.rng ? '<br><small style="color:var(--mute)">' + esc(r.rng.a === r.rng.b ? r.rng.a : r.rng.a + " to " + r.rng.b) + "</small>" : '<br><small style="color:var(--mute)">no history</small>') + "</td><td><b>" + r.side + "</b></td>" +
+      '<td class="num"><input type="number" step="any" data-ksl="' + r.id + '" value="' + (KS.ov[r.id] != null && KS.ov[r.id] !== "" ? KS.ov[r.id] : isFinite(r.auto) ? r.auto : "") + '" style="width:88px"' + (KS.ov[r.id] != null && KS.ov[r.id] !== "" ? ' title="Your level. Clear the box to go back to automatic."' : "") + "></td>" +
+      '<td class="num" style="font-size:1.05rem"><b>' + (isFinite(r.strike) ? fmt(r.strike, 0) : "—") + "</b></td>" +
+      '<td class="num"><small>' + (isFinite(dist) ? (dist > 0 ? "+" : "") + fmt(dist, 0) + " (" + (itm ? "ITM" : "OTM") + ")" : "—") + "</small></td>" +
+      '<td class="num">' + inp(r.id, "entry", P.entry, 64) + '</td><td class="num">' + inp(r.id, "qty", P.qty != null ? P.qty : KS.lot, 56) + '</td><td class="num">' + (isFinite(en) ? fmt(en * 0.2, 2) : "—") + '</td><td class="num">' + inp(r.id, "cur", P.cur, 64) + '</td><td class="num">' + pl(isFinite(en) && isFinite(cu) ? (en - cu) * qty : NaN) + '</td><td class="num">' + inp(r.id, "exit", P.exit, 64) + '</td><td class="num">' + pl(isFinite(en) && isFinite(ex) ? (en - ex) * qty : NaN) + "</td></tr>";
+  });
+  return h + '</tbody></table></div><p class="note" style="margin:8px 0 0">P&amp;L treats each trade as a <b>sold option</b>, like your sheet: (entry &minus; exit) &times; quantity, so a premium that falls is a gain. "Exit at 80%" is the premium when 80% of what you collected is earned (20% of the entry). Entry, quantity and prices are saved in this browser. These are the sheet\'s rules written out, not advice; check the strike and the premium in your broker before trading.</p></div>';
+}
+function ksPaint() { const b = document.getElementById("ksbox"); if (b) b.innerHTML = ksHTML(); }
+document.addEventListener("change", ev => {
+  const t = ev.target; if (!t || !t.closest || !t.closest("#ksbox")) return;
+  if (t.dataset.kss) { const v = +t.value; if (isFinite(v) && v > 0) { KS[t.dataset.kss] = v; ksSave(); } ksPaint(); return; }
+  if (t.dataset.ksl) { if (t.value === "") delete KS.ov[t.dataset.ksl]; else KS.ov[t.dataset.ksl] = +t.value; ksSave(); ksPaint(); return; }
+  if (t.dataset.ksp) { const p = t.dataset.ksp.split(":"); (KS.pos[p[0]] = KS.pos[p[0]] || {})[p[1]] = t.value === "" ? "" : +t.value; ksSave(); ksPaint(); }
+});
+setInterval(() => { if (typeof current !== "undefined" && current === "op" && !document.hidden) { opStrip(); const a = document.activeElement; if (!(a && a.closest && a.closest("#ksbox"))) ksPaint(); } }, 15000);
+function opPaint() { const b = document.getElementById("opbody"); if (!b) return; b.innerHTML = '<div id="ksbox">' + ksHTML() + "</div>" + guideHTML(); opStrip(); }
 function niftyHTML(s, c, id) {
   NIFTY_CTX = {c};
   const idx = n => ((typeof MARKET !== "undefined" && MARKET && MARKET.indices) || []).find(x => String(x.name).toUpperCase() === n);
@@ -3809,14 +3887,7 @@ const ppApi = (function () {
   function open() { build(); paint(); if (META.state !== "ok" || Date.now() - META.fetchedAt > 3 * 60 * 1000) load(false); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "pp" && !document.hidden) load(false); } catch (e) {} }, 3 * 60 * 1000);
   function list() { const AM = annMap(), out = []; DATA.forEach(s => { const P = score(s, F.mode); if (!P) return; const ad = annDate(s, AM); out.push({sym: symOfTk(s.ticker), total: P.total, rec: String(P.rec[0]), react: num(s.react_pct), d: ad ? ageOf(ad) : NaN, ad, revY: P.revY, npY: P.npY, fwdPe: P.fwdPe, pe: P.pe}); }); return out; }
-  function buys() {
-    const AM = annMap(), rows = DATA.map(s => { const ad = annDate(s, AM); return {s, P: score(s, F.mode), ad, d: ad ? ageOf(ad) : NaN}; }).filter(x => x.P);
-    try { bkLoad(rows); } catch (e) {}
-    const list = []; let pending = 0;
-    rows.forEach(x => { const b = bkEval(x); if (b.st === "wait") pending++; if (b.st === "buy" || b.st === "ext") list.push({sym: symOfTk(x.s.ticker), st: b.st, rules: b.rules, entry: b.c.entry, stop: b.c.entry * (1 - BK.stop / 100), px: b.px, edate: b.c.edate, days: x.d, score: x.P.total}); });
-    return {list, pending, loaded: DATA.length > 0};
-  }
-  return {open, load, pending, score, parseCSV, reactOf, list, buys};
+  return {open, load, pending, score, parseCSV, reactOf, list};
 })();
 const ppPaint = () => ppApi.open();
 
@@ -5798,7 +5869,7 @@ const cuApi = (function () {
     });
   }
   function open() { build(); view(); load(false); backtest(); if (F.flt && F.flt.some(id => /^(n50|n200|br|sec)$/.test(id)) && !MKT) { const go = () => buildMkt().then(() => view()); try { if (F.flt.indexOf("sec") >= 0 && typeof tcApi !== "undefined" && tcApi.load) tcApi.load(false).then(go, go); else go(); } catch (e) { go(); } } }
-  return {open, load, detect, arrOf, ensure, badge, merged: () => mergedRes(), state: () => ({t: ST.t, busy: ST.busy})};
+  return {open, detect, arrOf, ensure, badge};
 })();
 const cuPaint = () => cuApi.open();
 
@@ -6094,156 +6165,9 @@ const swApi = (function () {
     if (t.id === "swcost") { O.cost = Math.min(2, Math.max(0, +t.value || 0)); save(); SIG.forEach(sg => { sg.rx = {}; }); LAB = {}; view(); }
     if (t.id === "swx") { O.x = +t.value || 0; save(); LAB = {}; view(); }
   });
-  function regime() { if (!NF || !B.NIFTY) return null; const d = B.NIFTY.bars[B.NIFTY.bars.length - 1].time, m = NF[d]; return m ? {n50: m.n50, n200: m.n200, date: d} : null; }
-  function live(minScore, fresh) {
-    return SIG.filter(sg => sg.i >= sg.n - 1 - fresh).map(sg => ({sg, sc: scoreOf(sg)})).filter(x => x.sc >= minScore).map(x => { const p = planOf(x.sg), X = XV[O.x]; return {sym: x.sg.sym, setup: NAMES[x.sg.su], score: x.sc, entry: p.entry, stop: p.stop, tgt: p.tgt, rr: X.rr, H: X.H}; });
-  }
-  return {open, load, regime, live, bars: sym => (B[sym] ? B[sym].bars : null), state: () => ({t: ST.t, busy: ST.busy}), lastDate: () => (B.NIFTY ? B.NIFTY.bars[B.NIFTY.bars.length - 1].time : ""), cost: () => O.cost, _t: {prep, scan, rOf, stat, zDiff, RULES, XV, get SIG() { return SIG; }}};
+  return {open, load, _t: {prep, scan, rOf, stat, zDiff, RULES, XV, get SIG() { return SIG; }}};
 })();
 const swPaint = () => swApi.open();
-
-/* ===== COMMAND TAB: one pipeline from market gate to sized, journaled trades ===== */
-const cmApi = (function () {
-  const $e = s => document.querySelector(s), E = esc;
-  const f2 = (v, d) => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: d == null ? 2 : d, maximumFractionDigits: d == null ? 2 : d}) : "-");
-  const f2s = v => (isFinite(v) ? (v >= 0 ? "+" : "") + v.toFixed(2) : "-");
-  const secOf = sym => (typeof STOCK_SECTOR !== "undefined" && STOCK_SECTOR[sym]) || (typeof TC_SECTOR_EXTRA !== "undefined" && TC_SECTOR_EXTRA[sym]) || "";
-  let C = {risk: 2000, maxPos: 5, maxSec: 2, auto: true};
-  try { const sv = JSON.parse(localStorage.getItem("cmO") || "null"); if (sv) C = Object.assign(C, sv); } catch (e) {}
-  const saveC = () => { try { localStorage.setItem("cmO", JSON.stringify(C)); } catch (e) {} };
-  let J = []; try { J = JSON.parse(localStorage.getItem("cmJ") || "[]") || []; } catch (e) {}
-  const saveJ = () => { try { localStorage.setItem("cmJ", JSON.stringify(J)); } catch (e) {} };
-  const TIERS = {A: "A: PEAD + a timing signal", B: "B: PEAD rule alone", C: "C: Cup + Quick agree (unproven)", D: "D: watch only"}, TMULT = {A: 1, B: 1, C: 0.5, D: 0};
-  let PLAN = {rows: [], skip: [], watch: [], gate: null, ready: false, wait: ""}, BUSY = false, TM = null;
-
-  function gate() {
-    const r = swApi.regime(); if (!r) return {k: "unk", m: 0, t: "Nifty history not loaded yet", d: ""};
-    const n = r.n50 + r.n200;
-    return n === 2 ? {k: "go", m: 1, t: "GO: Nifty is above its 50-day and 200-day averages", d: r.date} : n === 1 ? {k: "caution", m: 0.5, t: "CAUTION: Nifty is above only one of its 50-day and 200-day averages. Half size.", d: r.date} : {k: "stop", m: 0, t: "STAND ASIDE: Nifty is below both averages. No new long trades.", d: r.date};
-  }
-  function readiness() {
-    const a = ppApi.buys(), cu = cuApi.state(), sw = swApi.state(), miss = [];
-    if (!a.loaded) miss.push("PEAD results"); else if (a.pending) miss.push("PEAD price checks (" + a.pending + ")");
-    if (!cu.t || cu.busy) miss.push("Cup & Handle scan"); if (!sw.t || sw.busy) miss.push("Quick scan");
-    return {ok: !miss.length, miss, a};
-  }
-  function build() {
-    const rd = readiness(), g = gate(), M = {}, get = s => M[s] || (M[s] = {sym: s});
-    rd.a.list.forEach(b => { if (b.st === "buy") get(b.sym).pead = b; else get(b.sym).ext = b; });
-    const cu = cuApi.merged(); Object.keys(cu).forEach(s => { const r = cu[s]; if (r.score >= 85 && /Breakout|Near breakout/.test(r.status)) get(s).cup = r; });
-    swApi.live(70, 1).forEach(q => { const o = get(q.sym); if (!o.qk || q.score > o.qk.score) o.qk = q; });
-    const L = Object.keys(M).map(s => M[s]);
-    L.forEach(o => {
-      o.tier = o.pead ? (o.cup || o.qk ? "A" : "B") : (o.cup && o.qk ? "C" : "D");
-      o.sector = secOf(o.sym); o.rank = o.pead ? 1000 + o.pead.score : o.cup ? 500 + o.cup.score : (o.qk ? o.qk.score : 0);
-      if (o.pead) { const b = o.pead; o.plan = {src: "PEAD", entry: b.px, stop: b.stop, tgt: NaN, rr: 99, H: 20, closeStop: true, why: "PEAD rule " + b.rules.join("+") + ", result " + b.days + " days ago" + (o.cup ? " · cup " + o.cup.status : "") + (o.qk ? " · quick " + o.qk.score : "")}; }
-      else if (o.cup) { const r = o.cup, e = Math.max(r.pivot * 1.001, r.price || 0), s = r.stop * 0.999, k = e - s; o.plan = {src: "Cup", entry: e, stop: s, tgt: e + 3 * k, rr: 3, H: 60, closeStop: false, why: "Cup score " + r.score + ", " + r.status + (o.qk ? " · quick " + o.qk.score + " (" + o.qk.setup + ")" : "")}; }
-      else if (o.qk) { const q = o.qk; o.plan = {src: "Quick", entry: q.entry, stop: q.stop, tgt: q.tgt, rr: q.rr, H: q.H, closeStop: false, why: q.setup + " score " + q.score}; }
-    });
-    const ord = {A: 0, B: 1, C: 2, D: 3}; L.sort((a, b) => ord[a.tier] - ord[b.tier] || b.rank - a.rank);
-    const d0 = swApi.lastDate(), openJ = J.filter(j => j.state === "open" && j.logDate !== d0), secN = {}; openJ.forEach(j => { if (j.sector) secN[j.sector] = (secN[j.sector] || 0) + 1; });
-    let n = openJ.length; const rows = [], skip = [], watch = [];
-    L.forEach(o => {
-      if (o.tier === "D" || !o.plan) { watch.push(o); return; }
-      const p = o.plan, risk = C.risk * TMULT[o.tier] * g.m, per = p.entry - p.stop; let why = "";
-      if (!(per > 0) || per / p.entry > 0.25) why = "stop too far or invalid";
-      else if (g.m === 0) why = "market gate is off";
-      else if (openJ.some(j => j.sym === o.sym)) why = "already in your journal";
-      else if (n >= C.maxPos) why = "position limit reached";
-      else if (o.sector && (secN[o.sector] || 0) >= C.maxSec) why = "sector limit (" + o.sector + ")";
-      o.qty = per > 0 ? Math.floor(risk / per) : 0; o.risk = o.qty * per;
-      if (!why && o.qty < 1) why = "risk per trade too small for one share";
-      if (why) { o.why = why; skip.push(o); return; }
-      o.rec = J.some(j => j.sym === o.sym && j.logDate === d0); n++; if (o.sector) secN[o.sector] = (secN[o.sector] || 0) + 1; rows.push(o);
-    });
-    PLAN = {rows, skip, watch, gate: g, ready: rd.ok, wait: rd.miss.join(", "), ext: rd.a.list.filter(b => b.st === "ext")};
-  }
-  /* ---------- journal: every selected trade is recorded as a paper trade and followed on daily candles ---------- */
-  function autolog() {
-    if (!C.auto || !PLAN.ready || !PLAN.gate || PLAN.gate.m === 0) return; const d0 = swApi.lastDate(); if (!d0) return; let add = 0;
-    PLAN.rows.forEach(o => {
-      const p = o.plan; if (J.some(j => j.sym === o.sym && (j.state === "open" || j.logDate >= addDays(d0, -15)))) return;
-      J.push({id: o.sym + "|" + d0 + "|" + p.src, sym: o.sym, tier: o.tier, src: p.src, why: p.why, sector: o.sector, logDate: d0, plan: p.entry, stop: p.stop, rr: p.rr, H: p.H, cs: p.closeStop ? 1 : 0, qty: o.qty, state: "open"}); add++;
-    });
-    if (add) saveJ();
-  }
-  const addDays = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-  function resolve() {
-    let ch = 0; const cost = swApi.cost();
-    J.forEach(j => {
-      if (j.state !== "open") return; const bars = swApi.bars(j.sym); if (!bars) return;
-      let k = -1; for (let q = bars.length - 1; q >= 0; q--) { if (bars[q].time > j.logDate) k = q; else break; } if (k < 0) return;
-      const fill = bars[k].open; if (!(fill > 0)) return; j.fill = fill; j.fillDate = bars[k].time; const risk = fill - j.stop;
-      const tgt = j.rr < 90 ? fill + j.rr * risk : Infinity; let ex = NaN, why = "";
-      if (!(risk > 0)) { ex = fill; why = "stop"; j.r = -1; }
-      else for (let q = k; q < bars.length && q < k + j.H; q++) {
-        const b = bars[q];
-        if (j.cs) { if (b.close < j.stop) { ex = b.close; why = "stop"; break; } }
-        else { if (q > k && b.open <= j.stop) { ex = b.open; why = "stop"; break; } if (b.low <= j.stop) { ex = j.stop; why = "stop"; break; } }
-        if (b.high >= tgt) { ex = tgt; why = "target"; break; }
-        if (q === k + j.H - 1) { ex = b.close; why = "time"; break; }
-      }
-      if (why) { if (!(j.r === -1 && risk <= 0)) j.r = (ex - fill) / risk - (cost / 100) * fill / risk; j.exit = ex; j.exitDate = j.exitDate || ""; j.why2 = why; j.state = "closed"; ch++; }
-      else { j.last = bars[bars.length - 1].close; j.rnow = (j.last - fill) / risk; }
-    });
-    if (ch) saveJ();
-  }
-  function stats(L) { const N = L.length; if (!N) return {n: 0}; const rs = L.map(j => j.r), m = rs.reduce((p, x) => p + x, 0) / N, sd = Math.sqrt(rs.reduce((p, x) => p + (x - m) * (x - m), 0) / Math.max(1, N - 1)); return {n: N, win: rs.filter(x => x > 0).length / N * 100, m, tot: rs.reduce((p, x) => p + x, 0), ci: N > 1 ? 1.96 * sd / Math.sqrt(N) : NaN}; }
-  /* ---------- screen ---------- */
-  function step() { try { build(); resolve(); autolog(); build(); } catch (e) { PLAN.err = String((e && e.message) || e); } }
-  const btn = (attr, label, tip) => '<button type="button" class="cbtn" ' + attr + '="1" title="' + E(tip || "") + '">' + label + "</button>";
-  function view() {
-    const host = $e("#cmbody"); if (!host) return; const g = PLAN.gate || gate();
-    const col = g.k === "go" ? "var(--good)" : g.k === "caution" ? "var(--warn,#b45309)" : g.k === "stop" ? "var(--bad)" : "var(--mute)";
-    let h = '<div class="znhead" style="background:linear-gradient(120deg,#111827,#0f766e)"><div><h2>COMMAND</h2><span>Market gate &rarr; best setups &rarr; position size &rarr; journal</span></div><div class="znpills"><span>PEAD first</span><span>Risk-sized</span><span>Self-checking journal</span></div></div>';
-    h += '<div class="card" style="border-left:6px solid ' + col + '"><b style="color:' + col + '">' + E(g.t) + "</b>" + (g.d ? ' <span class="note">(candle of ' + E(g.d) + ")</span>" : "") +
-      '<p class="note" style="margin:6px 0 0">How it works: the <b>market gate</b> sets your size (full, half or none). <b>PEAD</b> is the only rule your tests proved, so it comes first. A PEAD stock that also has a Cup &amp; Handle or Quick signal is tier A. A stock with only a Cup + Quick agreement is tier C: unproven, so half size. Every trade it lists is saved as a <b>paper trade</b> and followed on daily candles, so in a few weeks you see its real results instead of back-tests. Screening aid, not advice.</p></div>';
-    h += '<div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 14px"><label>Risk per trade Rs <input type="number" id="cmrisk" style="width:84px" value="' + C.risk + '"></label><label>Max positions <input type="number" id="cmpos" style="width:56px" min="1" max="30" value="' + C.maxPos + '"></label><label>Max per sector <input type="number" id="cmsec" style="width:56px" min="1" max="10" value="' + C.maxSec + '"></label>' +
-      '<label><input type="checkbox" id="cmauto"' + (C.auto ? " checked" : "") + "> Record the plan below as paper trades</label>" + btn("data-cmrefresh", "&#8635; Refresh all", "Reload PEAD, Cup & Handle and Quick data") + "</div>" +
-      '<div class="note" id="cmstat" style="margin:8px 0 0">' + (PLAN.ready ? "All data loaded." : "Loading: " + E(PLAN.wait || "starting") + "...") + (PLAN.err ? " Problem: " + E(PLAN.err) : "") + "</div></div>";
-    h += '<h3 class="tch" style="margin-top:14px">Today\'s plan (' + PLAN.rows.length + ")</h3>";
-    const tr = (o, skipped) => { const p = o.plan; return "<tr" + (skipped ? ' style="opacity:.6"' : "") + "><td><b>" + E(o.sym) + "</b><br><small style=\"color:var(--mute)\">" + E(o.sector) + "</small></td><td>" + o.tier + '</td><td class="num">' + f2(p.entry) + '</td><td class="num">' + f2(p.stop) + '</td><td class="num">' + (isFinite(p.tgt) ? f2(p.tgt) : "none") + '</td><td class="num">' + f2((p.entry - p.stop) / p.entry * 100, 1) + '</td><td class="num">' + (skipped ? "-" : o.qty) + '</td><td class="num">' + (skipped ? "-" : f2(o.risk, 0)) + "</td><td><small>" + E(skipped ? "Skipped: " + o.why : p.why + (o.rec ? " (recorded as a paper trade)" : "")) + " &middot; exit: " + (p.src === "PEAD" ? "close below stop or after 20 sessions" : "stop" + (isFinite(p.tgt) ? ", target" : "") + ", or after " + p.H + " sessions") + "</small></td></tr>"; };
-    const head = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Stock</th><th>Tier</th><th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th><th class="num">Risk %</th><th class="num">Shares</th><th class="num">Rs at risk</th><th>Why and exit</th></tr></thead><tbody>';
-    if (PLAN.rows.length) h += head + PLAN.rows.map(o => tr(o, false)).join("") + "</tbody></table></div>";
-    else h += '<div class="card"><p class="note" style="margin:0">' + (PLAN.ready ? (g.m === 0 ? "The market gate is off, so nothing is sized today." : "No stock qualifies right now. Waiting is a position too.") : "Still loading the data. This page fills in by itself.") + "</p></div>";
-    if (PLAN.skip.length) h += '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Qualified but skipped (' + PLAN.skip.length + ")</summary>" + head + PLAN.skip.map(o => tr(o, true)).join("") + "</tbody></table></div></details>";
-    if (PLAN.watch.length || (PLAN.ext && PLAN.ext.length)) h += '<details style="margin-top:8px"><summary style="cursor:pointer;font-weight:600">Watch only, not sized (' + (PLAN.watch.length + (PLAN.ext ? PLAN.ext.length : 0)) + ')</summary><p class="note">Single technical signals have no proven edge here. PEAD stocks that already ran more than 5% above the entry are "extended" and skipped by the PEAD rules.</p><p class="note">' + (PLAN.ext || []).map(b => "<b>" + E(b.sym) + "</b> (PEAD, extended)").concat(PLAN.watch.slice(0, 60).map(o => E(o.sym) + (o.cup ? " (cup)" : "") + (o.qk ? " (quick " + o.qk.score + ")" : ""))).join(" &middot; ") + "</p></details>";
-    /* journal */
-    const open = J.filter(j => j.state === "open"), closed = J.filter(j => j.state === "closed");
-    h += '<h3 class="tch" style="margin-top:18px">Journal (paper trades followed on daily candles)</h3>';
-    if (!J.length) h += '<div class="card"><p class="note" style="margin:0">Empty. Trades from the plan are recorded here once all data has loaded and the gate is on. It is stored in this browser only: use Export to keep a copy.</p></div>';
-    else {
-      const T = [["All", closed], ["A", closed.filter(j => j.tier === "A")], ["B", closed.filter(j => j.tier === "B")], ["C", closed.filter(j => j.tier === "C")]];
-      h += '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Tier</th><th class="num">Closed</th><th class="num">Win</th><th class="num">Average per trade (&plusmn; range)</th><th class="num">Total</th><th>Check</th></tr></thead><tbody>' +
-        T.map(q => { const s = stats(q[1]), flag = s.n >= 15 && s.m + s.ci < 0 ? "Losing: review or stop using" : s.n >= 15 && s.m < 0 ? "Below zero: watch closely" : s.n < 15 ? "Too few to judge (" + s.n + " of 15)" : "On track"; return "<tr><td>" + q[0] + '</td><td class="num">' + s.n + '</td><td class="num">' + (s.n ? s.win.toFixed(0) + "%" : "-") + '</td><td class="num">' + (s.n ? "<b>" + f2s(s.m) + "R</b> <small>&plusmn;" + f2(s.ci) + "</small>" : "-") + '</td><td class="num">' + (s.n ? f2(s.tot, 1) + "R" : "-") + '</td><td style="font-size:.82rem;color:var(--mute)">' + flag + "</td></tr>"; }).join("") + "</tbody></table></div>";
-      h += '<p class="note" style="margin:6px 0">R is the risk of a trade. Paper fills use the next open after the signal, with the Quick tab\'s cost % taken off. Open: ' + open.length + " &middot; closed: " + closed.length + ".</p>";
-      const rowJ = j => "<tr><td><b>" + E(j.sym) + "</b></td><td>" + j.tier + "</td><td>" + E(j.logDate) + '</td><td class="num">' + (j.fill ? f2(j.fill) : "waiting") + '</td><td class="num">' + f2(j.stop) + '</td><td class="num">' + (j.state === "closed" ? "<b>" + f2s(j.r) + "R</b> (" + E(j.why2) + ")" : isFinite(j.rnow) ? f2s(j.rnow) + "R now" : "-") + "</td></tr>";
-      const jh = '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Stock</th><th>Tier</th><th>Logged</th><th class="num">Fill</th><th class="num">Stop</th><th class="num">Result</th></tr></thead><tbody>';
-      if (open.length) h += '<details open style="margin-top:6px"><summary style="cursor:pointer;font-weight:600">Open (' + open.length + ")</summary>" + jh + open.map(rowJ).join("") + "</tbody></table></div></details>";
-      if (closed.length) h += '<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:600">Closed (' + closed.length + ")</summary>" + jh + closed.slice().reverse().slice(0, 100).map(rowJ).join("") + "</tbody></table></div></details>";
-      h += '<div class="charttools" style="border:0;padding:8px 0 0">' + btn("data-cmexport", "Export journal (CSV)") + btn("data-cmclear", "Clear journal") + "</div>";
-    }
-    host.innerHTML = h;
-  }
-  function open() { view(); try { ppApi.load(false); } catch (e) {} try { cuApi.load(false); } catch (e) {} try { swApi.load(false); } catch (e) {} step(); view(); if (!TM) TM = setInterval(() => { if (typeof current !== "undefined" && current === "cm" && !document.hidden) { const a = document.activeElement; step(); if (!(a && a.closest && a.closest("#cmbody") && /INPUT|SELECT/.test(a.tagName))) view(); } }, 5000); }
-  document.addEventListener("click", ev => {
-    const t = ev.target; if (!t || !t.closest || !t.closest("#cm")) return;
-    if (t.closest("[data-cmrefresh]")) { try { ppApi.load(true); } catch (e) {} try { cuApi.load(true); } catch (e) {} try { swApi.load(true); } catch (e) {} step(); view(); return; }
-    if (t.closest("[data-cmclear]")) { if (confirm("Delete the whole journal?")) { J = []; saveJ(); step(); view(); } return; }
-    if (t.closest("[data-cmexport]")) {
-      const L = ["symbol,tier,source,logged,fill_date,fill,stop,qty,state,exit,reason,R"].concat(J.map(j => [j.sym, j.tier, j.src, j.logDate, j.fillDate || "", j.fill || "", j.stop, j.qty, j.state, j.exit || "", j.why2 || "", isFinite(j.r) ? j.r.toFixed(3) : ""].join(",")));
-      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([L.join("\n")], {type: "text/csv"})); a.download = "journal.csv"; document.body.appendChild(a); a.click(); a.remove();
-    }
-  });
-  document.addEventListener("change", ev => {
-    const t = ev.target; if (!t || !t.closest || !t.closest("#cm")) return;
-    if (t.id === "cmrisk") C.risk = Math.max(100, +t.value || 2000); if (t.id === "cmpos") C.maxPos = Math.min(30, Math.max(1, +t.value || 5)); if (t.id === "cmsec") C.maxSec = Math.min(10, Math.max(1, +t.value || 2)); if (t.id === "cmauto") C.auto = t.checked;
-    saveC(); step(); view();
-  });
-  return {open, _t: {build, J: () => J, plan: () => PLAN}};
-})();
-const cmPaint = () => cmApi.open();
-
 
 
 
@@ -6266,7 +6190,6 @@ function show(id) {
   if (id === "n5") { try { n5Paint(); } catch (e) {} }
   if (id === "cu") { try { cuPaint(); } catch (e) {} }
   if (id === "sw") { try { swPaint(); } catch (e) {} }
-  if (id === "cm") { try { cmPaint(); } catch (e) {} }
   if (id === "op") { try { opPaint(); } catch (e) {} }
   ensureChart(sec);
   if (sec) { const cs = getComputedStyle(sec); document.documentElement.style.setProperty("--a", cs.getPropertyValue("--a")); document.documentElement.style.setProperty("--b", cs.getPropertyValue("--b")); }
@@ -6333,7 +6256,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="sw" aria-selected="false" style="--a:#0f766e;--b:#1d4ed8">Quick 1&ndash;5 day</button><button role="tab" data-t="cm" aria-selected="false" style="--a:#111827;--b:#0f766e">Command</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="sw" aria-selected="false" style="--a:#0f766e;--b:#1d4ed8">Quick 1&ndash;5 day</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -6370,10 +6293,6 @@ function render(stocks) {
     const n5 = document.createElement("section"); n5.className = "stock"; n5.id = "n5"; n5.style.cssText = "--a:#0f766e;--b:#2563eb";
     n5.innerHTML = '<div id="n5body"></div>'; views.appendChild(n5);
   }
-  if (!document.getElementById("cm")) {
-    const cm = document.createElement("section"); cm.className = "stock"; cm.id = "cm"; cm.style.cssText = "--a:#111827;--b:#0f766e";
-    cm.innerHTML = '<div id="cmbody"></div>'; views.appendChild(cm);
-  }
   if (!document.getElementById("sw")) {
     const sw = document.createElement("section"); sw.className = "stock"; sw.id = "sw"; sw.style.cssText = "--a:#0f766e;--b:#1d4ed8";
     sw.innerHTML = '<div id="swbody"></div>'; views.appendChild(sw);
@@ -6384,7 +6303,7 @@ function render(stocks) {
   }
   if (!document.getElementById("op")) {
     const op = document.createElement("section"); op.className = "stock"; op.id = "op"; op.style.cssText = "--a:#7c3aed;--b:#db2777";
-    op.dataset.ctk = SYMKEY; op.innerHTML = '<div class="znhead"><div><h2>OPTIONS</h2><span>Nifty chart with the sheet symbols, symbol guide and strategies</span></div><div class="znpills"><span>Smiley symbols</span><span>Strategies</span></div></div><div class="chartslot"></div><div id="opbody"></div>'; views.appendChild(op);
+    op.dataset.ctk = SYMKEY; op.innerHTML = '<div class="znhead"><div><h2>OPTIONS</h2><span>Nifty chart with the sheet symbols, symbol guide and strategies</span></div><div class="znpills"><span>Smiley symbols</span><span>Strategies</span></div></div><div id="opstrip"></div><div class="chartslot"></div><div id="opbody"></div>'; views.appendChild(op);
   }
   if (!document.getElementById("rm")) {
     const rm = document.createElement("section"); rm.className = "stock"; rm.id = "rm"; rm.style.cssText = "--a:#7c3aed;--b:#db2777";
@@ -6419,7 +6338,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "st" || current === "n5" || current === "cu" || current === "sw" || current === "cm" || current === "op" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "st" || current === "n5" || current === "cu" || current === "sw" || current === "op" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
