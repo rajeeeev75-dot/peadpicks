@@ -1274,10 +1274,17 @@ function opStripHTML() {
   return h;
 }
 function opStrip() { const b = document.getElementById("opstrip"); if (b) b.innerHTML = opStripHTML(); }
+let KSW = null, ksBusy = false;
 function ksBars() {
-  if (typeof HIST === "undefined" || !HIST) return null;
-  if (HIST[BENCH_TICKER] && HIST[BENCH_TICKER].length > 30) return HIST[BENCH_TICKER];
-  const k = Object.keys(HIST).find(x => /NIFTY_?50$/.test(x) && HIST[x].length > 30); return k ? HIST[k] : null;
+  if (typeof HIST !== "undefined" && HIST) {
+    if (HIST[BENCH_TICKER] && HIST[BENCH_TICKER].length > 30) return HIST[BENCH_TICKER];
+    const k = Object.keys(HIST).find(x => /NIFTY_?50$/.test(x) && HIST[x].length > 30); if (k) return HIST[k];
+  }
+  if (!KSW && !ksBusy && typeof MARKET_API_URL !== "undefined" && MARKET_API_URL) {
+    ksBusy = true;
+    fetch(MARKET_API_URL + "?bars=NIFTY&tf=DF", {cache: "no-store"}).then(r => r.json()).then(j => { const rows = j && j.bars && j.bars.NIFTY; if (rows && rows.length > 30) KSW = rows.map(x => ({time: String(x[0]).slice(0, 10), open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0})); }).catch(() => {}).then(() => { ksBusy = false; if (KSW) ksPaint(); });
+  }
+  return KSW;
 }
 const ksIso = d => d.toISOString().slice(0, 10), ksAdd = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return ksIso(d); };
 function ksRange(bars, a, b) { let hi = -Infinity, lo = Infinity, n = 0; bars.forEach(x => { if (x.time >= a && x.time <= b) { n++; if (x.high > hi) hi = x.high; if (x.low < lo) lo = x.low; } }); return n ? {hi, lo, n, a, b} : null; }
@@ -1295,7 +1302,6 @@ function ksRows() {
   const mk = (id, grp, side, rng, which, rule) => { const auto = rng ? (which === "hi" ? rng.hi : rng.lo) : NaN, lvl = isFinite(+KS.ov[id]) && KS.ov[id] !== "" && KS.ov[id] != null ? +KS.ov[id] : auto; rows.push({id, grp, side, rng, auto, lvl, rule}); };
   mk("mCE", "Monthly: " + KS.itm + "-point ITM", "CE", L.month, "hi", "ITM"); mk("mPE", "Monthly: " + KS.itm + "-point ITM", "PE", L.month, "lo", "ITM");
   mk("wCE", "Weekly: " + KS.buf + "-point buffer", "CE", L.week, "hi", "BUF"); mk("wPE", "Weekly: " + KS.buf + "-point buffer", "PE", L.week, "lo", "BUF");
-  mk("dCE", "Previous day: " + KS.buf + "-point buffer", "CE", L.day, "hi", "BUF"); mk("dPE", "Previous day: " + KS.buf + "-point buffer", "PE", L.day, "lo", "BUF");
   rows.forEach(r => {
     if (!isFinite(r.lvl)) { r.strike = NaN; return; }
     if (r.rule === "ITM") r.strike = r.side === "CE" ? ksFloor(r.lvl - KS.itm, S) : ksCeil(r.lvl + KS.itm, S);
@@ -1309,7 +1315,7 @@ function ksHTML() {
   let h = '<h2 class="hb hbn">&#127919; Strike price selector</h2><div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 14px">' +
     '<label>ITM points <input type="number" data-kss="itm" value="' + KS.itm + '" style="width:64px"></label><label>Buffer points <input type="number" data-kss="buf" value="' + KS.buf + '" style="width:56px"></label><label>Strike step <input type="number" data-kss="step" value="' + KS.step + '" style="width:64px"></label><label>Lot size <input type="number" data-kss="lot" value="' + KS.lot + '" style="width:56px"></label>' +
     '<span class="note" style="margin:0">Nifty now ' + fmt(spot, 2) + "</span></div>" +
-    '<p class="note" style="margin:8px 0">Your sheet\'s rules. <b>Monthly:</b> call strike = the month\'s high minus ' + KS.itm + " points, rounded down; put strike = the month's low plus " + KS.itm + " points, rounded up. <b>Weekly and previous day:</b> call strike = high plus " + KS.buf + " points, rounded up; put strike = low minus " + KS.buf + " points, rounded down. Levels come from the previous month, week and day of your Nifty history; type over any level to use your own, and clear the box to go back to the automatic one.</p>" +
+    '<p class="note" style="margin:8px 0">Your sheet\'s rules. <b>Monthly:</b> call strike = the month\'s high minus ' + KS.itm + " points, rounded down; put strike = the month's low plus " + KS.itm + " points, rounded up. <b>Weekly:</b> call strike = high plus " + KS.buf + " points, rounded up; put strike = low minus " + KS.buf + " points, rounded down. Levels come from the previous month, week and day of your Nifty history; type over any level to use your own, and clear the box to go back to the automatic one.</p>" +
     '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule</th><th>Type</th><th class="num">Level</th><th class="num">Strike</th><th class="num">From Nifty</th><th class="num">Entry</th><th class="num">Qty</th><th class="num">Exit at 80%</th><th class="num">Current</th><th class="num">Open P&amp;L</th><th class="num">Exit price</th><th class="num">Net P&amp;L</th></tr></thead><tbody>';
   let g = "";
   rows.forEach(r => {
