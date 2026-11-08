@@ -1287,8 +1287,8 @@ function ksBars() {
   return KSW;
 }
 const ksFloor = (v, s) => Math.floor(v / s + 1e-9) * s, ksCeil = (v, s) => Math.ceil(v / s - 1e-9) * s;
-/* the four rows of the sheet: monthly and weekly, each with a date and a High/Low choice */
-const KS_ROWS = [["m1", "Monthly sell: " + "ITM", "ITM", "HIGH"], ["m2", "Monthly sell: " + "ITM", "ITM", "LOW"], ["w1", "Weekly sell: buffer", "BUF", "HIGH"], ["w2", "Weekly sell: buffer", "BUF", "LOW"]];
+/* one row each for monthly and weekly: the High/Low choice decides call (CE) or put (PE) */
+const KS_ROWS = [["m1", "Monthly sell", "ITM", "HIGH"], ["w1", "Weekly sell", "BUF", "HIGH"]];
 function ksRows() {
   const bars = ksBars(), last = bars && bars.length ? bars[bars.length - 1].time : "", S = KS.step || 100, out = [];
   KS_ROWS.forEach(q => {
@@ -1303,30 +1303,47 @@ function ksRows() {
   });
   return out;
 }
+(function () { if (document.getElementById("ksstyle")) return; const st = document.createElement("style"); st.id = "ksstyle"; st.textContent =
+  ".ksgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px;margin-top:10px}" +
+  ".kscard{border:1px solid var(--line,rgba(0,0,0,.1));border-radius:18px;padding:16px;background:var(--card);box-shadow:0 6px 20px rgba(0,0,0,.05)}" +
+  ".kscard.ce{border-top:5px solid var(--bad)}.kscard.pe{border-top:5px solid var(--good)}.kscard.nn{border-top:5px solid var(--mute)}" +
+  ".kshd{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px}.kshd b{font-size:1.05rem}.kshd small{color:var(--mute)}" +
+  ".ksctl{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px}.ksctl label{display:flex;flex-direction:column;gap:3px;font-size:.78rem;color:var(--mute);font-weight:600}.ksctl input{font:inherit;padding:6px 8px;border-radius:10px;border:1px solid var(--line,rgba(0,0,0,.18));background:var(--card);color:inherit}" +
+  ".kseg{display:inline-flex;border-radius:12px;overflow:hidden;border:1px solid var(--line,rgba(0,0,0,.18))}.kseg button{font:inherit;font-weight:700;padding:8px 14px;border:0;background:transparent;color:var(--mute);cursor:pointer}.kseg button.on.h{background:var(--bad);color:#fff}.kseg button.on.l{background:var(--good);color:#fff}.kseg button.on.n{background:var(--mute);color:#fff}" +
+  ".kshero{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:14px 0;padding:14px;border-radius:14px}.kshero.ce{background:color-mix(in srgb,var(--bad) 10%,var(--card))}.kshero.pe{background:color-mix(in srgb,var(--good) 10%,var(--card))}.kshero.nn{background:color-mix(in srgb,var(--mute) 10%,var(--card))}" +
+  ".kssell{font-size:.78rem;font-weight:800;letter-spacing:.08em;color:var(--mute)}.ksstrike{font-size:2.2rem;font-weight:800;line-height:1}.ks-ce .ksstrike,.kshero.ce .ksstrike{color:var(--bad)}.kshero.pe .ksstrike{color:var(--good)}" +
+  ".kspill{padding:5px 12px;border-radius:999px;color:#fff;font-weight:800;font-size:.9rem}.kspill.ce{background:var(--bad)}.kspill.pe{background:var(--good)}.kspill.nn{background:var(--mute)}" +
+  ".ksfacts{display:flex;flex-direction:column;gap:2px;font-size:.85rem;color:var(--mute)}.ksfacts b{color:inherit}.ksok{color:var(--good);font-weight:700}.ksbad{color:var(--bad);font-weight:700}" +
+  ".kstr{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px}.kstr label,.kstr .kst{display:flex;flex-direction:column;gap:3px;font-size:.74rem;color:var(--mute);font-weight:600}.kstr input{font:inherit;padding:6px 8px;border-radius:10px;border:1px solid var(--line,rgba(0,0,0,.18));background:var(--card);color:inherit;width:100%;box-sizing:border-box}.kst b{font-size:1.05rem;color:var(--ink,inherit);padding:6px 0}.kst b.ksg{color:var(--good);background:none}.kst b.ksr{color:var(--bad);background:none}";
+  document.head.appendChild(st); })();
 function ksHTML() {
   const n50 = opN50(), bars = ksBars(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars && bars.length ? bars[bars.length - 1].close : NaN), rows = ksRows();
-  const inp = (id, key, v, w) => '<input type="number" step="any" data-ksp="' + id + ":" + key + '" value="' + (v == null || v === "" ? "" : v) + '" style="width:' + (w || 70) + 'px">';
-  let h = '<h2 class="hb hbn">&#127919; Strike price selector (option selling)</h2><div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 14px">' +
-    '<label>Monthly ITM points <input type="number" data-kss="itm" value="' + KS.itm + '" style="width:64px"></label><label>Weekly buffer points <input type="number" data-kss="buf" value="' + KS.buf + '" style="width:56px"></label><label>Strike step <input type="number" data-kss="step" value="' + KS.step + '" style="width:64px"></label><label>Lot size <input type="number" data-kss="lot" value="' + KS.lot + '" style="width:56px"></label>' +
-    '<span class="note" style="margin:0">Nifty now ' + fmt(spot, 2) + "</span></div>" +
-    '<p class="note" style="margin:8px 0">Pick a <b>date</b> and <b>High or Low</b>. The tool takes that day\'s Nifty high or low and picks the strike to sell. <b>Monthly:</b> High gives a call (CE) strike at least ' + KS.itm + " points below the high (rounded down to the step); Low gives a put (PE) strike at least " + KS.itm + " points above the low (rounded up). Example: high 22,787.25 gives 22,500 (a gap of 287), because 22,600 would be only 187 away. <b>Weekly:</b> High gives a CE at the high plus " + KS.buf + " points rounded up; Low gives a PE at the low minus " + KS.buf + " points rounded down. Choose NONE to skip a row.</p>" +
-    '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Date</th><th>High / Low</th><th>Type</th><th class="num">Nifty price</th><th class="num">Strike to sell</th><th class="num">Gap to price</th><th class="num">From Nifty now</th><th class="num">Entry</th><th class="num">Qty</th><th class="num">Exit at 80%</th><th class="num">Current</th><th class="num">Open P&amp;L</th><th class="num">Exit price</th><th class="num">Net P&amp;L</th></tr></thead><tbody>';
-  let g = "";
+  const inp = (id, key, v) => '<input type="number" step="any" data-ksp="' + id + ":" + key + '" value="' + (v == null || v === "" ? "" : v) + '">';
+  let h = '<h2 class="hb hbn">&#127919; Strike price selector (option selling)</h2><div class="card"><div class="ksctl">' +
+    '<label>Monthly ITM points<input type="number" data-kss="itm" value="' + KS.itm + '" style="width:92px"></label><label>Weekly buffer points<input type="number" data-kss="buf" value="' + KS.buf + '" style="width:92px"></label><label>Strike step<input type="number" data-kss="step" value="' + KS.step + '" style="width:92px"></label><label>Lot size<input type="number" data-kss="lot" value="' + KS.lot + '" style="width:92px"></label>' +
+    '<span class="note" style="margin:0 0 8px">Nifty now <b>' + fmt(spot, 2) + "</b></span></div>" +
+    '<p class="note" style="margin:10px 0 0">Pick a <b>date</b> and <b>High</b> or <b>Low</b>. High gives a call (CE) to sell, Low gives a put (PE) to sell. <b>Monthly:</b> the strike stays at least ' + KS.itm + " points inside the price, so a high of 22,787.25 gives 22,500 (a gap of 287); 22,600 would be only 187 away. <b>Weekly:</b> CE at the high plus " + KS.buf + " points rounded up; PE at the low minus " + KS.buf + ' points rounded down.</p><div class="ksgrid">';
   rows.forEach(r => {
     const P = KS.pos[r.id] || {}, qty = P.qty != null && P.qty !== "" ? +P.qty : KS.lot, en = P.entry != null && P.entry !== "" ? +P.entry : NaN, cu = P.cur != null && P.cur !== "" ? +P.cur : NaN, ex = P.exit != null && P.exit !== "" ? +P.exit : NaN;
-    const itm = isFinite(r.strike) && isFinite(spot) ? (r.side === "CE" ? r.strike < spot : r.strike > spot) : null, dist = isFinite(r.strike) && isFinite(spot) ? r.strike - spot : NaN, gap = isFinite(r.strike) && isFinite(r.lvl) ? r.lvl - r.strike : NaN;
-    const pl = v => (isFinite(v) ? '<span style="color:var(--' + (v >= 0 ? "good" : "bad") + ')"><b>' + (v >= 0 ? "+" : "") + fmt(v, 0) + "</b></span>" : "—");
-    if (r.grp !== g) { g = r.grp; h += '<tr><td colspan="14" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">' + esc(r.rule === "ITM" ? "Monthly sell: " + KS.itm + " points in the money" : "Weekly sell: " + KS.buf + "-point buffer") + "</td></tr>"; }
-    const note = !r.side ? "" : r.bar ? "" : bars ? '<br><small style="color:var(--bad)">no Nifty candle on this date</small>' : '<br><small style="color:var(--mute)">no Nifty history yet</small>';
-    h += '<tr><td><input type="date" data-ksd="' + r.id + '" value="' + esc(r.date || "") + '" style="width:140px">' + note + '</td><td><select data-ksh="' + r.id + '">' + ["HIGH", "LOW", "NONE"].map(x => '<option' + (x === r.hl ? " selected" : "") + ">" + x + "</option>").join("") + "</select></td><td><b>" + (r.side || "—") + "</b></td>" +
-      '<td class="num"><input type="number" step="any" data-ksl="' + r.id + '" value="' + (KS.ov[r.id] != null && KS.ov[r.id] !== "" ? KS.ov[r.id] : isFinite(r.auto) ? r.auto : "") + '" style="width:92px" title="Filled from the Nifty candle of that date. Type a price to use your own; clear the box to go back to automatic."></td>' +
-      '<td class="num" style="font-size:1.15rem"><b>' + (isFinite(r.strike) ? fmt(r.strike, 0) : "—") + "</b></td>" +
-      '<td class="num">' + (isFinite(gap) ? fmt(gap, 2) : "—") + '</td><td class="num"><small>' + (isFinite(dist) ? (dist > 0 ? "+" : "") + fmt(dist, 0) + " (" + (itm ? "ITM" : "OTM") + ")" : "—") + "</small></td>" +
-      '<td class="num">' + inp(r.id, "entry", P.entry, 64) + '</td><td class="num">' + inp(r.id, "qty", P.qty != null ? P.qty : KS.lot, 56) + '</td><td class="num">' + (isFinite(en) ? fmt(en * 0.2, 2) : "—") + '</td><td class="num">' + inp(r.id, "cur", P.cur, 64) + '</td><td class="num">' + pl(isFinite(en) && isFinite(cu) ? (en - cu) * qty : NaN) + '</td><td class="num">' + inp(r.id, "exit", P.exit, 64) + '</td><td class="num">' + pl(isFinite(en) && isFinite(ex) ? (en - ex) * qty : NaN) + "</td></tr>";
+    const k = r.side === "CE" ? "ce" : r.side === "PE" ? "pe" : "nn", dist = isFinite(r.strike) && isFinite(spot) ? r.strike - spot : NaN, itm = isFinite(dist) ? (r.side === "CE" ? dist < 0 : dist > 0) : null, gap = isFinite(r.strike) && isFinite(r.lvl) ? Math.abs(r.lvl - r.strike) : NaN;
+    const okGap = r.rule === "ITM" ? gap >= KS.itm : true;
+    const pl = v => (isFinite(v) ? '<b class="' + (v >= 0 ? "ksg" : "ksr") + '">' + (v >= 0 ? "+" : "") + fmt(v, 0) + "</b>" : "<b>—</b>");
+    const warn = !r.side ? "" : r.bar ? "" : bars ? '<span class="ksbad">no Nifty candle on this date</span>' : '<span style="color:var(--mute)">no Nifty history yet</span>';
+    h += '<div class="kscard ' + k + '"><div class="kshd"><b>' + (r.rule === "ITM" ? "Monthly sell" : "Weekly sell") + "</b><small>" + (r.rule === "ITM" ? KS.itm + " points in the money" : KS.buf + "-point buffer") + "</small></div>" +
+      '<div class="ksctl"><label>Date<input type="date" data-ksd="' + r.id + '" value="' + esc(r.date || "") + '"></label>' +
+      '<div><div class="kseg">' + [["HIGH", "h"], ["LOW", "l"], ["NONE", "n"]].map(x => '<button type="button" data-ksh="' + r.id + ":" + x[0] + '" class="' + x[1] + (r.hl === x[0] ? " on" : "") + '">' + x[0] + "</button>").join("") + "</div></div>" +
+      '<label>Nifty ' + (r.hl === "LOW" ? "low" : r.hl === "HIGH" ? "high" : "price") + ' of that day<input type="number" step="any" data-ksl="' + r.id + '" value="' + (KS.ov[r.id] != null && KS.ov[r.id] !== "" ? KS.ov[r.id] : isFinite(r.auto) ? r.auto : "") + '" style="width:120px" title="Filled from the Nifty candle of that date. Type your own price; clear the box to go back to automatic."></label></div>' +
+      (warn ? '<div style="margin-top:6px;font-size:.85rem">' + warn + "</div>" : "") +
+      '<div class="kshero ' + k + '"><div><div class="kssell">SELL</div><div class="ksstrike">' + (isFinite(r.strike) ? fmt(r.strike, 0) : "—") + '</div></div><span class="kspill ' + k + '">' + (r.side || "NONE") + '</span><div class="ksfacts"><span>Gap to the price: <b>' + (isFinite(gap) ? fmt(gap, 2) : "—") + "</b>" + (r.rule === "ITM" && isFinite(gap) ? (okGap ? ' <span class="ksok">&#10003; at least ' + KS.itm + "</span>" : ' <span class="ksbad">under ' + KS.itm + "</span>") : "") + "</span><span>From Nifty now: <b>" + (isFinite(dist) ? (dist > 0 ? "+" : "") + fmt(dist, 0) + "</b> " + (itm ? '<span class="' + (itm ? "ksok" : "") + '">ITM</span>' : "OTM") : "—</b>") + "</span></div></div>" +
+      '<div class="kstr"><label>Entry (premium)' + inp(r.id, "entry", P.entry) + "</label><label>Quantity" + inp(r.id, "qty", P.qty != null ? P.qty : KS.lot) + '</label><div class="kst">Exit at 80%<b>' + (isFinite(en) ? fmt(en * 0.2, 2) : "—") + "</b></div><label>Current price" + inp(r.id, "cur", P.cur) + '</label><div class="kst">Open P&amp;L' + pl(isFinite(en) && isFinite(cu) ? (en - cu) * qty : NaN) + "</div><label>Exit price" + inp(r.id, "exit", P.exit) + '</label><div class="kst">Net P&amp;L' + pl(isFinite(en) && isFinite(ex) ? (en - ex) * qty : NaN) + "</div></div></div>";
   });
-  return h + '</tbody></table></div><p class="note" style="margin:8px 0 0">P&amp;L treats each trade as a <b>sold option</b>, like your sheet: (entry &minus; exit) &times; quantity, so a premium that falls is a gain. "Exit at 80%" is the premium when 80% of what you collected is earned (20% of the entry). Dates, entry, quantity and prices are saved in this browser. These are your sheet\'s rules written out, not advice; check the strike and the premium in your broker before selling.</p></div>';
+  return h + '</div><p class="note" style="margin:12px 0 0">P&amp;L treats each trade as a <b>sold option</b>, like your sheet: (entry &minus; exit) &times; quantity, so a premium that falls is a gain (green) and one that rises is a loss (red). "Exit at 80%" is the premium when 80% of what you collected is earned (20% of the entry). Dates, entry, quantity and prices are saved in this browser. These are your sheet\'s rules written out, not advice; check the strike and the premium in your broker before selling.</p></div>';
 }
 function ksPaint() { const b = document.getElementById("ksbox"); if (b) b.innerHTML = ksHTML(); }
+document.addEventListener("click", ev => {
+  const b = ev.target && ev.target.closest ? ev.target.closest("[data-ksh]") : null; if (!b || !b.closest("#ksbox")) return;
+  const p = b.dataset.ksh.split(":"); (KS.rows[p[0]] = KS.rows[p[0]] || {}).hl = p[1]; delete KS.ov[p[0]]; ksSave(); ksPaint();
+});
 document.addEventListener("change", ev => {
   const t = ev.target; if (!t || !t.closest || !t.closest("#ksbox")) return;
   if (t.dataset.kss) { const v = +t.value; if (isFinite(v) && v > 0) { KS[t.dataset.kss] = v; ksSave(); } ksPaint(); return; }
