@@ -1262,9 +1262,9 @@ document.addEventListener("click", ev => {
   const body = b.closest(".gbody"); if (body) body.innerHTML = guideBody();
 });
 /* ===== OPTIONS TAB: Nifty session strip and the strike price selector (rules from the NZD Thulasi sheet) ===== */
-let KS = {itm: 200, buf: 10, step: 100, lot: 65, ov: {}, pos: {}};
-try { const sv = JSON.parse(localStorage.getItem("ksO") || "null"); if (sv) KS = Object.assign(KS, sv); } catch (e) {}
-const ksSave = () => { try { localStorage.setItem("ksO", JSON.stringify(KS)); } catch (e) {} };
+let KS = {itm: 200, buf: 10, step: 100, lot: 65, rows: {}, ov: {}, pos: {}};
+try { const sv = JSON.parse(localStorage.getItem("ksO2") || "null"); if (sv) KS = Object.assign(KS, sv); } catch (e) {}
+const ksSave = () => { try { localStorage.setItem("ksO2", JSON.stringify(KS)); } catch (e) {} };
 function opN50() { const MM = typeof MARKET !== "undefined" ? MARKET : null; return ((MM && MM.indices) || []).find(x => String(x.name).toUpperCase() === "NIFTY 50") || null; }
 function opStripHTML() {
   const MM = typeof MARKET !== "undefined" ? MARKET : null, n50 = opN50();
@@ -1286,55 +1286,52 @@ function ksBars() {
   }
   return KSW;
 }
-const ksIso = d => d.toISOString().slice(0, 10), ksAdd = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return ksIso(d); };
-function ksRange(bars, a, b) { let hi = -Infinity, lo = Infinity, n = 0; bars.forEach(x => { if (x.time >= a && x.time <= b) { n++; if (x.high > hi) hi = x.high; if (x.low < lo) lo = x.low; } }); return n ? {hi, lo, n, a, b} : null; }
-function ksLevels() {
-  const bars = ksBars(); if (!bars) return null; const today = new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Kolkata"});
-  const y = +today.slice(0, 4), m = +today.slice(5, 7), pm = m === 1 ? 12 : m - 1, py = m === 1 ? y - 1 : y, pmS = py + "-" + String(pm).padStart(2, "0");
-  const month = ksRange(bars, pmS + "-01", pmS + "-31");
-  const dow = (new Date(today + "T00:00:00Z").getUTCDay() + 6) % 7, mon = ksAdd(today, -dow), wk0 = dow >= 5 ? mon : ksAdd(mon, -7), week = ksRange(bars, wk0, ksAdd(wk0, 6));
-  const prev = bars.filter(x => x.time < today).pop(), day = prev ? {hi: prev.high, lo: prev.low, a: prev.time, b: prev.time, n: 1} : null;
-  return {month, week, day};
-}
 const ksFloor = (v, s) => Math.floor(v / s + 1e-9) * s, ksCeil = (v, s) => Math.ceil(v / s - 1e-9) * s;
+/* the four rows of the sheet: monthly and weekly, each with a date and a High/Low choice */
+const KS_ROWS = [["m1", "Monthly sell: " + "ITM", "ITM", "HIGH"], ["m2", "Monthly sell: " + "ITM", "ITM", "LOW"], ["w1", "Weekly sell: buffer", "BUF", "HIGH"], ["w2", "Weekly sell: buffer", "BUF", "LOW"]];
 function ksRows() {
-  const L = ksLevels() || {}, rows = [], S = KS.step || 100;
-  const mk = (id, grp, side, rng, which, rule) => { const auto = rng ? (which === "hi" ? rng.hi : rng.lo) : NaN, lvl = isFinite(+KS.ov[id]) && KS.ov[id] !== "" && KS.ov[id] != null ? +KS.ov[id] : auto; rows.push({id, grp, side, rng, auto, lvl, rule}); };
-  mk("mCE", "Monthly: " + KS.itm + "-point ITM", "CE", L.month, "hi", "ITM"); mk("mPE", "Monthly: " + KS.itm + "-point ITM", "PE", L.month, "lo", "ITM");
-  mk("wCE", "Weekly: " + KS.buf + "-point buffer", "CE", L.week, "hi", "BUF"); mk("wPE", "Weekly: " + KS.buf + "-point buffer", "PE", L.week, "lo", "BUF");
-  rows.forEach(r => {
-    if (!isFinite(r.lvl)) { r.strike = NaN; return; }
-    if (r.rule === "ITM") r.strike = r.side === "CE" ? ksFloor(r.lvl - KS.itm, S) : ksCeil(r.lvl + KS.itm, S);
-    else r.strike = r.side === "CE" ? ksCeil(r.lvl + KS.buf, S) : ksFloor(r.lvl - KS.buf, S);
+  const bars = ksBars(), last = bars && bars.length ? bars[bars.length - 1].time : "", S = KS.step || 100, out = [];
+  KS_ROWS.forEach(q => {
+    const cfg = KS.rows[q[0]] || {}, date = cfg.date || last, hl = cfg.hl || q[3];
+    const bar = bars && date ? bars.find(b => b.time === date) : null, auto = bar ? (hl === "HIGH" ? bar.high : hl === "LOW" ? bar.low : NaN) : NaN;
+    const o = KS.ov[q[0]], lvl = o != null && o !== "" && isFinite(+o) ? +o : auto, r = {id: q[0], grp: q[1], rule: q[2], date, hl, bar, auto, lvl, side: hl === "HIGH" ? "CE" : hl === "LOW" ? "PE" : "", strike: NaN};
+    if (isFinite(lvl) && r.side) {
+      if (q[2] === "ITM") r.strike = r.side === "CE" ? ksFloor(lvl - KS.itm, S) : ksCeil(lvl + KS.itm, S);
+      else r.strike = r.side === "CE" ? ksCeil(lvl + KS.buf, S) : ksFloor(lvl - KS.buf, S);
+    }
+    out.push(r);
   });
-  return rows;
+  return out;
 }
 function ksHTML() {
-  const n50 = opN50(), bars = ksBars(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars ? bars[bars.length - 1].close : NaN), rows = ksRows();
+  const n50 = opN50(), bars = ksBars(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars && bars.length ? bars[bars.length - 1].close : NaN), rows = ksRows();
   const inp = (id, key, v, w) => '<input type="number" step="any" data-ksp="' + id + ":" + key + '" value="' + (v == null || v === "" ? "" : v) + '" style="width:' + (w || 70) + 'px">';
-  let h = '<h2 class="hb hbn">&#127919; Strike price selector</h2><div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 14px">' +
-    '<label>ITM points <input type="number" data-kss="itm" value="' + KS.itm + '" style="width:64px"></label><label>Buffer points <input type="number" data-kss="buf" value="' + KS.buf + '" style="width:56px"></label><label>Strike step <input type="number" data-kss="step" value="' + KS.step + '" style="width:64px"></label><label>Lot size <input type="number" data-kss="lot" value="' + KS.lot + '" style="width:56px"></label>' +
+  let h = '<h2 class="hb hbn">&#127919; Strike price selector (option selling)</h2><div class="card"><div class="charttools" style="border:0;padding:0;gap:8px 14px">' +
+    '<label>Monthly ITM points <input type="number" data-kss="itm" value="' + KS.itm + '" style="width:64px"></label><label>Weekly buffer points <input type="number" data-kss="buf" value="' + KS.buf + '" style="width:56px"></label><label>Strike step <input type="number" data-kss="step" value="' + KS.step + '" style="width:64px"></label><label>Lot size <input type="number" data-kss="lot" value="' + KS.lot + '" style="width:56px"></label>' +
     '<span class="note" style="margin:0">Nifty now ' + fmt(spot, 2) + "</span></div>" +
-    '<p class="note" style="margin:8px 0">Your sheet\'s rules. <b>Monthly:</b> call strike = the month\'s high minus ' + KS.itm + " points, rounded down; put strike = the month's low plus " + KS.itm + " points, rounded up. <b>Weekly:</b> call strike = high plus " + KS.buf + " points, rounded up; put strike = low minus " + KS.buf + " points, rounded down. Levels come from the previous month, week and day of your Nifty history; type over any level to use your own, and clear the box to go back to the automatic one.</p>" +
-    '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Rule</th><th>Type</th><th class="num">Level</th><th class="num">Strike</th><th class="num">From Nifty</th><th class="num">Entry</th><th class="num">Qty</th><th class="num">Exit at 80%</th><th class="num">Current</th><th class="num">Open P&amp;L</th><th class="num">Exit price</th><th class="num">Net P&amp;L</th></tr></thead><tbody>';
+    '<p class="note" style="margin:8px 0">Pick a <b>date</b> and <b>High or Low</b>. The tool takes that day\'s Nifty high or low and picks the strike to sell. <b>Monthly:</b> High gives a call (CE) strike at least ' + KS.itm + " points below the high (rounded down to the step); Low gives a put (PE) strike at least " + KS.itm + " points above the low (rounded up). Example: high 22,787.25 gives 22,500 (a gap of 287), because 22,600 would be only 187 away. <b>Weekly:</b> High gives a CE at the high plus " + KS.buf + " points rounded up; Low gives a PE at the low minus " + KS.buf + " points rounded down. Choose NONE to skip a row.</p>" +
+    '<div class="wrap" style="overflow-x:auto"><table class="acctbl"><thead><tr><th>Date</th><th>High / Low</th><th>Type</th><th class="num">Nifty price</th><th class="num">Strike to sell</th><th class="num">Gap to price</th><th class="num">From Nifty now</th><th class="num">Entry</th><th class="num">Qty</th><th class="num">Exit at 80%</th><th class="num">Current</th><th class="num">Open P&amp;L</th><th class="num">Exit price</th><th class="num">Net P&amp;L</th></tr></thead><tbody>';
   let g = "";
   rows.forEach(r => {
     const P = KS.pos[r.id] || {}, qty = P.qty != null && P.qty !== "" ? +P.qty : KS.lot, en = P.entry != null && P.entry !== "" ? +P.entry : NaN, cu = P.cur != null && P.cur !== "" ? +P.cur : NaN, ex = P.exit != null && P.exit !== "" ? +P.exit : NaN;
-    const itm = isFinite(r.strike) && isFinite(spot) ? (r.side === "CE" ? r.strike < spot : r.strike > spot) : null, dist = isFinite(r.strike) && isFinite(spot) ? r.strike - spot : NaN;
+    const itm = isFinite(r.strike) && isFinite(spot) ? (r.side === "CE" ? r.strike < spot : r.strike > spot) : null, dist = isFinite(r.strike) && isFinite(spot) ? r.strike - spot : NaN, gap = isFinite(r.strike) && isFinite(r.lvl) ? r.lvl - r.strike : NaN;
     const pl = v => (isFinite(v) ? '<span style="color:var(--' + (v >= 0 ? "good" : "bad") + ')"><b>' + (v >= 0 ? "+" : "") + fmt(v, 0) + "</b></span>" : "—");
-    if (r.grp !== g) { g = r.grp; h += '<tr><td colspan="12" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">' + esc(r.grp) + "</td></tr>"; }
-    h += "<tr><td>" + (r.side === "CE" ? "Resistance" : "Support") + (r.rng ? '<br><small style="color:var(--mute)">' + esc(r.rng.a === r.rng.b ? r.rng.a : r.rng.a + " to " + r.rng.b) + "</small>" : '<br><small style="color:var(--mute)">no history</small>') + "</td><td><b>" + r.side + "</b></td>" +
-      '<td class="num"><input type="number" step="any" data-ksl="' + r.id + '" value="' + (KS.ov[r.id] != null && KS.ov[r.id] !== "" ? KS.ov[r.id] : isFinite(r.auto) ? r.auto : "") + '" style="width:88px"' + (KS.ov[r.id] != null && KS.ov[r.id] !== "" ? ' title="Your level. Clear the box to go back to automatic."' : "") + "></td>" +
-      '<td class="num" style="font-size:1.05rem"><b>' + (isFinite(r.strike) ? fmt(r.strike, 0) : "—") + "</b></td>" +
-      '<td class="num"><small>' + (isFinite(dist) ? (dist > 0 ? "+" : "") + fmt(dist, 0) + " (" + (itm ? "ITM" : "OTM") + ")" : "—") + "</small></td>" +
+    if (r.grp !== g) { g = r.grp; h += '<tr><td colspan="14" style="background:var(--soft,var(--card));font-weight:700;font-size:.8rem;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)">' + esc(r.rule === "ITM" ? "Monthly sell: " + KS.itm + " points in the money" : "Weekly sell: " + KS.buf + "-point buffer") + "</td></tr>"; }
+    const note = !r.side ? "" : r.bar ? "" : bars ? '<br><small style="color:var(--bad)">no Nifty candle on this date</small>' : '<br><small style="color:var(--mute)">no Nifty history yet</small>';
+    h += '<tr><td><input type="date" data-ksd="' + r.id + '" value="' + esc(r.date || "") + '" style="width:140px">' + note + '</td><td><select data-ksh="' + r.id + '">' + ["HIGH", "LOW", "NONE"].map(x => '<option' + (x === r.hl ? " selected" : "") + ">" + x + "</option>").join("") + "</select></td><td><b>" + (r.side || "—") + "</b></td>" +
+      '<td class="num"><input type="number" step="any" data-ksl="' + r.id + '" value="' + (KS.ov[r.id] != null && KS.ov[r.id] !== "" ? KS.ov[r.id] : isFinite(r.auto) ? r.auto : "") + '" style="width:92px" title="Filled from the Nifty candle of that date. Type a price to use your own; clear the box to go back to automatic."></td>' +
+      '<td class="num" style="font-size:1.15rem"><b>' + (isFinite(r.strike) ? fmt(r.strike, 0) : "—") + "</b></td>" +
+      '<td class="num">' + (isFinite(gap) ? fmt(gap, 2) : "—") + '</td><td class="num"><small>' + (isFinite(dist) ? (dist > 0 ? "+" : "") + fmt(dist, 0) + " (" + (itm ? "ITM" : "OTM") + ")" : "—") + "</small></td>" +
       '<td class="num">' + inp(r.id, "entry", P.entry, 64) + '</td><td class="num">' + inp(r.id, "qty", P.qty != null ? P.qty : KS.lot, 56) + '</td><td class="num">' + (isFinite(en) ? fmt(en * 0.2, 2) : "—") + '</td><td class="num">' + inp(r.id, "cur", P.cur, 64) + '</td><td class="num">' + pl(isFinite(en) && isFinite(cu) ? (en - cu) * qty : NaN) + '</td><td class="num">' + inp(r.id, "exit", P.exit, 64) + '</td><td class="num">' + pl(isFinite(en) && isFinite(ex) ? (en - ex) * qty : NaN) + "</td></tr>";
   });
-  return h + '</tbody></table></div><p class="note" style="margin:8px 0 0">P&amp;L treats each trade as a <b>sold option</b>, like your sheet: (entry &minus; exit) &times; quantity, so a premium that falls is a gain. "Exit at 80%" is the premium when 80% of what you collected is earned (20% of the entry). Entry, quantity and prices are saved in this browser. These are the sheet\'s rules written out, not advice; check the strike and the premium in your broker before trading.</p></div>';
+  return h + '</tbody></table></div><p class="note" style="margin:8px 0 0">P&amp;L treats each trade as a <b>sold option</b>, like your sheet: (entry &minus; exit) &times; quantity, so a premium that falls is a gain. "Exit at 80%" is the premium when 80% of what you collected is earned (20% of the entry). Dates, entry, quantity and prices are saved in this browser. These are your sheet\'s rules written out, not advice; check the strike and the premium in your broker before selling.</p></div>';
 }
 function ksPaint() { const b = document.getElementById("ksbox"); if (b) b.innerHTML = ksHTML(); }
 document.addEventListener("change", ev => {
   const t = ev.target; if (!t || !t.closest || !t.closest("#ksbox")) return;
   if (t.dataset.kss) { const v = +t.value; if (isFinite(v) && v > 0) { KS[t.dataset.kss] = v; ksSave(); } ksPaint(); return; }
+  if (t.dataset.ksd) { (KS.rows[t.dataset.ksd] = KS.rows[t.dataset.ksd] || {}).date = t.value; delete KS.ov[t.dataset.ksd]; ksSave(); ksPaint(); return; }
+  if (t.dataset.ksh) { (KS.rows[t.dataset.ksh] = KS.rows[t.dataset.ksh] || {}).hl = t.value; delete KS.ov[t.dataset.ksh]; ksSave(); ksPaint(); return; }
   if (t.dataset.ksl) { if (t.value === "") delete KS.ov[t.dataset.ksl]; else KS.ov[t.dataset.ksl] = +t.value; ksSave(); ksPaint(); return; }
   if (t.dataset.ksp) { const p = t.dataset.ksp.split(":"); (KS.pos[p[0]] = KS.pos[p[0]] || {})[p[1]] = t.value === "" ? "" : +t.value; ksSave(); ksPaint(); }
 });
