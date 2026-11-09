@@ -758,7 +758,7 @@ async function ixChartDraw() {
   if (!o || !o.bars) { say("No chart data for " + esc(sym) + " from your Worker (index names and some symbols are not available). Use the TradingView link."); return; }
   const c = colors(), bars = o.bars, intra = tf !== "D";
   const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
-  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
   candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
   let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(bars.map(b => ({time: b.time, value: b.vol, color: b.close >= b.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
   try { indAttach(chart, candle, bars, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
@@ -1432,7 +1432,7 @@ function ksCharts() {
   ksRows().forEach(r => {
     const box = document.getElementById("ksnc-" + r.id); if (!box || !isFinite(r.strike)) return; const c = colors(), P = KS.pos[r.id] || {}, en = P.entry != null && P.entry !== "" ? +P.entry : NaN;
     const ch = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 3}});
-    const cs = ch.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false}); cs.setData(bars.slice(-130).map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    const cs = ch.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true}); cs.setData(bars.slice(-130).map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
     const col = r.side === "CE" ? "#dc2626" : "#16a34a"; cs.createPriceLine({price: r.strike, color: col, lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: "Sell " + r.side});
     if (isFinite(r.lvl)) cs.createPriceLine({price: r.lvl, color: "#64748b", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: r.hl === "HIGH" ? "High" : "Low"});
     if (isFinite(en)) cs.createPriceLine({price: r.side === "CE" ? r.strike + en : r.strike - en, color: "#d97706", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Breakeven"});
@@ -2272,7 +2272,7 @@ function buildChart(tk, box) {
     crosshair: {mode: 1},
     localization: {locale: "en-IN"}
   });
-  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: false});
+  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
   const vol = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "vol", lastValueVisible: false, priceLineVisible: false});
   chart.priceScale("vol").applyOptions({scaleMargins: {top: 0.82, bottom: 0}});
   const ma = {}, maOn = {};
@@ -3846,7 +3846,7 @@ function znDrawChart(bars, zones, intra) {
     s.setData(pts);
     if (act) { try { s.createPriceLine({price: z.prox, color: col, lineWidth: 1, lineStyle: 0, lineVisible: false, axisLabelVisible: true, title: z.pat}); s.createPriceLine({price: z.dist, color: col, lineWidth: 1, lineStyle: 2, lineVisible: true, axisLabelVisible: false, title: ""}); } catch (e) {} }
   });
-  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: false});
+  const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
   candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
   try { indAttach(chart, candle, bars, {base: {top: 0.06, bottom: 0.08}}); } catch (e) {}
   ZCH = {chart, bars, intra: !!intra}; znRange();
@@ -5244,7 +5244,7 @@ const cbApi = (function () {
     if (!bars || !LW) { if (note) note.innerHTML = "No chart data for " + E(sym) + " from your Worker" + (LW ? "" : " (chart library missing)") + ". Use the TradingView link."; return; }
     const c = colors(), intra = tf !== "D";
     const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
-    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
     candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
     let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(bars.map(b => ({time: b.time, value: b.vol, color: b.close >= b.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
     try { indAttach(chart, candle, bars, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
@@ -5442,7 +5442,7 @@ const n5Api = (function () {
     if (!b || !LW) { if (note) note.textContent = "No chart data for " + sym + " from your Worker" + (LW ? "" : " (chart library missing)") + ". Use the TradingView link."; return; }
     const c = colors(), intra = tf !== "D";
     const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
-    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
     candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
     let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
     try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
@@ -5806,7 +5806,7 @@ const stApi = (function () {
     if (!b || !LW) { if (note) note.textContent = "No chart data for " + sym + " from your Worker" + (LW ? "" : " (chart library missing)") + ". Use the TradingView link."; return; }
     const c = colors(), intra = tf !== "D";
     const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
-    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
     candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
     let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
     /* SuperTrend lines: coloured by direction, the filter drawn thick */
@@ -6246,7 +6246,7 @@ const cuApi = (function () {
       '<div class="charttools" style="margin-top:10px"><b>Chart timeframe</b>' + ["D", "W", "M"].map(k => '<button type="button" class="cbtn" data-cuct="' + k + '" aria-pressed="' + (k === ct) + '">' + TFN[k] + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, ct === "D" ? "D" : ct) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-cux="1">Close</button></div><div id="cubox" style="height:420px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div class="note" style="margin:6px 0 0">' + TFN[ct] + ' candles from your Worker. ' + (RES[ct][OPEN] ? "L, B and R mark the left rim, the cup bottom and the right rim. " : "No separate cup and handle was found on this timeframe, so only the levels from the " + TFN[tf].toLowerCase() + " pattern are drawn. ") + 'Lines: pivot, stop and target.</div></div>';
     const box = PN.querySelector("#cubox"), LW = window.LightweightCharts; if (!LW || !box) return;
     const co = B[OPEN].X[ct], r2 = RES[ct][OPEN], c = colors(), b = co.bars, chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
-    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
     candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
     let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
     try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
