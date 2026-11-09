@@ -5237,7 +5237,7 @@ const cbApi = (function () {
   function drawLines() {
     if (!CANDLE) return;
     LINES.forEach(l => { try { CANDLE.removePriceLine(l); } catch (e) {} }); LINES = [];
-    if (isFinite(LASTPX)) { try { LINES.push(CANDLE.createPriceLine({price: LASTPX, color: "#64748b", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "Price"})); } catch (e) {} }
+    if (isFinite(LASTPX)) { try { LINES.push(CANDLE.createPriceLine({price: LASTPX, color: "#f59e0b", lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: "Price " + LASTPX.toFixed(2)})); } catch (e) {} }
     const p = SEL && PL[SEL.plan]; if (!p) return;
     [[p.entry, "#2563eb", "Entry"], [p.stop, "#dc2626", "Stop"], [p.target, "#16a34a", "Target"]].forEach(a => { try { LINES.push(CANDLE.createPriceLine({price: a[0], color: a[1], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[2]})); } catch (e) {} });
   }
@@ -5258,7 +5258,7 @@ const cbApi = (function () {
     LASTPX = bars[bars.length - 1].close; CH = chart; CANDLE = candle; drawLines();
     const n = bars.length;
     try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = bars[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
-    if (note) note.textContent = (intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + " Dashed lines show the entry logic selected below.";
+    if (note) note.textContent = (intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + " Amber line = last price " + LASTPX.toFixed(2) + ". Dashed lines show the entry logic selected below.";
   }
   function cbDock() {
     if (!PN) return; const res = $e("#cbres"); if (!res) return;
