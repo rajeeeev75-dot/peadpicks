@@ -1,21 +1,21 @@
-# PEAD back-test (3636 results, 434 stocks, 2020-11-12 to 2026-11-02)
+# PEAD back-test (7165 results, 867 stocks, 2020-11-12 to 2026-11-06)
 
-Announcement dates: 1050 from NSE, 2586 from the volume spike.
+Announcement dates: 1881 from NSE, 5284 from the volume spike.
 
 | Group | Events | 20d up | 20d avg | 20d vs Nifty | 60d avg | 60d vs Nifty |
 |---|---|---|---|---|---|---|
-| All results | 3636 | 39.5% | -1.0% | -0.8% | -1.71% | -1.74% |
-| Excellent results | 162 | 45.9% | 0.88% | 1.96% | -0.95% | -0.49% |
-| Very good results | 280 | 44.2% | 0.83% | 1.3% | 1.56% | 1.8% |
-| Good results | 604 | 41.7% | -0.35% | 0.02% | 0.91% | 1.02% |
-| Weak or poor results | 2590 | 38.1% | -1.46% | -1.37% | -2.68% | -2.8% |
-| Positive reaction | 2198 | 37.0% | -1.33% | -0.91% | -2.15% | -1.83% |
-| High volume | 2821 | 37.1% | -1.67% | -1.17% | -2.12% | -1.78% |
-| Excellent + positive reaction | 118 | 48.6% | 1.43% | 2.64% | -0.55% | 0.14% |
-| Excellent + high volume | 149 | 45.2% | 0.33% | 1.49% | -2.16% | -1.45% |
-| YOUR COMBO: Excellent + high volume + positive reaction | 111 | 47.5% | 0.98% | 2.27% | -2.01% | -1.15% |
-| Combo, looser: Excellent or Very good + volume 1.5x + positive | 317 | 43.8% | 0.73% | 1.52% | 0.12% | 0.7% |
-| Combo, stricter: Excellent + volume 3x + reaction 2%+ | 97 | 44.9% | 1.09% | 2.52% | -2.22% | -1.29% |
-| SHORT side: Poor + high volume + negative reaction | 682 | 62.8% | 1.87% | 1.4% | 1.74% | 1.73% |
+| All results | 7165 | 39.5% | -0.98% | -0.69% | -1.84% | -1.81% |
+| Excellent results | 303 | 44.9% | 0.83% | 1.77% | -2.14% | -1.76% |
+| Very good results | 568 | 44.0% | 0.67% | 1.3% | 1.28% | 1.74% |
+| Good results | 1210 | 41.6% | -0.39% | 0.07% | 0.88% | 0.93% |
+| Weak or poor results | 5084 | 38.2% | -1.39% | -1.21% | -2.78% | -2.82% |
+| Positive reaction | 4368 | 37.4% | -1.19% | -0.74% | -2.35% | -1.96% |
+| High volume | 5694 | 37.6% | -1.39% | -0.88% | -1.95% | -1.55% |
+| Excellent + positive reaction | 225 | 46.4% | 1.66% | 2.57% | -0.98% | -0.34% |
+| Excellent + high volume | 279 | 44.7% | 0.7% | 1.72% | -2.71% | -2.17% |
+| YOUR COMBO: Excellent + high volume + positive reaction | 212 | 45.4% | 1.37% | 2.35% | -1.89% | -1.2% |
+| Combo, looser: Excellent or Very good + volume 1.5x + positive | 621 | 43.5% | 0.8% | 1.58% | -0.19% | 0.58% |
+| Combo, stricter: Excellent + volume 3x + reaction 2%+ | 177 | 43.8% | 0.84% | 1.92% | -3.23% | -2.59% |
+| SHORT side: Poor + high volume + negative reaction | 1379 | 61.5% | 1.23% | 0.73% | 1.26% | 1.18% |
 
 Return = from the close of the first session after the result to N trading days later; excess = minus the Nifty over the same days. Score is the PEAD Picks score re-created from Screener quarterly data (volume adjustment uses the first-session volume only). ci = about 95% range of the average excess. Fewer than 30 events is a rough guide only. Before brokerage and slippage.
