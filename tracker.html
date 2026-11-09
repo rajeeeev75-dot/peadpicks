@@ -636,6 +636,58 @@ function fiiHTML() {
   }
   return h + '<p class="note">Rs crore, NSE provisional figures published after the close. The table fills up day by day once the Worker has seen each day, so a longer history builds over time. FII/FPI means foreign portfolio investors, DII means domestic institutions.</p>';
 }
+/* ===== SuperTrend Ladder (5 minute) signals for the OI spurts rows: a port of your "SuperTrend Ladder Signals" Pine script ===== */
+const LD = {atr: [8, 15, 22], fac: 2, fAtr: 20, fFac: 3, emaLen: 200, gate: true, confirm: true, regimeExit: true, voteExit: true, useEma: true}, LDC = {}; let LD_BUSY = false;
+function ldST(b, fac, len) {
+  const n = b.length, d = new Array(n).fill(NaN), st = new Array(n).fill(NaN), U = new Array(n).fill(NaN), Lw = new Array(n).fill(NaN); let atr = NaN, sum = 0;
+  for (let i = 0; i < n; i++) {
+    const tr = i ? Math.max(b[i].high - b[i].low, Math.abs(b[i].high - b[i - 1].close), Math.abs(b[i].low - b[i - 1].close)) : b[i].high - b[i].low;
+    if (i < len) { sum += tr; if (i === len - 1) atr = sum / len; } else atr = (atr * (len - 1) + tr) / len;
+    if (!isFinite(atr)) continue;
+    const hl = (b[i].high + b[i].low) / 2; let up = hl + fac * atr, lo = hl - fac * atr;
+    if (isFinite(U[i - 1])) { lo = (lo > Lw[i - 1] || b[i - 1].close < Lw[i - 1]) ? lo : Lw[i - 1]; up = (up < U[i - 1] || b[i - 1].close > U[i - 1]) ? up : U[i - 1]; }
+    let dir; if (!isFinite(st[i - 1])) dir = 1; else if (st[i - 1] === U[i - 1]) dir = b[i].close > up ? -1 : 1; else dir = b[i].close < lo ? 1 : -1;
+    U[i] = up; Lw[i] = lo; d[i] = dir; st[i] = dir === -1 ? lo : up;
+  }
+  return {d, st};
+}
+function ldRun(bars0) {
+  const b = (bars0 || []).slice(); if (b.length && b[b.length - 1].time + 300 > Date.now() / 1000) b.pop();   // only closed bars, as the script does
+  if (b.length < 40) return null;
+  const V = LD.atr.map(l => ldST(b, LD.fac, l)), F = ldST(b, LD.fFac, LD.fAtr), n = b.length, ema = new Array(n).fill(NaN);
+  if (n >= LD.emaLen) { let e = 0; for (let i = 0; i < LD.emaLen; i++) e += b[i].close; e /= LD.emaLen; ema[LD.emaLen - 1] = e; const k = 2 / (LD.emaLen + 1); for (let i = LD.emaLen; i < n; i++) { e = b[i].close * k + e * (1 - k); ema[i] = e; } }
+  let pos = 0, entryI = -1, exitI = -1, exitDir = 0, pL = false, pS = false, gate = "";
+  for (let i = 0; i < n; i++) {
+    if (!isFinite(V[2].d[i]) || !isFinite(F.d[i])) { pL = pS = false; continue; }
+    const up = V.reduce((a, x) => a + (x.d[i] < 0 ? 1 : 0), 0), propL = up >= 2, propS = 3 - up >= 2, fUp = F.d[i] < 0, fAdv = isFinite(F.st[i - 1]) ? (fUp ? F.st[i] > F.st[i - 1] : F.st[i] < F.st[i - 1]) : false;
+    const gL = !LD.gate || (fUp && fAdv), gS = !LD.gate || (!fUp && fAdv), cL = !LD.confirm || pL, cS = !LD.confirm || pS, noE = !LD.useEma || !isFinite(ema[i]), eL = noE || b[i].close > ema[i], eS = noE || b[i].close < ema[i];
+    let p = pos, ex = false;
+    if (p === 1 && ((LD.regimeExit && !fUp) || (LD.voteExit && !propL))) { ex = true; exitI = i; exitDir = 1; p = 0; }
+    else if (p === -1 && ((LD.regimeExit && fUp) || (LD.voteExit && !propS))) { ex = true; exitI = i; exitDir = -1; p = 0; }
+    if (p === 0 && !ex) { if (propL && gL && cL && eL) { p = 1; entryI = i; } else if (propS && gS && cS && eS) { p = -1; entryI = i; } }
+    pos = p; pL = propL; pS = propS;
+    if (i === n - 1) gate = pos ? "in position" : (propL || propS) ? ((LD.gate && ((propL ? 1 : 0) !== (fUp ? 1 : 0))) ? "blocked: wrong regime" : (LD.gate && !fAdv) ? "waiting: filter not advancing" : (propL ? !eL : !eS) ? "blocked by the 200 EMA" : "waiting: confirm") : "no proposal";
+  }
+  const last = n - 1, lastDay = Math.floor((b[last].time + 19800) / 86400), tm = t => { const q = new Date((t + 19800) * 1000), hm = String(q.getUTCHours()).padStart(2, "0") + ":" + String(q.getUTCMinutes()).padStart(2, "0"); return Math.floor((t + 19800) / 86400) === lastDay ? hm : q.getUTCDate() + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][q.getUTCMonth()] + " " + hm; };
+  const o = {pos, n, last: b[last].close, asOf: tm(b[last].time), gate, ema: n >= LD.emaLen, sl: F.st[last]};
+  if (pos) { o.entry = b[entryI].close; o.since = tm(b[entryI].time); o.fresh = entryI >= last - 2; o.sl0 = F.st[entryI]; }
+  else if (exitI === last) o.exit = exitDir;
+  return o;
+}
+async function ldEnsure(syms) {
+  if (LD_BUSY || !MARKET_API_URL) return; const now = Date.now(), todo = syms.filter(s => !LDC[s] || now - LDC[s].t > 90e3); if (!todo.length) return;
+  LD_BUSY = true;
+  try {
+    for (let i = 0; i < todo.length; i += 10) {
+      const ch = todo.slice(i, i + 10);
+      try {
+        const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=5", {cache: "no-store"}), j = await r.json(), t = Date.now();
+        ch.forEach(sy => { const rows = j && j.bars && j.bars[sy]; LDC[sy] = {t, res: rows && rows.length ? ldRun(rows.map(x => ({time: +x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4]}))) : null}; });
+      } catch (e) { ch.forEach(sy => { LDC[sy] = {t: Date.now(), res: null}; }); }
+    }
+  } finally { LD_BUSY = false; }
+  try { ixPaint(); } catch (e) {}
+}
 /* ===== OI SPURTS (NSE, F&O underlyings): data only ===== */
 let OI = null, OI_ERR = "", oiBusy = false, OI_ALL = false;
 function oiHTML() {
@@ -647,10 +699,19 @@ function oiHTML() {
   const rows = common.concat(top.slice(0, Math.max(0, 10 - common.length))), shown = rows;   // stocks that are also trade ideas first, then the biggest spurts up to 10 rows
   const cls = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
   const pxM = {}; try { ((typeof MARKET !== "undefined" && MARKET && MARKET.stocks) || []).forEach(x => { pxM[String(x.s).toUpperCase()] = x; }); } catch (e) {}
+  try { ldEnsure(shown.map(r => String(r.s).toUpperCase())); } catch (e) {}
+  const ldCell = r => {
+    const sy = String(r.s).toUpperCase(), c = LDC[sy], q = pxM[sy], v = c && c.res; if (!c) return '<td class="num" colspan="3"><span class="note">loading...</span></td>'; if (!v) return '<td class="num" colspan="3"><span class="note">no 5m data</span></td>';
+    const oiv = q && isFinite(+q.pct) ? (+r.chg > 0 ? (+q.pct > 0 ? "Long buildup" : "Short buildup") : +r.chg < 0 ? (+q.pct > 0 ? "Short covering" : "Long unwinding") : "") : "", agree = (v.pos === 1 && oiv === "Long buildup") || (v.pos === -1 && oiv === "Short buildup");
+    const pill = "display:inline-block;font-weight:700;font-size:.95rem;padding:4px 18px";
+    const sig = v.pos === 1 ? '<span class="chip g" style="' + pill + '">Long</span>' : v.pos === -1 ? '<span class="chip r" style="' + pill + '">Short</span>' : v.exit ? '<span class="chip w" style="' + pill + '">Exit ' + (v.exit === 1 ? "long" : "short") + "</span>" : '<span class="note">Flat</span>';
+    const sub = '<div class="note" style="font-size:.72rem;margin:2px 0 0">' + (v.pos ? (v.fresh ? "NEW &middot; " : "") + "since " + v.since : esc(v.gate)) + (oiv ? " &middot; " + oiv + (agree ? " &#10003;" : "") : "") + "</div>";
+    return '<td class="num" style="white-space:nowrap">' + sig + sub + "</td>" + (v.pos ? '<td class="num">' + d2(v.entry) + '</td><td class="num">' + d2(v.sl) + '<div class="note" style="font-size:.72rem;margin:0">' + (Math.abs(v.entry - v.sl) / v.entry * 100).toFixed(2) + "% risk</div></td>" : '<td class="num">-</td><td class="num">-</td>');
+  };
   const pxCell = r => { const q = pxM[String(r.s).toUpperCase()]; return q && isFinite(+q.p) ? '<td class="num">' + d2(+q.p) + '</td><td class="num" style="' + cls(+q.pct) + '">' + (+q.pct > 0 ? "+" : "") + (+q.pct).toFixed(2) + "%</td>" : '<td class="num">-</td><td class="num">-</td>'; };
-  let h = h2 + '<div class="card"><div class="wrap"><table><thead><tr><th>Symbol</th><th class="num">Price</th><th class="num">% change</th><th class="num">Open interest</th><th class="num">Previous OI</th><th class="num">Change in OI</th><th class="num">% change in OI</th><th class="num">Volume (contracts)</th><th class="num">Futures value (Rs lakh)</th><th class="num">Option value (Rs lakh)</th><th class="num">Total value (Rs lakh)</th><th class="num">Premium value (Rs lakh)</th><th class="num">Underlying value</th></tr></thead><tbody>' +
-    shown.map(r => "<tr><td style=\"white-space:nowrap\"><b>" + esc(r.s) + "</b>" + znTvA(r.s, "D") + " " + ixBtn(r.s) + (ideaSyms.has(String(r.s).toUpperCase()) ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in Trade ideas">Trade idea</span>' : "") + '</td>' + pxCell(r) + '<td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
-  return h + '<p class="note">NSE OI spurts (stocks that are also trade ideas first, then the biggest by % change in open interest)' + (OI.asOf ? ", as of " + esc(OI.asOf) : "") + ". Data only, no interpretation.</p></div>";
+  let h = h2 + '<div class="card"><div class="wrap"><table><thead><tr><th>Symbol</th><th class="num">Price</th><th class="num">% change</th><th class="num">5m signal</th><th class="num">Entry</th><th class="num">Stop loss</th><th class="num">Open interest</th><th class="num">Previous OI</th><th class="num">Change in OI</th><th class="num">% change in OI</th><th class="num">Volume (contracts)</th><th class="num">Futures value (Rs lakh)</th><th class="num">Option value (Rs lakh)</th><th class="num">Total value (Rs lakh)</th><th class="num">Premium value (Rs lakh)</th><th class="num">Underlying value</th></tr></thead><tbody>' +
+    shown.map(r => "<tr><td style=\"white-space:nowrap\"><b>" + esc(r.s) + "</b>" + znTvA(r.s, "D") + " " + ixBtn(r.s) + (ideaSyms.has(String(r.s).toUpperCase()) ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px" title="Also in Trade ideas">Trade idea</span>' : "") + '</td>' + pxCell(r) + ldCell(r) + '<td class="num">' + n(r.oi) + '</td><td class="num">' + n(r.prev) + '</td><td class="num" style="' + cls(r.chg) + '">' + n(r.chg) + '</td><td class="num" style="' + cls(r.pct) + '">' + d2(r.pct) + '</td><td class="num">' + n(r.vol) + '</td><td class="num">' + d2(r.fut) + '</td><td class="num">' + d2(r.opt) + '</td><td class="num">' + d2(r.tot) + '</td><td class="num">' + d2(r.prem) + '</td><td class="num">' + d2(r.und) + "</td></tr>").join("") + "</tbody></table></div>";
+  return h + '<p class="note">NSE OI spurts (stocks that are also trade ideas first, then the biggest by % change in open interest)' + (OI.asOf ? ", as of " + esc(OI.asOf) : "") + ". Signals come from your SuperTrend Ladder script on closed 5-minute candles (3 SuperTrends vote, a slower SuperTrend gates, 200 EMA baseline, 2-bar confirm). Long or Short = the trade is on, since the time shown (NEW = the entry came in the last 3 candles). Entry = close of the signal candle. Stop loss = the slower filter SuperTrend line now (the script exits when that line flips or the votes flip). A tick means the OI picture agrees (long buildup for a buy, short buildup for a sell). This is your indicator, not a tested edge.</p></div>";
 }
 async function loadOi() {
   if (!MARKET_API_URL || oiBusy) return;
@@ -1269,7 +1330,7 @@ function opN50() { const MM = typeof MARKET !== "undefined" ? MARKET : null; ret
 function opStripHTML() {
   const MM = typeof MARKET !== "undefined" ? MARKET : null, n50 = opN50();
   if (!n50) return '<p class="note">Waiting for the Nifty prices from your Worker...</p>';
-  let h = niftySessionHTML({p: +n50.last}); const vix = ((MM && MM.indices) || []).find(x => String(x.name).toUpperCase() === "INDIA VIX");
+  let h = niftySessionHTML({p: +n50.last}); h = h.replace('<div class="tiles">', '<div class="tiles"><div class="tile' + tileCls(+n50.pct) + '"><small>Nifty 50</small><b>' + fmt(+n50.last, 2) + "</b><span>" + (isFinite(+n50.pct) ? pct(+n50.pct, 2) + " today" : "live") + "</span></div>"); const vix = ((MM && MM.indices) || []).find(x => String(x.name).toUpperCase() === "INDIA VIX");
   if (vix && isFinite(+vix.last)) h = h.replace(/<\/div>\s*$/, '<div class="tile' + tileCls(+vix.pct) + '"><small>India VIX</small><b>' + fmt(+vix.last, 2) + "</b><span>" + (isFinite(+vix.pct) ? pct(+vix.pct, 2) + " today" : "") + "</span></div></div>");
   return h;
 }
@@ -1370,10 +1431,129 @@ function ksCharts() {
     ch.timeScale().setVisibleLogicalRange({from: nd - 55, to: nd + 4}); KSCH.push(ch);
   });
 }
+/* Today's strategy: reads the symbols (your Symbols tab, else the built-in history) and shows which weekly NZDP sell is active (rules from the NZDP Trade Strategy deck) */
+function nzSignals() {
+  const today = ksIST(), out = [];
+  for (let back = 0; back <= 8; back++) {
+    const D = ksPlus(today, -back); let list = SHEET_SYM[D];
+    if (!list) {
+      const day = Math.round((Date.UTC(+D.slice(0, 4), +D.slice(5, 7) - 1, +D.slice(8, 10)) - SYM_T0) / 864e5), code = SYM_DATA[day] | 0; list = [];
+      if (code) { const bpv = Math.floor(code / 4096) % 16 - 1; if (bpv >= 0 && bpv <= 8) list.push({k: "BP", n: bpv, d: 1}); }
+      if (code) [["R", 1], ["V", 4], ["Y", 16], ["B", 64], ["S", 256], ["F", 1024], ["BS", 16777216], ["IC", 67108864]].forEach(x => { const v = Math.floor(code / x[1]) % 4; if (v === 1 || v === 2) list.push({k: x[0], d: v}); });
+    }
+    if (list && list.length) out.push({date: D, list});
+  }
+  return out;
+}
+function nzPanel() {
+  const today = ksIST(), sigs = nzSignals(), bars = ksBars(), S = KS.step || 100, HG = 400, n50 = opN50(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars && bars.length ? bars[bars.length - 1].close : NaN);
+  const byDate = {}; sigs.forEach(g => { byDate[g.date] = g.list; });
+  const nextTD = D => { let e = ksPlus(D, 1); while (ksDow(e) === 0 || ksDow(e) === 6) e = ksPlus(e, 1); return e; }, prevTD = D => { let e = ksPlus(D, -1); while (ksDow(e) === 0 || ksDow(e) === 6) e = ksPlus(e, -1); return e; };
+  const expOf = D => { let e = nextTD(D); while (ksDow(e) !== 2) e = ksPlus(e, 1); return e; }, barOf = D => (bars ? bars.find(b => b.time === D) : null);
+  const has = (D, k, d) => (byDate[D] || []).some(e => e.k === k && (d == null || e.d === d)), SM = ["R", "V", "Y", "B"];
+  const strikeFor = (D, d) => { const b = barOf(D); return b ? (d === 1 ? ksFloor(b.low - KS.buf, S) : ksCeil(b.high + KS.buf, S)) : NaN; };
+  const chip = e => '<span class="kspill ' + (e.d === 1 ? "pe" : "ce") + '" style="font-size:.9rem">' + (SYM_EMO[e.k] || e.k) + (e.d === 1 ? " &uarr;" : " &darr;") + "</span>";
+  const status = D => { const nd = nextTD(D), ex = expOf(D); return ksDow(D) === 2 ? '<span class="ksbad">Ignored: the signal came on an expiry day</span>' : nd > today ? "Starts " + ksDayName(nd) : nd === today ? '<span class="ksok">ACTIVE TODAY</span>' : "Still alive (till " + ksDayName(ex) + ")"; };
+  const card = (cls, title, st, body) => '<div class="kscard ' + cls + '" style="margin-bottom:12px"><div class="kshd"><b>' + title + "</b><small>" + st + '</small></div><div class="kssec">' + body + "</div></div>";
+  const hero = (d, strike, facts) => { const c = d === 1 ? "pe" : "ce"; return '<div class="kshero ' + c + '"><div><div class="kssell">SELL</div><div class="ksstrike">' + (isFinite(strike) ? fmt(strike, 0) : "—") + '</div></div><span class="kspill ' + c + '">' + (d === 1 ? "PE" : "CE") + '</span><div class="ksfacts">' + facts + "</div></div>"; };
+  const hedge = (d, strike, pts, same) => (isFinite(strike) ? '<div class="kshedge">&#128737; <b>Hedge: BUY ' + fmt(d === 1 ? strike - pts : strike + pts, 0) + " " + (d === 1 ? "PE" : "CE") + "</b> (" + pts + " points further out" + (same ? ", same expiry and same minute" : "") + ")</div>" : "");
+  const para = t => '<div style="margin-top:10px;font-size:1rem;line-height:1.5">' + t + "</div>";
+  const useBtn = (D, d) => ksDow(D) === 2 ? "" : '<div style="margin-top:10px"><button type="button" class="cbtn" data-nzu="' + D + ":" + (d === 1 ? "LOW" : "HIGH") + '">Use in the strike selector below</button></div>';
+  const gates = "<b>Enter only when both gates are open in the same minute:</b> the day has moved at least 25 points your way, and the option you sell trades above Rs 50 (Rs 40 on expiry day or the day before).";
+  const dayWord = d => (d === 1 ? "support (below the candle)" : "resistance (above the candle)");
+  let html = "", n = 0, other = [];
+  const bpOf = D => { const e = (byDate[D] || []).find(x => x.k === "BP"); return e ? e.n : null; };
+  Object.keys(byDate).sort().reverse().forEach(D2 => {
+    const D1 = prevTD(D2), a = bpOf(D1), b2 = bpOf(D2); if (a == null || b2 == null) return;
+    const bull = a <= 1 && b2 >= 7, bear = a >= 7 && b2 <= 1; if (!bull && !bear) return;
+    const D3 = nextTD(D2), bar2 = barOf(D2), b3 = barOf(D3), later = Object.keys(byDate).filter(E => E > D2 && bpOf(E) != null && (bull ? bpOf(E) <= 1 : bpOf(E) >= 7)).sort()[0];
+    const broke = bar2 && isFinite(spot) && (bull ? spot < bar2.low : spot > bar2.high), K = isFinite(spot) ? (bull ? Math.floor(spot / S) * S + S : Math.ceil(spot / S) * S - S) : NaN, cur = ksExpiry("BUF"), nxt = ksPlus(cur, 7), far = ksPlus(cur, 14);
+    const e1 = bull ? nxt : cur, e2 = bull ? far : nxt, move = b3 ? (bull ? b3.high - b3.open : b3.open - b3.low) : NaN;
+    if (D3 < ksPlus(today, -6)) return; n++;
+    html += card(bull ? "pe" : "ce", (bull ? "Bullish" : "Bearish") + " Rocket (option buy)", D3 > today ? "Starts " + ksDayName(D3) : D3 === today ? '<span class="ksok">ENTRY DAY (Day 3)</span>' : "Running since " + ksDayName(D3),
+      para("Setup: Day 1 <b>BP " + a + "</b> (" + ksDayName(D1) + ") then Day 2 <b>BP " + b2 + "</b> (" + ksDayName(D2) + "). Valid even if a day is an expiry day.") +
+      '<div class="kshero ' + (bull ? "pe" : "ce") + '"><div><div class="kssell">BUY</div><div class="ksstrike">' + (isFinite(K) ? fmt(K, 0) : "—") + '</div></div><span class="kspill ' + (bull ? "pe" : "ce") + '">' + (bull ? "CE" : "PE") + '</span><div class="ksfacts"><span>One strike out of the money from Nifty ' + (isFinite(spot) ? fmt(spot, 0) : "—") + '</span><span>50% in the <b>' + ksDayName(e1) + "</b> expiry, 50% in the <b>" + ksDayName(e2) + "</b> expiry</span></div></div>" +
+      para("<b>Day 3 condition:</b> " + (bull ? "if Open = High (the high is less than the open + 25 points) there is no entry; otherwise take it." : "if Open = Low (the low is more than the open − 25 points) there is no entry; otherwise take it.") + (b3 && isFinite(move) ? " So far on " + ksDayName(D3) + " the " + (bull ? "high is " : "low is ") + fmt(move, 0) + " points " + (bull ? "above" : "below") + " the open: " + (move >= 25 ? '<b class="ksok">entry allowed</b>' : '<b class="ksbad">no entry yet</b>') + "." : "")) +
+      para("<b>Exit:</b> " + (bull ? "if the low of the BP 7/8 candle (" + (bar2 ? fmt(bar2.low, 0) : "—") + ") breaks (no need to wait for the close), exit the CE and buy a PE to reverse (50% current week, 50% next week). If a BP 0 or 1 comes on a later day, exit the next day at the open. If Open = High on a later day (high less than open + 25), exit." : "if the high of the BP 0/1 candle (" + (bar2 ? fmt(bar2.high, 0) : "—") + ") breaks and closes above it, exit the PE (no reverse trade). If a BP 7 or 8 comes on a later day, exit the next day at the open. If Open = Low on a later day (low more than open − 25), exit.") + " Target: 50% for beginners, 100% once experienced.") +
+      ((bull ? has(D3, "OH") : has(D3, "OL")) ? para('<b class="ksbad">' + ksDayName(D3) + " is " + (bull ? "O=H" : "O=L") + " in your sheet: no entry.</b>") : "") +
+      (Object.keys(byDate).some(E => E > D3 && (bull ? has(E, "OH") : has(E, "OL"))) ? para('<b class="ksbad">' + (bull ? "O=H" : "O=L") + " came on a later day: exit.</b>") : "") +
+      (broke ? para('<b class="ksbad">Nifty ' + fmt(spot, 0) + (bull ? " is below the BP 7/8 low: the exit and reverse rule is triggered.</b>" : " is above the BP 0/1 high: the exit rule is triggered (it needs a close above).</b>")) : "") +
+      (later ? para('<b class="ksbad">A ' + (bull ? "BP 0/1" : "BP 7/8") + " was generated on " + ksDayName(later) + ": exit the next day at the open.</b>") : ""));
+  });
+  Object.keys(byDate).sort().reverse().forEach(D => {
+    const ex = expOf(D); if (ex < today) return;
+    const list = byDate[D], bar = barOf(D), nd = nextTD(D), pv = prevTD(D), isExp = ksDow(D) === 2, star = list.find(e => e.k === "S"), ball = list.find(e => e.k === "F");
+    // 1. weekly NZDP sell (star, football, or Type 1 extra: Violet resistance yesterday + ST support today)
+    let main = star || ball, label = (star ? "&#11088; Star" : "") + (star && ball ? " + " : "") + (ball ? "&#9917; Football (strong)" : "");
+    if (!main && has(D, "F", 1) && has(pv, "V", 2)) { main = {d: 1}; label = "Type 1 extra: Violet resistance yesterday + ST support today"; }
+    if (main) {
+      const d = main.d, K = strikeFor(D, d), ign = !isExp && (d === 1 ? (has(D, "OH") || has(nd, "OH")) : (has(D, "OL") || has(nd, "OL"))); n++;
+      html += card(d === 1 ? "pe" : "ce", "Weekly NZDP option sell", ign ? '<span class="ksbad">Ignored: ' + (d === 1 ? "O=H" : "O=L") + " on the signal day or the next day</span>" : status(D), hero(d, K, "<span>Signal: <b>" + label + "</b> on <b>" + ksDayName(D) + "</b> (" + dayWord(d) + ")</span><span>" + (bar ? "Signal day " + (d === 1 ? "low " + fmt(bar.low, 2) : "high " + fmt(bar.high, 2)) : "No Nifty candle for that date yet") + "</span>") + hedge(d, K, HG, true) +
+        para(gates + " Weekly expiry: <b>" + ksDayName(ex) + "</b>; the signal dies after it. Hold to expiry at 15:29, or exit early when 80% of the profit has arrived. At most one bullish and one bearish trade at a time.") +
+        (ign ? para("<b>Ignore rule:</b> a " + (d === 1 ? "bullish signal with Open = High" : "bearish signal with Open = Low") + " on the same or the next day is not traded." + (d === 1 ? " Your Powerful weekly rule says the market is then bearish: buy an OTM or ATM PE and also sell a CE." : "")) : "") +
+        (star && d === 2 && has(D, "V", 2) ? para("<b>Rule A (Violet resistance + NZDP −1):</b> at 15:25 on the entry day, if Nifty is above that day's open (green), also add a bullish spread: sell the PE at that day's lowest price (9:15–15:25) minus 10, rounded down to 100, with its hedge. If the day is red, add nothing.") : "") + (ign ? "" : useBtn(D, d)));
+      // Rules B and C: opposite NZDP star on the very next trading day
+      if (star && has(pv, "S") && !has(pv, "S", star.d)) {
+        const pb = barOf(pv), L = bar && pb ? Math.min(bar.low, pb.low) : NaN, broken = isFinite(L) && isFinite(spot) && spot < L;
+        const bullFirst = star.d === 2;   // Day 1 +1, Day 2 -1
+        html += card("nn", bullFirst ? "NZDP Rule B: bull to bear reversal" : "NZDP Rule C: bear to bull add", "Break guard line L = " + (isFinite(L) ? fmt(L, 0) : "—"),
+          para(bullFirst ? "Day 1 NZDP +1 then Day 2 NZDP −1 (the next trading day), with the bullish already live. The reversal is <b>armed, not fired</b>. It fires only if Nifty trades <b>below L " + (isFinite(L) ? fmt(L, 0) : "") + "</b> (the lower of the two lows) at any time from the next day until expiry (" + ksDayName(ex) + "). Then: exit the bullish, sell a CE with its hedge, and buy a PE about 100 points below the price. If the price is back above L at 15:25 the reversal is undone (not after 15:25)." : "Day 1 NZDP −1 then Day 2 NZDP +1, with the bearish already live. <b>Keep the bearish</b>, add a bullish spread under the usual two gates, and arm the break guard at <b>L " + (isFinite(L) ? fmt(L, 0) : "") + "</b> (the lower of the two lows).") +
+          (isFinite(L) && isFinite(spot) ? para("Nifty now <b>" + fmt(spot, 0) + "</b> is <b>" + (broken ? '<span class="ksbad">below L: the guard line is broken</span>' : '<span class="ksok">above L</span>') + "</b>.") : "") );
+      }
+    }
+    // 2. smiley option sell (Rules 1 to 8), Yellow, Violet, Bro and Red smileys
+    [1, 2].forEach(d => {
+      const sm = list.filter(e => SM.indexOf(e.k) >= 0 && e.d === d); if (!sm.length) return;
+      const opp = 3 - d, K = strikeFor(D, d), invalid = !isExp && SM.some(k => has(nd, k, opp)), second = SM.some(k => has(pv, k, opp)), chips = sm.map(chip).join(" ");
+      const sameWeek = Object.keys(byDate).filter(E => E < D && ksDow(E) !== 2 && expOf(E) === ex && SM.some(k => has(E, k, d))).sort(), fk = sameWeek[0], FK = fk ? strikeFor(fk, d) : NaN;
+      let note = fk ? "Not the first of the week: the first one (" + ksDayName(fk) + (isFinite(FK) ? ", " + fmt(FK, 0) : "") + ") stays the most powerful (Rule 2)." + (isFinite(FK) && isFinite(K) && ((d === 2 && K > FK) || (d === 1 && K < FK)) ? " The market is expected to close between " + fmt(Math.min(K, FK), 0) + " and " + fmt(Math.max(K, FK), 0) + " (Rule 3)." : "") : "First " + (d === 1 ? "support" : "resistance") + " of the week: the most powerful (Rule 2).";
+      n++;
+      if (second && !isExp) {
+        const sp = bar ? bar.close : spot, Kb = d === 1 ? ksCeil(sp + 500, S) : ksFloor(sp - 500, S), Kf = d === 1 ? ksCeil(sp + 200, S) : ksFloor(sp - 200, S), mx = ksExpiry("ITM");
+        html += card(d === 1 ? "pe" : "ce", "Smiley Rule 7: Divine concept", status(D), para("Smiley " + (d === 1 ? "support" : "resistance") + " " + chips + " came the day after the opposite smiley, so the <b>first trade is invalid: exit it at the next day's open</b>, profit or loss. Then take the monthly trade (monthly expiry about <b>" + ksDayName(mx) + "</b>):") +
+          '<div class="kshero ' + (d === 1 ? "pe" : "ce") + '" style="display:block"><div><b>BUY ' + fmt(Kb, 0) + " " + (d === 1 ? "CE" : "PE") + "</b> (about 400 to 500 points " + (d === 1 ? "above" : "below") + " the close " + (isFinite(sp) ? fmt(sp, 0) : "") + ")</div><div><b>SELL " + fmt(Kb, 0) + " " + (d === 1 ? "PE" : "CE") + "</b> (same strike, same monthly expiry)</div></div>" +
+          para("Exit the sold option when its premium has melted 80%. Exit the bought option at your target, if the smiley changes direction before monthly expiry, or at 3:29 pm on monthly expiry day. Use about 20% of capital for these. (Rule 9, smiley failure, uses a strike about 200 points away: " + fmt(Kf, 0) + ".)"));
+        return;
+      }
+      html += card(d === 1 ? "pe" : "ce", "Smiley option sell (Type 1, weekly)", invalid ? '<span class="ksbad">Invalid: an opposite smiley came the next day (Rule 7). Exit at that day\'s open.</span>' : status(D), hero(d, K, "<span>Signal: " + chips + " Smiley " + (d === 1 ? "support" : "resistance") + " on <b>" + ksDayName(D) + "</b></span><span>" + (bar ? "Signal day " + (d === 1 ? "low " + fmt(bar.low, 2) : "high " + fmt(bar.high, 2)) : "No Nifty candle for that date yet") + "</span>") +
+        para("Sell the strike on the next trading day. Minimum premium: Rs 50 (Rs 40 on expiry day or the day before). If you cannot get it, skip this direction for the rest of the week unless the opposite signal comes (Rule 1). Valid for the weekly expiry only: <b>" + ksDayName(ex) + "</b> (Rule 8).") +
+        para(note) + (d === 1 ? para("Carrying a sold PE overnight: buy a PE 300 points below the sold strike" + (isFinite(K) ? " (" + fmt(K - 300, 0) + " PE)" : "") + " by 3:29 pm and close it at 9:15 the next morning (Rule 6).") : "") +
+        para('<span class="note">The Smiley deck gives no strike rule, so the strike uses your weekly rule: the signal day ' + (d === 1 ? "low minus " : "high plus ") + KS.buf + ", rounded " + (d === 1 ? "down" : "up") + " to " + S + ". An opposite signal on a different day: sell that side too and hold both (Rule 5).</span>") + useBtn(D, d));
+    });
+    // 3. Blue Smiley (Trump strategy)
+    const bs = list.find(e => e.k === "BS");
+    if (bs && bar) {
+      const nb = barOf(nd), red = nb && nb.close < nb.open, up = isFinite(spot) && spot > bar.high, dn = isFinite(spot) && spot < bar.low; n++;
+      html += card("nn", "Blue Smiley (Trump strategy)", "Signal " + ksDayName(D), para("Market is just turning from bearish to bullish. <b>Bullish when Nifty breaks the Blue Smiley day's high " + fmt(bar.high, 2) + "</b>; <b>bearish when it breaks the low " + fmt(bar.low, 2) + "</b>. Nifty now " + (isFinite(spot) ? fmt(spot, 0) + (up ? ' &mdash; <b class="ksok">above the high: bullish</b>' : dn ? ' &mdash; <b class="ksbad">below the low: bearish</b>' : " &mdash; inside the range: wait") : "—") + ".") +
+        para((red ? '<b class="ksbad">The next day was a red candle: take the bearish view at 3:29 of that red candle (that next day only).</b> ' : "If the next day is a red candle, take the bearish view at 3:29 of that candle (next day only). ") + "Stays valid while the market is above the Blue Smiley low; it can turn bearish on a Brother or Red Smiley resistance. A second Blue Smiley with a low break is strongly bearish. These are option-buy ideas: use the nearest OTM option with about 10% of capital.") );
+    }
+    // 4. Green Arrow (Chennai session) and BP option sell for the current week
+    const ar = list.find(e => e.k === "AR"), bpv = bpOf(D);
+    if (ar && ar.d === 1 && bar) {
+      const nb = barOf(nd), nred = nb && nb.close < nb.open, strong = bpv != null && bpv >= 6, below = isFinite(spot) && spot < bar.low, red = bar.close < bar.open; n++;
+      html += card("pe", "Green Arrow", "Signal " + ksDayName(D),
+        para(strong ? "<b>Bullish:</b> Green Arrow with <b>BP " + bpv + "</b>." : "<b>Setup not complete:</b> a Green Arrow is bullish only with BP 6, 7 or 8" + (bpv == null ? " (no BP in your sheet for this day)." : " (this day has BP " + bpv + ").")) +
+        para("Arrow day high <b>" + fmt(bar.high, 2) + "</b>, low <b>" + fmt(bar.low, 2) + "</b>. It turns <b>bearish if the Green Arrow low breaks</b>. Stop loss: the highest high from the Green Arrow day to the day the low breaks." + (isFinite(spot) ? " Nifty now " + fmt(spot, 0) + (below ? ' &mdash; <b class="ksbad">below the low: bearish</b>.' : ' &mdash; <b class="ksok">above the low</b>.') : "")) +
+        (red ? para("The Green Arrow day was a <b>red</b> candle: a high break is bullish (stop loss: yesterday's low) and a low break is bearish (stop loss: yesterday's high).") : "") +
+        ((nred || has(nd, "OH") || has(nd, "V", 2)) ? para('<b class="ksbad">Next day (' + ksDayName(nd) + "): " + [nred ? "a red candle" : "", has(nd, "OH") ? "O=H" : "", has(nd, "V", 2) ? "a Violet resistance" : ""].filter(Boolean).join(", ") + " &mdash; the bullish is off: exit the CE and look to buy a PE.</b>") : ""));
+    }
+    if (bpv != null && (bpv <= 1 || bpv >= 7) && bar) {
+      const d = bpv >= 7 ? 1 : 2, K = d === 1 ? (Math.floor(bar.low / S) * S === bar.low ? bar.low - S : Math.floor(bar.low / S) * S) : Math.floor(bar.high / S) * S + S; n++;
+      html += card(d === 1 ? "pe" : "ce", "BP " + bpv + " option sell (current week)", status(D), hero(d, K, "<span>Signal: <b>BP " + bpv + "</b> on <b>" + ksDayName(D) + "</b></span><span>" + (d === 1 ? "Strike: the hundred below the low " + fmt(bar.low, 2) + " (support for the week)" : "Strike: the hundred above the high " + fmt(bar.high, 2) + " (resistance for the week)") + "</span>") +
+        para("Current-week expiry: <b>" + ksDayName(ex) + "</b>." + (d === 2 ? " If Day 2 is a green candle, also sell the PE at 3:29 while holding the CE; if the green candle's low breaks, buy the nearest OTM PE (2x lot) and hold both." : " Take the overnight hedge for the sold PE (a PE 300 points below, bought by 3:29 pm, closed at 9:15 next day).")));
+    }
+    list.filter(e => e.k !== "S" && e.k !== "F" && SM.indexOf(e.k) < 0 && e.k !== "BS" && e.k !== "BP" && e.k !== "AR" && e.k !== "OL" && e.k !== "OH").forEach(e => other.push(SYM_EMO[e.k] + " " + ksDayName(D)));
+  });
+  const sh = symSheetState === "error" ? '<p class="note" style="margin:8px 0 0">The Symbols sheet could not be read, so this uses the built-in history only.</p>' : "";
+  return '<h2 class="hb hbn">&#128197; Today\'s strategy (from your symbols)</h2><div class="card">' + (html || '<p style="margin:0">No signal in the last few days that has a coded strategy, so nothing is active.</p>') +
+    '<p class="note" style="margin:8px 0 0">Symbols come from the Symbols tab of your sheet (Date, Up or Down, then the symbols: Star, Ball, Violet, Yellow, Bro, Red, Blue, the Bull Point 0 to 8, O=L, O=H and the Green or Red Arrow as ARR). A signal is known at the close, so it is traded from the next trading day. Market holidays are not known here, so check the expiry date.</p>' +
+    '<p class="note" style="margin:8px 0 0"><b>Not covered yet</b> because the sheet has no such symbol: White and Blue Arrow, Z and EYE, flags, and the market direction. Those strategies (Butterfly, SSS, Power Mode, One entry in a year and NZDP Types 2 and 3) still need those symbols added to the sheet.' + (other.length ? " Ice cream and highest bull or bear symbols have no rule here." : "") + "</p>" + sh + "</div>";
+}
+document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-nzu]") : null; if (!b) return; const q = b.dataset.nzu.split(":"); KS.rows.w1 = Object.assign(KS.rows.w1 || {}, {date: q[0], hl: q[1]}); delete KS.ov.w1; ksSave(); ksPaint(); });
 function ksHTML() {
   const n50 = opN50(), bars = ksBars(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars && bars.length ? bars[bars.length - 1].close : NaN), rows = ksRows();
   const inp = (id, key, v) => '<input type="number" step="any" data-ksp="' + id + ":" + key + '" value="' + (v == null || v === "" ? "" : v) + '">';
-  let h = '<h2 class="hb hbn">&#127919; Strike price selector (option selling)</h2><div class="card"><div class="ksctl">' +
+  let h = nzPanel() + '<h2 class="hb hbn">&#127919; Strike price selector (option selling)</h2><div class="card"><div class="ksctl">' +
     '<label>Monthly ITM points<input type="number" data-kss="itm" value="' + KS.itm + '" style="width:92px"></label><label>Weekly buffer points<input type="number" data-kss="buf" value="' + KS.buf + '" style="width:92px"></label><label>Strike step<input type="number" data-kss="step" value="' + KS.step + '" style="width:92px"></label><label>Lot size<input type="number" data-kss="lot" value="' + KS.lot + '" style="width:92px"></label><label>Hedge points away<input type="number" data-kss="hpts" value="' + KS.hpts + '" style="width:92px"></label><label class="kschk"><input type="checkbox" data-ksb="hon"' + (KS.hon ? " checked" : "") + '> Buy a far option (hedge)</label>' +
     '<span class="note" style="margin:0 0 8px">Nifty now <b>' + fmt(spot, 2) + "</b></span></div>" +
     '<p class="note" style="margin:10px 0 0">Pick a <b>date</b> and <b>High</b> or <b>Low</b>. High gives a call (CE) to sell, Low gives a put (PE) to sell. <b>Monthly:</b> the strike stays at least ' + KS.itm + " points inside the price, so a high of 22,787.25 gives 22,500 (a gap of 287); 22,600 would be only 187 away. <b>Weekly:</b> CE at the high plus " + KS.buf + " points rounded up; PE at the low minus " + KS.buf + ' points rounded down.</p><div class="ksgrid">';
@@ -1498,6 +1678,8 @@ function stockHTML(s, c, id) {
   const pos = getPos(s.ticker), A = alerts(s, c, pos);
   let h = "";
   if (isIdxStock(s, c)) { try { const obs0 = obsList(s.observations); return niftyHTML(s, c, id) + "<!--SPLIT-->" + (obs0.length ? '<h2 class="hb">&#128221; My observations <span class="note">(from the sheet, newest first)</span></h2><div class="card">' + obsHTML(obs0) + "</div>" : "") + "<h2>Target prices</h2>" + (c.targets.length ? tbl(["Broker", "Target", "Rating", "Upside vs live price"], c.targets.map(t => [esc(t.who + (t.when ? " (" + t.when + ")" : "")), '<span class="num">Rs ' + fmt(t.val, 0) + "</span>", esc(t.rating), '<span class="num">' + (isFinite(c.p) ? pct((t.val / c.p - 1) * 100) : "—") + "</span>"])) : '<p class="note">No target prices saved for Nifty in the sheet.</p>') + (s.target_note ? '<p class="note">' + esc(s.target_note) + "</p>" : ""); } catch (e) { h += '<p class="note">Could not draw the Nifty dashboard (' + esc(e.message) + "). Showing the standard layout.</p>"; } }
+  let fullNm = "", secNm = ""; try { const q = n5Api.list().find(x => String(x.s).toUpperCase() === String(s.short).trim().toUpperCase()); if (q) { fullNm = q.n; secNm = q.i; } } catch (e) {}
+  h += '<h2 class="hb hbn" style="margin-top:0">' + esc(s.short) + (fullNm ? ' <span class="note" style="font-weight:500">' + esc(fullNm) + (secNm ? " &middot; " + esc(secNm) : "") + "</span>" : ' <span class="note" style="font-weight:500">' + esc(s.ticker) + "</span>") + "</h2>";
   h += '<p class="note" style="margin:0 0 8px"><a class="tvl" href="' + tvUrl(s.ticker) + '" target="_blank" rel="noopener">Open ' + esc(s.short) + ' on TradingView &#8599;</a></p>';
   const isIdx = String(s.short || "").trim().toUpperCase() === BENCH_NAME.toUpperCase() || /^(INDEXNSE:NIFTY_50|NSE:NIFTY|NSE:NIFTY50|NIFTY|NIFTY_50)$/.test(c.tk);
   if (isIdx) {
@@ -1931,9 +2113,9 @@ const SYM_DATA = {"-6455":33554432,"1":33583184,"2":145242114,"5":136982530,"6":
 /* Sheet symbols (from the NZDP indicator data) drawn on the Nifty chart */
 const SYM_T0 = Date.UTC(2020, 0, 1);
 let SYM_ON = true; try { SYM_ON = localStorage.getItem("symOn") !== "0"; } catch (e) {}
-const SYM_DEF = {BS: 1, R: 1, V: 1, Y: 1, B: 1, HB: 1, HR: 1, BP: 1, AR: 1, WA: 1, BA: 1, YA: 1, IC: 1, S: 0, F: 0};
+const SYM_DEF = {BS: 1, R: 1, V: 1, Y: 1, B: 1, HB: 1, HR: 1, BP: 1, AR: 1, WA: 1, BA: 1, YA: 1, IC: 1, S: 0, F: 0, OL: 1, OH: 1};
 let SYM_SEL = Object.assign({}, SYM_DEF); try { Object.assign(SYM_SEL, JSON.parse(localStorage.getItem("symSel") || "{}")); } catch (e) {}
-const SYM_LIST = [["BS", "\u{1F916} Blue smiley"], ["R", "\u{1F621} Red"], ["V", "\u{1F47F} Violet"], ["Y", "\u{1F600} Yellow"], ["B", "\u{1F60D} Bro"], ["HB", "\u{1F402} H Bull"], ["HR", "\u{1F43B} H Bear"], ["BP", "1️⃣ Bull point"], ["AR", "▲▼ Green/Red"], ["WA", "△▽ White"], ["BA", "⬆⬇ Blue"], ["YA", "↑↓ Yellow"], ["IC", "\u{1F368} Ice cream"], ["S", "⭐ Star"], ["F", "⚽ Ball"]];
+const SYM_LIST = [["BS", "\u{1F916} Blue smiley"], ["R", "\u{1F621} Red"], ["V", "\u{1F47F} Violet"], ["Y", "\u{1F600} Yellow"], ["B", "\u{1F60D} Bro"], ["HB", "\u{1F402} H Bull"], ["HR", "\u{1F43B} H Bear"], ["BP", "1️⃣ BP"], ["AR", "▲▼ Green/Red"], ["WA", "△▽ White"], ["BA", "⬆⬇ Blue"], ["YA", "↑↓ Yellow"], ["IC", "\u{1F368} Ice cream"], ["S", "⭐ Star"], ["F", "⚽ Ball"], ["OL", "O=L"], ["OH", "O=H"]];
 /* The chart with the sheet symbols lives in the Options tab under its own key; the Nifty tab chart has no symbols */
 const SYMKEY = "SYM:NIFTY", symTk = tk => String(tk || "") === SYMKEY;
 const niftyRow = () => lastRows.find(x => isNiftyTk(x.s.ticker));
@@ -1942,8 +2124,8 @@ const histKey = tk => { if (!symTk(tk)) return String(tk).toUpperCase(); const r
 const isNiftyTk = tk => /^(INDEXNSE:NIFTY_50|NSE:NIFTY|NSE:NIFTY50|NIFTY|NIFTY_50)$/i.test(String(tk || ""));
 /* Smileys you type in the Symbols tab of your sheet (one row per date: one Up/Down, then up to 3 symbols). They override the built-in history for that date. */
 let SHEET_SYM = {}, symSheetState = "";
-const SYM_EMO = {BS: "\u{1F916}", R: "\u{1F621}", V: "\u{1F47F}", Y: "\u{1F600}", B: "\u{1F60D}", HB: "\u{1F402}", HR: "\u{1F43B}", IC: "\u{1F368}", S: "\u2B50", F: "\u26BD"};
-const symKeyOf = t => { const x = String(t || "").toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim(); return x.indexOf("blue") === 0 ? "BS" : x.indexOf("red") === 0 ? "R" : x.indexOf("violet") === 0 ? "V" : x.indexOf("yellow") === 0 ? "Y" : x.indexOf("bro") === 0 ? "B" : x.indexOf("h bull") === 0 ? "HB" : x.indexOf("h bear") === 0 ? "HR" : x.indexOf("star") === 0 ? "S" : x.indexOf("ball") === 0 ? "F" : x.indexOf("ice") === 0 ? "IC" : ""; };
+const SYM_EMO = {BS: "\u{1F916}", R: "\u{1F621}", V: "\u{1F47F}", Y: "\u{1F600}", B: "\u{1F60D}", HB: "\u{1F402}", HR: "\u{1F43B}", IC: "\u{1F368}", S: "\u2B50", F: "\u26BD", OL: "O=L", OH: "O=H"}, ARW = {AR: ["▲", "▼"], WA: ["△", "▽"], BA: ["⬆", "⬇", "#2563eb"], YA: ["↑", "↓", "#ca8a04"]};
+const symKeyOf = t => { const x = String(t || "").toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim(); return /^(arr|green arrow|red arrow|green red arrow)$/.test(x) ? "AR" : /^(b arr|blue arrow)$/.test(x) ? "BA" : /^(w arr|white arrow)$/.test(x) ? "WA" : /^(y arr|yellow arrow)$/.test(x) ? "YA" : x === "o l" ? "OL" : x === "o h" ? "OH" : x.indexOf("blue") === 0 ? "BS" : x.indexOf("red") === 0 ? "R" : x.indexOf("violet") === 0 ? "V" : x.indexOf("yellow") === 0 ? "Y" : x.indexOf("bro") === 0 ? "B" : x.indexOf("h bull") === 0 ? "HB" : x.indexOf("h bear") === 0 ? "HR" : x.indexOf("star") === 0 ? "S" : x.indexOf("ball") === 0 ? "F" : x.indexOf("ice") === 0 ? "IC" : ""; };
 function symIso(t) {
   t = String(t || "").trim(); let m;
   if ((m = t.match(/^(\d{4})-(\d{2})-(\d{2})/))) return m[1] + "-" + m[2] + "-" + m[3];
@@ -1956,7 +2138,7 @@ function parseSymSheet(text) {
   parseCSV(text).slice(1).forEach(r => {
     const d = symIso(r[0]); if (!d) return;
     const dir = /^\s*up/i.test(r[1]) ? 1 : /^\s*down/i.test(r[1]) ? 2 : 0, list = [];   // one Up/Down for the date, then up to 3 symbols
-    if (dir) for (let i = 2; i < r.length; i++) { const k = symKeyOf(r[i]); if (k && !list.some(e => e.k === k)) list.push({k, d: dir}); }
+    if (dir) for (let i = 2; i < r.length; i++) { const bm = String(r[i] || "").trim().match(/^(?:bp\s*)?([0-8])$/i); if (bm) { if (!list.some(e => e.k === "BP")) list.push({k: "BP", n: +bm[1], d: dir}); continue; } const k = symKeyOf(r[i]); if (k && !list.some(e => e.k === k)) list.push({k, d: dir}); }
     if (list.length) out[d] = list;
   });
   return out;
@@ -1968,12 +2150,13 @@ async function loadSymSheet() {
     SHEET_SYM = parseSymSheet(await r.text()); symSheetState = "ok";
   } catch (e) { symSheetState = "error"; }
   try { Object.keys(CH).forEach(tk => applySymbols(tk)); } catch (e) {}
+  try { ksPaint(); } catch (e) {}
 }
 function symMarkers(bars) {
   const c = colors(), out = [], KC = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"], X = SYM_SEL;
   bars.forEach(b => {
     if (typeof b.time === "string" && SHEET_SYM[b.time]) {   // a date typed in your Symbols tab replaces the built-in history for that day
-      SHEET_SYM[b.time].forEach(e => { if (X[e.k]) out.push({time: b.time, position: e.d === 1 ? "belowBar" : "aboveBar", shape: "circle", size: 0, color: c.ink, text: SYM_EMO[e.k]}); });
+      SHEET_SYM[b.time].forEach(e => { if (X[e.k]) out.push({time: b.time, position: e.k === "BP" ? (e.n <= 3 ? "belowBar" : "aboveBar") : e.k === "OL" ? "belowBar" : e.k === "OH" ? "aboveBar" : e.d === 1 ? "belowBar" : "aboveBar", shape: "circle", size: 0, color: e.k === "OL" ? "#16a34a" : e.k === "OH" ? "#dc2626" : ARW[e.k] ? (e.k === "AR" ? (e.d === 1 ? "#16a34a" : "#dc2626") : (ARW[e.k][2] || c.ink)) : c.ink, text: e.k === "BP" ? KC[e.n] : ARW[e.k] ? ARW[e.k][e.d === 1 ? 0 : 1] : SYM_EMO[e.k]}); });
       return;
     }
     let day; if (typeof b.time === "string") { const q = b.time.split("-").map(Number); day = Math.round((Date.UTC(q[0], q[1] - 1, q[2]) - SYM_T0) / 864e5); } else return;
@@ -2227,6 +2410,23 @@ function parseNews(text) {
   });
   return out;
 }
+/* ----- news impact: scores recent headlines (last 2 days) of the stocks in your News tab as positive or negative, used by the Combo tab ----- */
+const NW_POS = /\b(wins?|won|bags?|bagged|secures?|secured|upgrade[sd]?|outperform|overweight|raises? target|beats?|record|surges?|jumps?|soars?|rall(y|ies|ied)|strong|robust|approv(al|ed)|launch(es|ed)?|expands?|expansion|buyback|bonus|dividend|acquires?|acquisition|turnaround|breakout|upper circuit|growth|highest|rises?|climbs?|gains?|order inflow|profit (up|rises?|jumps?|surges?))\b/gi;
+const NW_NEG = /\b(downgrade[sd]?|underperform|underweight|cuts? target|lowers? target|miss(es|ed)?|loss(es)?|plunges?|tanks?|slumps?|crash(es|ed)?|falls?|fell|drops?|slips?|declines?|weak|disappoint(s|ing|ed)?|probe|raid|penalt(y|ies)|fraud|default(s|ed)?|insolvency|resign(s|ed|ation)?|show[- ]cause|ban(ned)?|suspend(s|ed)?|delist(ing)?|lawsuit|fined?|concern|lower circuit|pledge|warning|shutdown|recall|negative|stake sale|sells? stake)\b/gi;
+function nwScore(x) {
+  const t = String(x.title || ""), pos = Math.min(2, (t.match(NW_POS) || []).length), neg = Math.min(2, (t.match(NW_NEG) || []).length); let sc = pos - neg;
+  if (x.tag === "Risk") sc -= 1; else if (x.tag === "Orders / M&A" && sc >= 0) sc += 1; else if (x.tag === "Corporate action" && /buyback|bonus|dividend/i.test(t) && sc >= 0) sc += 1;
+  return Math.max(-3, Math.min(3, sc));
+}
+function nwImpactMap() {
+  const out = {}; if (!NEWS) return out;
+  Object.keys(NEWS).forEach(k => {
+    const sym = k.replace(/^[A-Za-z]+:/, "").toUpperCase(); let net = 0; const used = [];
+    (NEWS[k] || []).forEach(x => { if (!x.date || x.tag === "Market wrap") return; const a = ageOf(x.date); if (a > 2 || a < -1) return; const sc = nwScore(x); if (sc) { net += sc; used.push({x, sc}); } });
+    if (used.length) out[sym] = {net, used};
+  });
+  return out;
+}
 function ageOf(iso) {
   if (!iso) return 999;
   const t = new Date(); t.setHours(0, 0, 0, 0); const p = iso.split("-").map(Number);
@@ -2289,6 +2489,7 @@ function paintAllNews() {
     catch (e) { const sl = n.querySelector(".newsslot"); if (sl) sl.innerHTML = '<h2 class="hb hbn">&#128240; News</h2><div class="card newscard"><p class="newsempty">Problem drawing the headlines: ' + esc(e && e.message) + "</p></div>"; }
   });
   const o = document.getElementById("ovnews"); if (o) o.innerHTML = safeOvNews();
+  try { if (current === "cb") cbPaint(); } catch (e) {}
 }
 function newsFromCache() {
   if (NEWS || !NEWS_CSV_URL) return;
@@ -3037,7 +3238,7 @@ function paintMarket() { const o = document.getElementById("mkt"); if (o) o.inne
    2027 rows are computed (Pushya, Panchak, Trayodashi, new/full moons, equinoxes/solstices) or published (FOMC).
    Add more rows here (same layout) when you have them, for example planetary transits or Gann reversal dates for 2027. */
 const ASTRO = [[20261028,0,0,"⚠️ 28 Oct: Major crash date"],[20261028,1437,107,"❌ Bhadra (Vishti Karana)",20261029],[20261028,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20261029,915,1530,"⏳ F&O EXPIRY (Oct)"],[20261031,1135,1135,"🪐 Guru -> Simha (Jup -> Leo)"],[20261031,1658,352,"❌ Bhadra (Vishti Karana)",20261101],[20261101,539,430,"✨ Pushya Nakshatra",20261102],[20261102,1954,1954,"🪐 Moon Conjunct Mars (☽ ☌ ♂)"],[20261103,2326,1104,"❌ Bhadra (Vishti Karana)",20261104],[20261104,0,0,"🔄 REVERSAL (225°)",20261105],[20261106,45,45,"🪐 Venus Transit -> Virgo (Rx)"],[20261106,1031,1048,"🌘 Krishna Trayodashi"],[20261107,1049,2306,"❌ Bhadra (Vishti Karana)"],[20261109,1800,2000,"🌑 New Moon (Diwali / Laxmi Puja)"],[20261112,2030,2030,"🪐 Mars Transit -> Leo"],[20261113,725,2043,"❌ Bhadra (Vishti Karana)"],[20261113,915,915,"⏩ Mercury Retrograde ENDS"],[20261114,915,915,"⏩ Venus Retrograde ENDS"],[20261116,0,0,"🔄 REVERSAL (236.25°)",20261117],[20261117,420,1718,"❌ Bhadra (Vishti Karana)"],[20261117,1530,555,"❌ Panchak",20261122],[20261119,0,0,"🔄 REVERSAL (240°)",20261120],[20261120,1901,632,"❌ Bhadra (Vishti Karana)",20261121],[20261122,457,237,"🌙 Shukla Trayodashi"],[20261122,1738,1738,"🪐 Venus Transit -> Libra"],[20261123,2343,1006,"❌ Bhadra (Vishti Karana)",20261124],[20261126,915,1530,"⏳ F&O EXPIRY (Nov)"],[20261126,2331,949,"❌ Bhadra (Vishti Karana)",20261127],[20261127,0,0,"🔄 REVERSAL (247.5°)",20261130],[20261127,915,1530,"🛍️ Black Friday (US Retail)"],[20261128,1250,1059,"✨ Pushya Nakshatra",20261129],[20261130,147,1255,"❌ Bhadra (Vishti Karana)"],[20261130,915,1530,"🛍️ Cyber Monday"],[20261201,104,104,"🪐 Moon Conjunct Mars (☽ ☌ ♂)"],[20261203,1054,2304,"❌ Bhadra (Vishti Karana)"],[20261204,1000,1030,"🏦 RBI MPC Meet (Est)"],[20261206,52,222,"🌘 Krishna Trayodashi"],[20261207,223,1516,"❌ Bhadra (Vishti Karana)"],[20261208,0,0,"🔄 REVERSAL (258.75°)",20261209],[20261208,1230,1230,"🌑 New Moon (Margashirsha)"],[20261213,329,1648,"❌ Bhadra (Vishti Karana)"],[20261213,626,626,"⏪ Jupiter Retrograde (Guru Vakri)"],[20261214,2236,1558,"❌ Panchak",20261219],[20261216,2246,1113,"❌ Bhadra (Vishti Karana)",20261217],[20261216,2330,2330,"🏦 FOMC Meet (Fed)"],[20261220,918,2015,"❌ Bhadra (Vishti Karana)"],[20261221,0,0,"🔄 REVERSAL (270°)",20261222],[20261221,1736,1424,"🌙 Shukla Trayodashi"],[20261221,2030,2030,"❄️ Winter Solstice (Gann Day)"],[20261222,0,0,"📌 22 Dec: TREND CHANGE date"],[20261223,1048,2054,"❌ Bhadra (Vishti Karana)"],[20261225,2250,2012,"✨ Pushya Nakshatra",20261226],[20261226,943,2006,"❌ Bhadra (Vishti Karana)"],[20261228,2313,2313,"🪐 Moon Conjunct Mars (☽ ☌ ♂)"],[20261229,1325,56,"❌ Bhadra (Vishti Karana)",20261230],[20261231,0,0,"🔄 REVERSAL (281.25°)"],[20261231,915,1530,"⏳ F&O EXPIRY (Dec)"],[20270101,0,0,"📈 Trending months: Jan, Feb, Mar",20270331],[20270101,2311,2311,"🪐 Venus Transit -> Vrishchika (Scorpio)"],[20270102,144,1425,"❌ Bhadra (Vishti Karana)"],[20270104,1816,2040,"🌘 Krishna Trayodashi",20270105],[20270105,2040,957,"❌ Bhadra (Vishti Karana)",20270106],[20270108,154,154,"🌑 New Moon (astronomical)"],[20270111,434,2350,"❌ Panchak",20270115],[20270111,2232,1130,"❌ Bhadra (Vishti Karana)",20270112],[20270115,1414,205,"❌ Bhadra (Vishti Karana)",20270116],[20270118,2113,750,"❌ Bhadra (Vishti Karana)",20270119],[20270120,442,112,"🌙 Shukla Trayodashi",20270121],[20270121,0,0,"⚠️ 21 Jan: Major crash date"],[20270121,2131,738,"❌ Bhadra (Vishti Karana)",20270122],[20270122,1024,731,"✨ Pushya Nakshatra",20270123],[20270122,1747,1747,"🌕 Full Moon (astronomical)"],[20270124,2130,811,"❌ Bhadra (Vishti Karana)",20270125],[20270125,115,115,"🪐 Guru Transit (Jupiter) -> Karka (Cancer) (retrograde)"],[20270127,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20270128,354,1553,"❌ Bhadra (Vishti Karana)"],[20270129,1831,1831,"🪐 Venus Transit -> Dhanu (Sagittarius)"],[20270131,1935,842,"❌ Bhadra (Vishti Karana)",20270201],[20270201,0,0,"📌 Budget Day (1 Feb): wild moves, square off before the speech"],[20270203,1351,1632,"🌘 Krishna Trayodashi",20270204],[20270204,1632,550,"❌ Bhadra (Vishti Karana)",20270205],[20270206,2126,2126,"🌑 New Moon (astronomical)"],[20270207,1036,541,"❌ Panchak",20270212],[20270209,0,0,"⏪ Mercury Retrograde (Vakri) begins"],[20270210,1447,305,"❌ Bhadra (Vishti Karana)",20270211],[20270213,954,954,"🏺 Kumbh Sankranti (Sun -> Kumbha)"],[20270214,207,1329,"❌ Bhadra (Vishti Karana)"],[20270217,659,1732,"❌ Bhadra (Vishti Karana)"],[20270218,1428,1115,"🌙 Shukla Trayodashi",20270219],[20270218,2105,1835,"✨ Pushya Nakshatra",20270219],[20270220,800,1825,"❌ Bhadra (Vishti Karana)"],[20270221,453,453,"🌕 Full Moon (astronomical)"],[20270223,1040,2150,"❌ Bhadra (Vishti Karana)"],[20270224,1505,1505,"🪐 Venus Transit -> Makara (Capricorn)"],[20270226,2044,914,"❌ Bhadra (Vishti Karana)",20270227],[20270302,1525,445,"❌ Bhadra (Vishti Karana)",20270303],[20270303,0,0,"⏩ Mercury turns Direct (Margi)"],[20270305,955,1204,"🌘 Krishna Trayodashi",20270306],[20270306,1204,59,"❌ Bhadra (Vishti Karana)",20270307],[20270306,1734,1119,"❌ Panchak",20270311],[20270308,1459,1459,"🌑 New Moon (astronomical)"],[20270310,6,6,"🪐 Mars Transit -> Karka (Cancer) (retrograde)"],[20270312,321,1458,"❌ Bhadra (Vishti Karana)"],[20270315,1052,2155,"❌ Bhadra (Vishti Karana)"],[20270317,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20270318,507,320,"✨ Pushya Nakshatra",20270319],[20270318,1508,152,"❌ Bhadra (Vishti Karana)",20270319],[20270319,2318,2046,"🌙 Shukla Trayodashi",20270320],[20270320,0,0,"📌 20 Mar (Equinox): Reversal date"],[20270321,154,154,"🌱 Spring Equinox (Gann Day)"],[20270321,1822,516,"❌ Bhadra (Vishti Karana)",20270322],[20270321,1841,1841,"🪐 Venus Transit -> Kumbha (Aquarius)"],[20270322,1613,1613,"🌕 Full Moon (astronomical)"],[20270325,51,1238,"❌ Bhadra (Vishti Karana)"],[20270328,1506,405,"❌ Bhadra (Vishti Karana)",20270329],[20270401,1133,46,"❌ Bhadra (Vishti Karana)",20270402],[20270403,132,1825,"❌ Panchak",20270407],[20270404,427,524,"🌘 Krishna Trayodashi",20270405],[20270405,524,1737,"❌ Bhadra (Vishti Karana)"],[20270407,521,521,"🌑 New Moon (astronomical)"],[20270410,1238,2340,"❌ Bhadra (Vishti Karana)"],[20270413,0,0,"⏩ Jupiter turns Direct (Margi)"],[20270413,1729,427,"❌ Bhadra (Vishti Karana)",20270414],[20270414,1052,933,"✨ Pushya Nakshatra",20270415],[20270415,1509,1509,"🪐 Venus Transit -> Meena (Pisces)"],[20270416,2224,928,"❌ Bhadra (Vishti Karana)",20270417],[20270418,743,609,"🌙 Shukla Trayodashi",20270419],[20270420,452,1621,"❌ Bhadra (Vishti Karana)"],[20270421,357,357,"🌕 Full Moon (astronomical)"],[20270423,1555,421,"❌ Bhadra (Vishti Karana)",20270424],[20270426,1134,1134,"🪐 Mars Transit -> Simha (Leo)"],[20270427,958,2314,"❌ Bhadra (Vishti Karana)"],[20270428,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20270430,953,314,"❌ Panchak",20270505],[20270501,609,1854,"❌ Bhadra (Vishti Karana)"],[20270503,2005,1931,"🌘 Krishna Trayodashi",20270504],[20270504,1931,659,"❌ Bhadra (Vishti Karana)",20270505],[20270506,1628,1628,"🌑 New Moon (astronomical)"],[20270509,1943,623,"❌ Bhadra (Vishti Karana)",20270510],[20270510,837,837,"🪐 Venus Transit -> Mesha (Aries)"],[20270511,1625,1455,"✨ Pushya Nakshatra",20270512],[20270512,2314,1014,"❌ Bhadra (Vishti Karana)",20270513],[20270516,544,1714,"❌ Bhadra (Vishti Karana)"],[20270517,1629,1604,"🌙 Shukla Trayodashi",20270518],[20270518,0,0,"⚠️ 18 May: Lower or upper circuit date"],[20270519,1603,413,"❌ Bhadra (Vishti Karana)",20270520],[20270520,1628,1628,"🌕 Full Moon (astronomical)"],[20270523,742,2042,"❌ Bhadra (Vishti Karana)"],[20270527,405,1719,"❌ Bhadra (Vishti Karana)"],[20270527,1749,1249,"❌ Panchak",20270601],[20270530,2156,1003,"❌ Bhadra (Vishti Karana)",20270531],[20270602,829,635,"🌘 Krishna Trayodashi",20270603],[20270603,635,1724,"❌ Bhadra (Vishti Karana)"],[20270604,29,29,"🪐 Venus Transit -> Vrishabha (Taurus)"],[20270605,110,110,"🌑 New Moon (astronomical)"],[20270607,2345,2136,"✨ Pushya Nakshatra",20270608],[20270608,153,1222,"❌ Bhadra (Vishti Karana)"],[20270609,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20270610,0,0,"⏪ Mercury Retrograde (Vakri) begins"],[20270611,514,1626,"❌ Bhadra (Vishti Karana)"],[20270614,1407,209,"❌ Bhadra (Vishti Karana)",20270615],[20270616,231,321,"🌙 Shukla Trayodashi",20270617],[20270618,435,1722,"❌ Bhadra (Vishti Karana)"],[20270619,614,614,"🌕 Full Moon (astronomical)"],[20270621,0,0,"📌 21 Jun (Solstice): TREND CHANGE date"],[20270621,1940,1940,"☀️ Summer Solstice (Gann Day)"],[20270621,2351,1308,"❌ Bhadra (Vishti Karana)",20270622],[20270624,50,2148,"❌ Panchak",20270628],[20270625,2018,910,"❌ Bhadra (Vishti Karana)",20270626],[20270626,415,415,"🪐 Guru Transit (Jupiter) -> Simha (Leo)"],[20270628,1428,1428,"🪐 Venus Transit -> Mithuna (Gemini)"],[20270629,1033,2205,"❌ Bhadra (Vishti Karana)"],[20270701,0,0,"📈 Trending months: Jul, Aug, Sep",20270930],[20270701,1815,1524,"🌘 Krishna Trayodashi",20270702],[20270702,1524,148,"❌ Bhadra (Vishti Karana)",20270703],[20270704,831,831,"🌑 New Moon (astronomical)"],[20270705,0,0,"⏩ Mercury turns Direct (Margi)"],[20270705,419,419,"🪐 Mars Transit -> Kanya (Virgo)"],[20270705,919,633,"✨ Pushya Nakshatra",20270706],[20270707,814,1845,"❌ Bhadra (Vishti Karana)"],[20270710,1238,9,"❌ Bhadra (Vishti Karana)",20270711],[20270714,36,1311,"❌ Bhadra (Vishti Karana)"],[20270715,1441,1636,"🌙 Shukla Trayodashi",20270716],[20270717,1849,801,"❌ Bhadra (Vishti Karana)",20270718],[20270718,2114,2114,"🌕 Full Moon (astronomical)"],[20270721,703,513,"❌ Panchak",20270726],[20270721,1536,447,"❌ Bhadra (Vishti Karana)",20270722],[20270723,135,135,"🪐 Venus Transit -> Karka (Cancer)"],[20270725,953,2215,"❌ Bhadra (Vishti Karana)"],[20270728,2031,735,"❌ Bhadra (Vishti Karana)",20270729],[20270728,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20270731,219,2258,"🌘 Krishna Trayodashi"],[20270731,2258,911,"❌ Bhadra (Vishti Karana)",20270801],[20270801,2004,1709,"✨ Pushya Nakshatra",20270802],[20270802,1535,1535,"🌑 New Moon (astronomical)"],[20270805,1544,228,"❌ Bhadra (Vishti Karana)",20270806],[20270808,2225,1024,"❌ Bhadra (Vishti Karana)",20270809],[20270812,1357,300,"❌ Bhadra (Vishti Karana)",20270813],[20270814,522,754,"🌙 Shukla Trayodashi",20270815],[20270816,923,923,"🪐 Venus Transit -> Simha (Leo)"],[20270816,1029,2345,"❌ Bhadra (Vishti Karana)"],[20270817,1258,1258,"🌕 Full Moon (astronomical)"],[20270817,1304,1110,"❌ Panchak",20270822],[20270820,608,1854,"❌ Bhadra (Vishti Karana)"],[20270823,2053,844,"❌ Bhadra (Vishti Karana)",20270824],[20270824,934,934,"🪐 Mars Transit -> Tula (Libra)"],[20270825,0,0,"🪔 Janmashtami: market top or bottom"],[20270827,437,1526,"❌ Bhadra (Vishti Karana)"],[20270829,617,344,"✨ Pushya Nakshatra",20270830],[20270829,936,613,"🌘 Krishna Trayodashi",20270830],[20270830,613,1628,"❌ Bhadra (Vishti Karana)"],[20270831,2311,2311,"🌑 New Moon (astronomical)"],[20270904,118,1226,"❌ Bhadra (Vishti Karana)"],[20270907,1129,1,"❌ Bhadra (Vishti Karana)",20270908],[20270909,1429,1429,"🪐 Venus Transit -> Kanya (Virgo)"],[20270911,618,1937,"❌ Bhadra (Vishti Karana)"],[20270912,2214,40,"🌙 Shukla Trayodashi",20270914],[20270913,1933,1647,"❌ Panchak",20270918],[20270915,249,1544,"❌ Bhadra (Vishti Karana)"],[20270915,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20270916,433,433,"🌕 Full Moon (astronomical)"],[20270918,1900,710,"❌ Bhadra (Vishti Karana)",20270919],[20270921,0,0,"📌 21 Sep (Equinox): TREND CHANGE, lower or upper circuit"],[20270922,553,1718,"❌ Bhadra (Vishti Karana)"],[20270923,1131,1131,"🍂 Autumn Equinox (Gann Day)"],[20270925,1146,2231,"❌ Bhadra (Vishti Karana)"],[20270925,1427,1237,"✨ Pushya Nakshatra",20270926],[20270927,1656,1355,"🌘 Krishna Trayodashi",20270928],[20270928,1355,25,"❌ Bhadra (Vishti Karana)",20270929],[20270930,805,805,"🌑 New Moon (astronomical)"],[20271003,1343,129,"❌ Bhadra (Vishti Karana)",20271004],[20271003,1813,1813,"🪐 Venus Transit -> Tula (Libra)"],[20271007,0,0,"⏪ Mercury Retrograde (Vakri) begins"],[20271007,414,1718,"❌ Bhadra (Vishti Karana)"],[20271008,111,111,"🪐 Mars Transit -> Vrishchika (Scorpio)"],[20271011,57,1409,"❌ Bhadra (Vishti Karana)"],[20271011,255,2329,"❌ Panchak",20271015],[20271012,1614,1749,"🌙 Shukla Trayodashi",20271013],[20271014,1850,708,"❌ Bhadra (Vishti Karana)",20271015],[20271015,1916,1916,"🌕 Full Moon (astronomical)"],[20271018,620,1752,"❌ Bhadra (Vishti Karana)"],[20271021,1343,51,"❌ Bhadra (Vishti Karana)",20271022],[20271022,2024,1907,"✨ Pushya Nakshatra",20271023],[20271024,1848,541,"❌ Bhadra (Vishti Karana)",20271025],[20271027,104,2250,"🌘 Krishna Trayodashi"],[20271027,2146,2146,"🪐 Venus Transit -> Vrishchika (Scorpio)"],[20271027,2250,948,"❌ Bhadra (Vishti Karana)",20271028],[20271027,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20271028,0,0,"⏩ Mercury turns Direct (Margi)"],[20271028,0,0,"⚠️ 28 Oct: Major crash date"],[20271029,1906,1906,"🌑 New Moon (astronomical)"],[20271102,534,1803,"❌ Bhadra (Vishti Karana)"],[20271106,10,1330,"❌ Bhadra (Vishti Karana)"],[20271107,1059,755,"❌ Panchak",20271112],[20271109,2028,912,"❌ Bhadra (Vishti Karana)",20271110],[20271111,1008,1022,"🌙 Shukla Trayodashi",20271112],[20271113,956,2130,"❌ Bhadra (Vishti Karana)"],[20271114,855,855,"🌕 Full Moon (astronomical)"],[20271116,1643,342,"❌ Bhadra (Vishti Karana)",20271117],[20271118,828,828,"🪐 Mars Transit -> Dhanu (Sagittarius)"],[20271119,151,27,"✨ Pushya Nakshatra",20271120],[20271119,2121,819,"❌ Bhadra (Vishti Karana)",20271120],[20271121,157,157,"🪐 Venus Transit -> Dhanu (Sagittarius)"],[20271123,236,1345,"❌ Bhadra (Vishti Karana)"],[20271125,1052,948,"🌘 Krishna Trayodashi",20271126],[20271126,915,1530,"🛍️ Black Friday (US Retail)"],[20271126,948,2125,"❌ Bhadra (Vishti Karana)"],[20271126,1738,1738,"🪐 Guru Transit (Jupiter) -> Kanya (Virgo)"],[20271128,854,854,"🌑 New Moon (astronomical)"],[20271129,915,1530,"🛍️ Cyber Monday"],[20271202,38,1344,"❌ Bhadra (Vishti Karana)"],[20271204,1907,1726,"❌ Panchak",20271209],[20271205,2138,1052,"❌ Bhadra (Vishti Karana)",20271206],[20271208,2330,2330,"🏦 FOMC Meet (Fed rate decision)"],[20271209,1516,320,"❌ Bhadra (Vishti Karana)",20271210],[20271211,254,143,"🌙 Shukla Trayodashi",20271212],[20271212,2356,1050,"❌ Bhadra (Vishti Karana)",20271213],[20271213,2138,2138,"🌕 Full Moon (astronomical)"],[20271215,800,800,"🪐 Venus Transit -> Makara (Capricorn)"],[20271216,248,1322,"❌ Bhadra (Vishti Karana)"],[20271216,912,707,"✨ Pushya Nakshatra",20271217],[20271219,537,1633,"❌ Bhadra (Vishti Karana)"],[20271222,0,0,"📌 22 Dec: TREND CHANGE date"],[20271222,811,811,"❄️ Winter Solstice (Gann Day)"],[20271222,1205,2341,"❌ Bhadra (Vishti Karana)"],[20271224,2309,2332,"🌘 Krishna Trayodashi",20271225],[20271225,2332,1154,"❌ Bhadra (Vishti Karana)",20271226],[20271227,1247,1247,"🪐 Mars Transit -> Makara (Capricorn)"],[20271228,142,142,"🌑 New Moon (astronomical)"],[20271231,2133,1056,"❌ Bhadra (Vishti Karana)",20280101]];
-let AS_CAT = "all", AS_HOR = "15";
+let AS_CAT = "all", AS_HOR = "15", AS_OPEN = false;
 function asCat(n) {
   const l = String(n).toLowerCase();
   if (/bhadra/.test(l)) return "bhadra";
@@ -3069,22 +3270,31 @@ function astroHTML() {
   const hor = AS_HOR === "all" ? 99999 : +AS_HOR;
   const keep = rows.filter(x => x.e >= todayI && asDayNum(x.d) - tn <= hor && (AS_CAT === "all" || asCat(x.n) === AS_CAT));
   const cats = [["all", "All"], ["moon", "New/Full moon"], ["panchak", "Panchak"], ["pushya", "Pushya"], ["tryd", "Trayodashi"], ["key", "Key dates (crash, circuit, trend)"], ["bhadra", "Bhadra"], ["rev", "Gann reversal"], ["planet", "Planets"], ["season", "Equinox/Solstice"], ["macro", "Expiry, Fed, RBI, holidays"]];
+  const intD = t => { const q = new Date(t); return q.getUTCFullYear() * 10000 + (q.getUTCMonth() + 1) * 100 + q.getUTCDate(); };
+  const isHol = di => { const dt = Date.UTC(Math.floor(di / 10000), Math.floor(di / 100) % 100 - 1, di % 100), wd = new Date(dt).getUTCDay(); if (wd === 0 || wd === 6) return true; return (typeof MARKET !== "undefined" && MARKET && MARKET.holidays || []).some(h => { const q = String(h.d || ""), a1 = q.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})/), a2 = q.match(/^(\d{4})-(\d{2})-(\d{2})/); const mm = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]; const t = a1 ? Date.UTC(+a1[3], mm.indexOf(a1[2].toLowerCase()), +a1[1]) : a2 ? Date.UTC(+a2[1], +a2[2] - 1, +a2[3]) : NaN; return t === dt; }); };
+  let ntd = todayI, tt = Date.UTC(Math.floor(todayI / 10000), Math.floor(todayI / 100) % 100 - 1, todayI % 100); for (let k = 0; k < 14; k++) { tt += 864e5; ntd = intD(tt); if (!isHol(ntd)) break; }
+  const rowHTML = (x, lab) => { const dt = x.d === x.e ? asDate(x.d) : asDate(x.d) + " - " + asDate(x.e), tm = x.s === 0 && x.t === 0 ? "all day" : x.s === x.t ? asHHMM(x.s) : asHHMM(x.s) + " - " + asHHMM(x.t); return ['<span class="acn ' + asCls(x.n) + '">' + esc(x.n) + "</span>", '<span class="num">' + esc(dt) + "</span>", '<span class="num">' + tm + "</span>", lab]; };
+  const dn = asDayNum(ntd) - tn, ntdLab = "Next trading day (" + asDate(ntd) + (dn > 1 ? ", in " + dn + " days" : "") + ")";
+  const todayRows = rows.filter(x => x.d <= todayI && x.e >= todayI).map(x => rowHTML(x, "<b>Today</b>")), nextRows = ntd === todayI ? [] : rows.filter(x => x.d <= ntd && x.e >= ntd).map(x => rowHTML(x, ntdLab));
   let h = "<h2>Astro and trading calendar</h2>";
+  h += '<div class="card"><p class="note" style="margin:0 0 8px">Today and the next trading day only. Open the full calendar below for more.</p>' + (todayRows.length || nextRows.length ? tbl(["Event", "Date", "Time (IST)", "When"], todayRows.concat(nextRows)) : '<p style="margin:0">No astro or calendar events today or on the next trading day (' + esc(asDate(ntd)) + ").</p>") + (todayRows.length && !nextRows.length && ntd !== todayI ? '<p class="note" style="margin:8px 0 0">No events on the next trading day (' + esc(asDate(ntd)) + ").</p>" : (!todayRows.length && nextRows.length ? '<p class="note" style="margin:8px 0 0">No events today.</p>' : "")) + "</div>";
+  h += '<details data-asd class="asfull"' + (AS_OPEN ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;padding:8px 2px">Full calendar (filters)</summary>';
   h += '<div class="nwf"><select data-ashor aria-label="How far ahead">' + [["15", "Next 15 days"], ["30", "Next 30 days"], ["90", "Next 90 days"], ["365", "Next 12 months"], ["all", "All upcoming"]].map(o => '<option value="' + o[0] + '"' + (AS_HOR === o[0] ? " selected" : "") + ">" + o[1] + "</option>").join("") + "</select>" +
     '<select data-ascat aria-label="Event type">' + cats.map(o => '<option value="' + o[0] + '"' + (AS_CAT === o[0] ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("") + "</select></div>";
-  if (!keep.length) return h + '<div class="card"><p class="note" style="margin:0">No events in this view. Try a longer range or All.</p></div>' + asNote();
+  if (!keep.length) return h + '<div class="card"><p class="note" style="margin:0">No events in this view. Try a longer range or All.</p></div>' + asNote() + "</details>";
   h += '<div class="card">' + tbl(["Event", "Date", "Time (IST)", "When"], keep.slice(0, 80).map(x => {
     const days = asDayNum(x.d) - tn, isNow = todayI >= x.d && todayI <= x.e;
     const when = isNow ? "<b>today</b>" : days === 1 ? "tomorrow" : "in " + days + " days";
     const dt = x.d === x.e ? asDate(x.d) : asDate(x.d) + " - " + asDate(x.e);
     const tm = x.s === 0 && x.t === 0 ? "all day" : x.s === x.t ? asHHMM(x.s) : asHHMM(x.s) + " - " + asHHMM(x.t);
     return ['<span class="acn ' + asCls(x.n) + '">' + esc(x.n) + "</span>", '<span class="num">' + esc(dt) + "</span>", '<span class="num">' + tm + "</span>", when];
-  })) + "</div>" + (keep.length > 80 ? '<p class="note">Showing the first 80. Narrow the range or type to see the rest.</p>' : "") + asNote();
+  })) + "</div>" + (keep.length > 80 ? '<p class="note">Showing the first 80. Narrow the range or type to see the rest.</p>' : "") + asNote() + "</details>";
   return h;
 }
 function asNote() {
   return '<p class="note">Dates to Dec 2026 come from your Trading Calendar indicator (the estimated results rows are left out because the earnings calendar below has the real dates). For 2027, Pushya Nakshatra, Panchak and Trayodashi are worked out from the Moon&#39;s position (Lahiri sidereal) and shown in IST; I checked them against Prokerala&#39;s Pushya and Trayodashi tables and your own 2026 Panchak times, and they agree to within a minute or two. New and full moons and equinoxes/solstices are astronomical times in IST and can differ by a day from the Panchang tithi. Fed dates are the Fed&#39;s published schedule. Bhadra (Vishti karana) times, Kumbh Sankranti, Mercury/Jupiter retrograde stations and Mars, Venus and Jupiter sign changes for 2027 are worked out the same way; planet sign-change times can be off by an hour or so against other sources, and station dates are shown as all-day. Fixed dates from your list (21 Jan, 1 Feb, 18 May, 21 Jun, 21 Sep, 28 Oct, 22 Dec, Black Friday, Cyber Monday, trending months, Janmashtami 25 Aug 2027) are included. Gann reversal dates for 2027 are not included. Astro dates are a study aid, not a trading signal or advice.</p>';
 }
+document.addEventListener("toggle", ev => { const t = ev.target; if (t && t.hasAttribute && t.hasAttribute("data-asd")) AS_OPEN = t.open; }, true);
 document.addEventListener("change", ev => { const t = ev.target; if (t && t.hasAttribute) { if (t.hasAttribute("data-ashor")) { AS_HOR = t.value; nwPaint(); } else if (t.hasAttribute("data-ascat")) { AS_CAT = t.value; nwPaint(); } } });
 
 /* ===== NEWS AND EVENTS TAB ===== */
@@ -4718,7 +4928,7 @@ const cbApi = (function () {
   let F = {side: "Both", min: 3};
   try { const sv = JSON.parse(localStorage.getItem("cbF") || "null"); if (sv) F = Object.assign(F, sv); } catch (e) {}
   const save = () => { try { localStorage.setItem("cbF", JSON.stringify(F)); } catch (e) {} };
-  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["mkt", "Market direction agrees", "Mkt"]];
+  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["news", "News impact (last 2 days)", "News"], ["mkt", "Market direction agrees", "Mkt"]];
   const px2 = v => (isFinite(v) ? fmt(v, v < 100 ? 2 : 1) : "-");
   const sgn = (v, d = 1) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) + "%" : "-");
   let PT = null, last = 0, LASTR = {};
@@ -4747,6 +4957,7 @@ const cbApi = (function () {
     try { const sn = tcApi.season(14); Object.keys(sn.m).forEach(sym => { const x = sn.m[sym]; tcm[sym] = x; tcs[x.sec] = sn.sm[x.sec]; if (x.prob >= 60 && x.avg > 0) give(sym, 1, "tc", "Rose in " + Math.round(x.prob) + "% of past years over the next 2 weeks", Math.round(x.prob) + "%", {x}); else if (x.prob <= 40 && x.avg < 0) give(sym, -1, "tc", "Fell in " + Math.round(100 - x.prob) + "% of past years over the next 2 weeks", Math.round(100 - x.prob) + "%", {x}); }); } catch (e) {}
     const pdm = {};
     try { ppApi.list().forEach(x => { if (!(x.d <= 60)) return; pdm[x.sym] = x; if (!(x.d <= 30) || !isFinite(x.react)) return; if (/EXCELLENT|VERY GOOD/i.test(x.rec) && x.react >= 0) give(x.sym, 1, "pead", x.rec.toLowerCase() + ", score " + Math.round(x.total) + ", reaction " + pct(x.react, 1), String(Math.round(x.total)), {x}); else if (/POOR/i.test(x.rec) && x.react < 0) give(x.sym, -1, "pead", x.rec.toLowerCase() + ", score " + Math.round(x.total) + ", reaction " + pct(x.react, 1), String(Math.round(x.total)), {x}); }); } catch (e) {}
+    try { const nm = nwImpactMap(); Object.keys(nm).forEach(sym => { const o = nm[sym]; if (Math.abs(o.net) < 2) return; const top = o.used.slice().sort((a, b) => Math.abs(b.sc) - Math.abs(a.sc))[0]; give(sym, o.net > 0 ? 1 : -1, "news", "News impact " + (o.net > 0 ? "+" : "") + o.net + ": " + String(top.x.title).slice(0, 90), (o.net > 0 ? "+" : "") + o.net, {o}); }); } catch (e) { window.__nwErr = String(e && e.message || e); }
     const mb = marketBias(), rows = [];
     Object.keys(by).forEach(sym => {
       const r = by[sym], nL = Object.keys(r.L).length, nS = Object.keys(r.S).length; if (!nL && !nS) return;
@@ -4882,6 +5093,7 @@ const cbApi = (function () {
     if (d.st) { const x = d.st; L.push(row("SuperTrend", (x.side === 1 ? "LONG" : "SHORT") + " on 15m since " + x.when + " (" + x.bars + " bars), " + x.votes + " of 3 lines agree. Entry " + px2(x.entry) + ", now " + px2(x.close) + " (" + sgn(x.pl, 2) + "), stop " + px2(x.stop))); }
     if (d.rm) { const x = d.rm; L.push(row("123 reversal", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 on " + x.tf + ", " + (x.st === "fresh" ? x.kind.toLowerCase() + " signal " + x.age + " bars ago" : "armed, waiting for the neckline") + (isFinite(x.score) ? ", quality " + Math.round(x.score) + "/100" : "") + (x.plan ? ". Plan: entry " + px2(x.plan.entry) + ", stop " + px2(x.plan.stop) + ", T1 " + px2(x.plan.t1) + ", T2 " + px2(x.plan.t2) : ""))); }
     if (tc) { const sec = r.tcSec; L.push(row("Season", "Over the next 2 weeks it rose in " + Math.round(tc.prob) + "% of " + tc.n + " past years, average " + sgn(tc.avg * 100, 1) + (tc.sec ? ". " + E(tc.sec) + " sector: " + (sec ? Math.round(sec.prob) + "% of " + sec.n + " years" : "n/a") : ""))); }
+    if (d.news) { const o = d.news.o; L.push(row("News", o.used.slice(0, 4).map(u => (u.sc > 0 ? "&#9650; " : "&#9660; ") + E(u.x.title) + ' <small class="note" style="margin:0">(' + E([u.x.tag, ageText(u.x.date)].filter(Boolean).join(", ")) + ")</small>").join("<br>") + '<br><small class="note" style="margin:0">Net impact ' + (o.net > 0 ? "+" : "") + o.net + " (headlines of the last 2 days scored by keywords; at least 2 needed to count as a screen)</small>")); }
     if (pd) L.push(row("PEAD", "Score <b>" + Math.round(pd.total) + "/100</b> (" + E(pd.rec.toLowerCase()) + "), reported " + (pd.d === 0 ? "today" : pd.d + " days ago") + (isFinite(pd.react) ? ", first-session reaction " + sgn(pd.react, 1) : "") + (isFinite(pd.revY) ? ". Sales " + sgn(pd.revY, 0) + " YoY, profit " + sgn(pd.npY, 0) + " YoY" : "") + (pd.fwdPe > 0 ? ", forward P/E " + pd.fwdPe.toFixed(1) : "")));
     return '<table class="acctbl" style="font-size:.86rem"><tbody>' + L.join("") + "</tbody></table>";
   }
@@ -4964,7 +5176,7 @@ const cbApi = (function () {
     const rows = R.rows.filter(r => r.score >= F.min && (F.side === "Both" || (F.side === "Long" ? r.side === 1 : r.side === -1)));
     const st = (name, n) => name + (n ? " <b>" + n + "</b>" : " <i>waiting</i>");
     const cnt = k => R.rows.filter(r => r.has[k]).length;
-    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · Market: " + E(R.mb.t);
+    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · " + st("News", cnt("news")) + " · Market: " + E(R.mb.t);
     let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th>' + SRC.map(x => '<th title="' + E(x[1]) + '" style="text-align:center">' + E(x[2]) + "</th>").join("") + '</tr></thead><tbody>';
     h += rows.length ? rows.slice(0, 80).map((r, i) => {
       const q = r.q, chg = q ? +q.pct : NaN, sel = SEL && SEL.sym === r.sym;
@@ -4979,7 +5191,7 @@ const cbApi = (function () {
   }
   function build() {
     const host = document.getElementById("cbbody"); if (!host || host.dataset.built) return; host.dataset.built = "1";
-    host.innerHTML = '<div class="znhead"><div><h2>COMBO</h2><span>Stocks where several screens agree on the same side</span></div><div class="znpills"><span>Zone + 123 + OI + Trade ideas</span><span>Season + PEAD + market</span><span>Forward-test log</span></div></div>' +
+    host.innerHTML = '<div class="znhead"><div><h2>COMBO</h2><span>Stocks where several screens agree on the same side</span></div><div class="znpills"><span>Zone + 123 + OI + Trade ideas</span><span>Season + PEAD + News + market</span><span>Forward-test log</span></div></div>' +
       '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><b>Side</b>' + ["Both", "Long", "Short"].map(x => '<button type="button" class="cbtn" data-cbs="' + x + '" aria-pressed="' + (F.side === x) + '">' + x + "</button>").join("") + '<span class="csep"></span><b>Minimum score</b>' + [2, 3, 4, 5].map(x => '<button type="button" class="cbtn" data-cbm="' + x + '" aria-pressed="' + (F.min === x) + '">' + x + "+</button>").join("") + '<span class="csep"></span><button type="button" class="cbtn" id="cbReload">&#8635; Refresh sources</button></div><div class="note" id="cbstat" style="margin:8px 0 0"></div></div><div id="cbpanel"></div><div id="cbres"></div><div id="cbfwd"></div>'; PN = $e("#cbpanel");
     host.addEventListener("change", ev => { const t = ev.target; if (t && t.id === "cbfm") { FM = t.value; fwdPaint(); } });
     host.addEventListener("click", ev => {
@@ -6328,7 +6540,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="sw" aria-selected="false" style="--a:#0f766e;--b:#1d4ed8">Quick 1&ndash;5 day</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -6410,7 +6622,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "st" || current === "n5" || current === "cu" || current === "sw" || current === "op" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "st" || current === "n5" || current === "cu" || current === "op" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
