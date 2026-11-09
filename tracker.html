@@ -1787,6 +1787,7 @@ function overviewHTML(rows) {
   }).join("");
   let h = "<h2>Watchlist</h2><div class=\"wrap\"><table><tr><th>Stock</th><th>Price</th><th>Today</th><th>From 52w high</th><th>Level below</th><th>Level above</th><th>R:R</th><th>PEAD</th><th>Status</th></tr>" + body + "</table></div>";
   h += '<p class="note">Tap a row to open that stock. R:R is the distance to the next saved level above divided by the distance to the next one below. Status is a prompt to look closer: Review now means a support broke, a stop was hit or the move today was large; Watch means price is near a level, stretched, or above a broker target.</p>';
+  h += '<div id="cues">' + safeCues() + "</div>";
   h += '<div id="mkt">' + safeMarket() + "</div>";
   h += safeMacro();
   const ovObs = [];
@@ -3307,7 +3308,6 @@ function marketHTML() {
     '<div class="tile' + tcl(secs[secs.length - 1].p) + '"><small>Weakest sector</small><b>' + esc(secs[secs.length - 1].n) + "</b><span>" + pct(secs[secs.length - 1].p, 2) + " today</span></div>";
   h += "</div>";
   try { h += moodHTML(M, secs, idx); } catch (e) {}
-  try { h += cuesHTML(M, mc, idx); } catch (e) {}
   // breadth
   const bar = (label, a, d, u) => {
     const t = a + d + u; if (!(t > 0)) return "";
@@ -3348,8 +3348,15 @@ function marketHTML() {
   h += '<p class="note">' + (marketStale ? "Showing the last data received (" + esc(marketErr || "refresh pending") + "). " : "") + "From NSE" + (M.asOf ? ", as of " + esc(M.asOf) : "") + ". Outside market hours this is the last session. Can be delayed. Not advice.</p>";
   return h;
 }
+function safeCues() {
+  try {
+    if (typeof MARKET === "undefined" || !MARKET) return ""; const M = MARKET, idx = n => (M.indices || []).find(x => String(x.name).toUpperCase() === n);
+    const mc = v => (isFinite(v) ? '<span class="num" style="color:var(--' + (v >= 0 ? "good" : "bad") + ')">' + pct(v, 2) + "</span>" : '<span class="num">—</span>');
+    return cuesHTML(M, mc, idx);
+  } catch (e) { return ""; }
+}
 function safeMarket() { try { return marketHTML(); } catch (e) { return '<h2>Market today</h2><div class="card"><p class="note" style="margin:0">Problem drawing market data: ' + esc(e && e.message) + "</p></div>"; } }
-function paintMarket() { const o = document.getElementById("mkt"); if (o) o.innerHTML = safeMarket(); try { ixPaint(); } catch (e) {} try { if (document.getElementById("nwbody")) nwPaint(); } catch (e) {} }
+function paintMarket() { const c0 = document.getElementById("cues"); if (c0) c0.innerHTML = safeCues(); const o = document.getElementById("mkt"); if (o) o.innerHTML = safeMarket(); try { ixPaint(); } catch (e) {} try { if (document.getElementById("nwbody")) nwPaint(); } catch (e) {} }
 
 /* ===== ASTRO AND TRADING CALENDAR =====
    Rows are [start date yyyymmdd, start hhmm IST, end hhmm IST, name, optional end date yyyymmdd]. Dates to Dec 2026 come from your Trading Calendar indicator.
