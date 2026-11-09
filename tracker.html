@@ -48,7 +48,7 @@ main{max-width:900px;margin:0 auto;padding:0 16px 48px}
 .dockrow>td{padding:8px 4px !important;background:transparent !important;white-space:normal !important}.dockrow:hover{background:transparent !important}td:has(>[data-ixchart])>b:first-child,td>b[data-tcsec]{cursor:pointer}
 .tabs{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;scrollbar-color:rgba(100,100,120,.55) transparent;margin:-34px -16px 6px;padding:6px 16px 12px;position:sticky;top:0;z-index:30;transition:background .2s,box-shadow .2s;cursor:grab}.tabs.drag{cursor:grabbing;user-select:none}.tabs::-webkit-scrollbar{height:9px}.tabs::-webkit-scrollbar-thumb{background:rgba(100,100,120,.5);border-radius:6px}.tabs::-webkit-scrollbar-thumb:hover{background:rgba(100,100,120,.8)}.tabs::-webkit-scrollbar-track{background:transparent}.tabs.stuck{background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 14px rgba(0,0,0,.12)}
 .tabs button{font:inherit;font-weight:600;padding:10px 16px;border:2px solid transparent;border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer;box-shadow:var(--shadow);white-space:nowrap;flex:0 0 auto;transition:transform .12s}.tabs button:hover{transform:translateY(-2px)}
-.acctbl{width:100%;border-collapse:collapse;font-size:.92rem}.acctbl th,.acctbl td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}.acctbl th{font-size:.78rem;color:#fff !important;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,.25)}.acctbl .num{text-align:right}.acctbl tr.base td{color:var(--mute);font-style:italic}.accg{color:var(--good);font-weight:700}.accb{color:var(--bad);font-weight:700}
+.acctbl{width:100%;border-collapse:collapse;font-size:.92rem}.acctbl th,.acctbl td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}.acctbl th{font-size:.78rem;color:#fff !important;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,.25)}.acctbl .num{text-align:right}.cbdet td{white-space:normal;word-break:break-word}.cbdet td:first-child{white-space:nowrap;vertical-align:top}.card{min-width:0;max-width:100%}.acctbl tr.base td{color:var(--mute);font-style:italic}.accg{color:var(--good);font-weight:700}.accb{color:var(--bad);font-weight:700}
 .tabs button[aria-selected="true"]{color:#fff;background:linear-gradient(120deg,var(--a),var(--b))}
 .side{margin:0 0 10px}.side details{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:6px 12px}.side summary{cursor:pointer;font-weight:700;padding:6px 2px}.side .sl{display:flex;flex-wrap:wrap;gap:6px;padding:6px 0 8px}.side button{font:inherit;font-weight:600;font-size:.88rem;padding:7px 11px;border:2px solid transparent;border-radius:9px;background:var(--bg);color:var(--ink);cursor:pointer;text-align:left}.side button:hover{transform:translateX(2px)}.side button[aria-selected="true"]{color:#fff;background:linear-gradient(120deg,var(--a),var(--b))}.side .sh{font-size:.72rem;color:var(--mute);margin:0 0 4px}
 @media(min-width:1000px){main{max-width:1180px}.shell{display:grid;grid-template-columns:178px minmax(0,1fr);gap:18px;align-items:start}.side{position:sticky;top:78px;max-height:calc(100vh - 96px);overflow:auto;margin:0}.side summary{pointer-events:none;list-style:none}.side summary::-webkit-details-marker{display:none}.side .sl{flex-direction:column;flex-wrap:nowrap}.side button{width:100%}.mc{min-width:0}}
@@ -5227,7 +5227,7 @@ const cbApi = (function () {
     if (tc) { const sec = r.tcSec; L.push(row("Season", "Over the next 2 weeks it rose in " + Math.round(tc.prob) + "% of " + tc.n + " past years, average " + sgn(tc.avg * 100, 1) + (tc.sec ? ". " + E(tc.sec) + " sector: " + (sec ? Math.round(sec.prob) + "% of " + sec.n + " years" : "n/a") : ""))); }
     if (d.news) { const o = d.news.o; L.push(row("News", o.used.slice(0, 4).map(u => (u.sc > 0 ? "&#9650; " : "&#9660; ") + E(u.x.title) + ' <small class="note" style="margin:0">(' + E([u.x.tag, ageText(u.x.date)].filter(Boolean).join(", ")) + ")</small>").join("<br>") + '<br><small class="note" style="margin:0">Net impact ' + (o.net > 0 ? "+" : "") + o.net + " (headlines of the last 2 days scored by keywords; at least 2 needed to count as a screen)</small>")); }
     if (pd) L.push(row("PEAD", "Score <b>" + Math.round(pd.total) + "/100</b> (" + E(pd.rec.toLowerCase()) + "), reported " + (pd.d === 0 ? "today" : pd.d + " days ago") + (isFinite(pd.react) ? ", first-session reaction " + sgn(pd.react, 1) : "") + (isFinite(pd.revY) ? ". Sales " + sgn(pd.revY, 0) + " YoY, profit " + sgn(pd.npY, 0) + " YoY" : "") + (pd.fwdPe > 0 ? ", forward P/E " + pd.fwdPe.toFixed(1) : "")));
-    return '<table class="acctbl" style="font-size:.86rem"><tbody>' + L.join("") + "</tbody></table>";
+    return '<table class="acctbl cbdet" style="font-size:.86rem"><tbody>' + L.join("") + "</tbody></table>";
   }
   function planTable() {
     if (!PL.length) return '<p class="note" style="margin:8px 0 0">No entry levels could be worked out yet (waiting for candles).</p>';
@@ -5265,7 +5265,14 @@ const cbApi = (function () {
     const row = SEL ? Array.from(res.querySelectorAll("tr[data-cbsym]")).find(r => r.dataset.cbsym === SEL.sym) : null;
     if (row) { const dr = document.createElement("tr"), td = document.createElement("td"); dr.className = "dockrow"; td.colSpan = 30; td.appendChild(PN); dr.appendChild(td); row.after(dr); }
     else if (PN.parentElement !== res.parentElement) res.before(PN);
+    cbFit();
   }
+  function cbFit() {
+    if (!PN) return; const w = PN.closest ? PN.closest(".wrap") : null;
+    if (w) { PN.style.cssText = "position:sticky;left:0;box-sizing:border-box;width:" + Math.max(260, w.clientWidth - 4) + "px;white-space:normal"; }
+    else PN.style.cssText = "";
+  }
+  window.addEventListener("resize", () => { try { cbFit(); } catch (e) {} });
   async function panelDraw() {
     const host = PN || $e("#cbpanel"); if (!host) return;
     if (CH) { try { CH.remove(); } catch (e) {} CH = null; CANDLE = null; }
