@@ -3157,6 +3157,7 @@ async function loadMarket() {
     if (!MARKET) setTimeout(loadMarket, 30000);
   }
   clearTimeout(killer); marketBusy = false; paintMarket();
+  try { Object.keys(SECX_OPEN).forEach(k => secxLoad(k, false)); } catch (e) {}
   try { if (lastStocks && !marketStale && !(document.activeElement && document.activeElement.tagName === "INPUT")) render(lastStocks); } catch (e) {}
 }
 /* ===== Trending stocks over a week or a month, from daily candles (5 and 21 sessions back) ===== */
@@ -3184,6 +3185,74 @@ document.addEventListener("click", ev => {
   TR_P = b.dataset.trp; try { localStorage.setItem("trP", TR_P); } catch (e) {}
   if (TR_P !== "d") trLoad(false); paintMarket();
 });
+/* ===== SECTOR DRILL-DOWN: click a sector row to list its stocks, best performer first ===== */
+var SECX_OPEN = {}, SECX_BUSY = {}, SECX_TRIED = {}, SECQ = {}, SECX_CACHE = {};
+try { SECX_OPEN = JSON.parse(localStorage.getItem("secxOpen") || "{}") || {}; } catch (e) { SECX_OPEN = {}; }
+function secxMembers(k) {
+  if (SECX_CACHE[k]) return SECX_CACHE[k];
+  const all = Object.assign({}, typeof TC_SECTOR_EXTRA !== "undefined" ? TC_SECTOR_EXTRA : {}, STOCK_SECTOR);
+  const grp = g => Object.keys(all).filter(x => all[x] === g), u = a => Array.from(new Set(a));
+  const pvt = grp("Pvt Bank"), psu = grp("PSU Bank"), fin = grp("Fin Services"), pharma = grp("Pharma"), hc = grp("Healthcare"), oil = grp("Oil & Gas"), en = grp("Energy");
+  const M = {
+    "NIFTY AUTO": grp("Auto"),
+    "NIFTY BANK": u(["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "INDUSINDBK", "BANKBARODA", "PNB", "CANBK", "UNIONBANK", "AUBANK", "FEDERALBNK", "IDFCFIRSTB", "YESBANK"]),
+    "NIFTY PRIVATE BANK": pvt,
+    "NIFTY PSU BANK": psu,
+    "NIFTY FINANCIAL SERVICES": u(["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK"].concat(fin.filter(x => ["IRFC", "IEX", "OFSS", "MCX", "CDSL", "BSE", "SAGILITY", "PAYTM", "KFINTECH", "CAMS", "ANGELONE", "POLICYBZR", "MANAPPURAM", "BAJAJHLDNG", "PNBHOUSING", "MFSL", "NAM-INDIA", "MOTILALOFS", "360ONE", "ABCAPITAL", "LICI", "HUDCO", "IIFL", "NUVAMA"].indexOf(x) < 0))),
+    "NIFTY FMCG": u(grp("FMCG").filter(x => x !== "JUBLFOOD").concat(["UNITDSPR"])),
+    "NIFTY IT": u(grp("IT").filter(x => ["KAYNES", "TATATECH"].indexOf(x) < 0).concat(["OFSS"])),
+    "NIFTY MEDIA": ["SUNTV", "ZEEL", "PVRINOX", "NETWORK18", "SAREGAMA", "TIPSMUSIC", "NAZARA", "DBCORP"],
+    "NIFTY METAL": u(grp("Metal").filter(x => x !== "COALINDIA").concat(["ADANIENT"])),
+    "NIFTY PHARMA": pharma,
+    "NIFTY HEALTHCARE INDEX": u(pharma.concat(hc)),
+    "NIFTY REALTY": grp("Realty"),
+    "NIFTY CONSUMER DURABLES": ["DIXON", "TITAN", "HAVELLS", "VOLTAS", "KALYANKJIL", "CROMPTON", "BLUESTARCO", "AMBER", "PGEL", "WHIRLPOOL", "KAJARIACER", "BATAINDIA", "VGUARD", "CERA", "SENCO"],
+    "NIFTY OIL & GAS": oil.concat(["IGL"]),
+    "NIFTY ENERGY": u(en.concat(oil.filter(x => ["RELIANCE", "ONGC", "IOC", "BPCL", "GAIL", "HINDPETRO", "OIL"].indexOf(x) >= 0), ["COALINDIA", "TORNTPOWER"])),
+    "NIFTY INFRASTRUCTURE": u(grp("Infra").concat(["RELIANCE", "BHARTIARTL", "INDIGO", "INDUSTOWER", "POWERGRID", "NTPC"]))
+  };
+  Object.keys(M).forEach(n => { SECX_CACHE[n] = M[n]; });
+  return SECX_CACHE[k] || [];
+}
+function secxQuote(s) {
+  const f = ((MARKET && MARKET.stocks) || []).find(x => x && x.s === s);
+  if (f && isFinite(+f.pct) && isFinite(+f.p)) return {p: +f.p, pct: +f.pct};
+  const q = SECQ[s]; return q && isFinite(q.pct) ? q : null;
+}
+async function secxLoad(k, force) {
+  if (!MARKET_API_URL || SECX_BUSY[k]) return;
+  const need = secxMembers(k).filter(s => !secxQuote(s) && (force || !SECX_TRIED[s]));
+  if (!need.length) return;
+  SECX_BUSY[k] = true; paintMarket();
+  const chunks = []; for (let i = 0; i < need.length; i += 20) chunks.push(need.slice(i, i + 20));
+  for (const ch of chunks) {
+    ch.forEach(s => { SECX_TRIED[s] = 1; });
+    try {
+      const r = await fetch(MARKET_API_URL + "?quotes=" + encodeURIComponent(ch.join(",")), {cache: "no-store"}), j = await r.json().catch(() => null);
+      if (j && Array.isArray(j.quotes)) j.quotes.forEach(q => { if (q && q.s && isFinite(q.p)) SECQ[String(q.s).toUpperCase()] = {p: +q.p, pct: isFinite(q.pct) ? +q.pct : NaN}; });
+    } catch (e) {}
+  }
+  SECX_BUSY[k] = false; paintMarket();
+}
+function secxHTML(k, label) {
+  const mem = secxMembers(k);
+  if (!mem.length) return '<p class="note" style="margin:6px 8px">No stock list is set for this sector.</p>';
+  const rows = mem.map(s => { const q = secxQuote(s); return q ? {s, p: q.p, pct: q.pct} : null; }).filter(Boolean).sort((a, b) => b.pct - a.pct);
+  if (!rows.length) return '<p class="note" style="margin:6px 8px">' + (SECX_BUSY[k] || !SECX_TRIED[mem[0]] ? "Loading stocks..." : "Could not load prices for this sector's stocks.") + "</p>";
+  const up = rows.filter(x => x.pct > 0).length, dn = rows.filter(x => x.pct < 0).length;
+  const col = v => '<span class="num" style="color:var(--' + (v >= 0 ? "good" : "bad") + ')">' + pct(v, 2) + "</span>";
+  const body = rows.map((x, i) => "<tr><td>" + (i + 1) + "</td><td><b>" + esc(x.s) + "</b>" + (i === 0 ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px">top stock</span>' : i === rows.length - 1 && rows.length > 2 ? ' <span class="chip r" style="font-size:.7rem;padding:1px 6px">weakest</span>' : "") + '</td><td class="num">' + fmt(x.p, 2) + "</td><td>" + col(x.pct) + "</td></tr>").join("");
+  return '<div style="margin:4px 6px 0"><div class="note" style="margin:0 0 4px">' + esc(label || k) + ": " + rows.length + " stocks, " + up + " up, " + dn + " down" + (rows.length < mem.length ? " (" + (mem.length - rows.length) + " without a price)" : "") + (SECX_BUSY[k] ? " &middot; loading more..." : "") + '</div><div class="wrap"><table><tr><th>#</th><th>Stock</th><th class="num">Price</th><th>Today</th></tr>' + body + "</table></div>" +
+    '<div class="note" style="margin:4px 0 0;font-size:.76rem">Stock list is an approximation of the index members, ranked by today\'s change.</div></div>';
+}
+function secxToggle(row) {
+  const k = row.getAttribute("data-secrow"); if (!k) return;
+  if (SECX_OPEN[k]) delete SECX_OPEN[k]; else SECX_OPEN[k] = 1;
+  try { localStorage.setItem("secxOpen", JSON.stringify(SECX_OPEN)); } catch (e) {}
+  paintMarket(); if (SECX_OPEN[k]) secxLoad(k, false);
+}
+document.addEventListener("click", ev => { const r = ev.target && ev.target.closest ? ev.target.closest("[data-secrow]") : null; if (r) secxToggle(r); });
+document.addEventListener("keydown", ev => { if (ev.key !== "Enter" && ev.key !== " ") return; const r = ev.target && ev.target.closest ? ev.target.closest("[data-secrow]") : null; if (r) { ev.preventDefault(); secxToggle(r); } });
 function marketHTML() {
   const head = "<h2>Market today</h2>", msg = t => head + '<div class="card"><p class="note" style="margin:0">' + esc(t) + "</p></div>";
   if (marketState === "none") return msg("Market breadth, sector moves and top movers come from NSE through a small Cloudflare Worker, not from your sheet. Deploy worker.js, then paste its address into MARKET_API_URL near the top of this file.");
@@ -3194,7 +3263,7 @@ function marketHTML() {
   let h = head;
   // tiles
   const n50 = idx("NIFTY 50"), nb = idx("NIFTY BANK");
-  const secs = (M.indices || []).filter(x => MARKET_SECTORS.indexOf(String(x.name).toUpperCase()) >= 0 && isFinite(+x.pct)).map(x => ({n: tc(x.name), p: +x.pct, p30: +x.pct30, last: +x.last})).sort((a, b) => b.p - a.p);
+  const secs = (M.indices || []).filter(x => MARKET_SECTORS.indexOf(String(x.name).toUpperCase()) >= 0 && isFinite(+x.pct)).map(x => ({n: tc(x.name), k: String(x.name).toUpperCase(), p: +x.pct, p30: +x.pct30, last: +x.last})).sort((a, b) => b.p - a.p);
   const tcl = tileCls;
   h += '<div class="tiles">';
   if (n50) h += '<div class="tile' + tcl(+n50.pct) + '"><small>Nifty 50</small><b>' + fmt(+n50.last, 2) + "</b><span>" + pct(+n50.pct, 2) + " today</span></div>";
@@ -3218,9 +3287,12 @@ function marketHTML() {
   if (secs.length) {
     const mx = Math.max.apply(null, secs.map(x => Math.abs(x.p))) || 1;
     const bestS = secs.reduce((m, x) => (x.p > m.p ? x : m), secs[0]), worstS = secs.reduce((m, x) => (x.p < m.p ? x : m), secs[0]), sg = v => (v > 0 ? "+" : "") + v.toFixed(2) + "%";
-    h += '<details class="card" data-sec="1" style="margin-top:12px"' + (SEC_OPEN ? " open" : "") + '><summary style="cursor:pointer"><b>Sector performance</b> <span class="note">(' + secs.length + " sectors) strongest " + esc(bestS.n) + " " + sg(bestS.p) + ", weakest " + esc(worstS.n) + " " + sg(worstS.p) + " &middot; click to expand</span></summary>" + tbl(["Sector", "Today", "", "30 days"], secs.map(x => [
-      "<b>" + esc(x.n) + "</b>", mc(x.p),
-      '<div style="height:10px;min-width:60px;width:' + Math.max(3, Math.round(Math.abs(x.p) / mx * 100)) + '%;border-radius:5px;background:var(--' + (x.p >= 0 ? "good" : "bad") + ')"></div>', mc(x.p30)])) + "</details>";
+    h += '<details class="card" data-sec="1" style="margin-top:12px"' + (SEC_OPEN ? " open" : "") + '><summary style="cursor:pointer"><b>Sector performance</b> <span class="note">(' + secs.length + " sectors) strongest " + esc(bestS.n) + " " + sg(bestS.p) + ", weakest " + esc(worstS.n) + " " + sg(worstS.p) + " &middot; click to expand</span></summary>" + '<div class="wrap"><table><tr><th>Sector</th><th>Today</th><th></th><th>30 days</th></tr>' + secs.map(x => {
+      const op = !!SECX_OPEN[x.k];
+      return '<tr data-secrow="' + esc(x.k) + '" tabindex="0" role="button" aria-expanded="' + op + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 8%,var(--card))" : "") + '"><td><b><span style="display:inline-block;width:1.1em;color:var(--mute)">' + (op ? "&#9662;" : "&#9656;") + "</span>" + esc(x.n) + "</b></td><td>" + mc(x.p) + "</td><td>" +
+        '<div style="height:10px;min-width:60px;width:' + Math.max(3, Math.round(Math.abs(x.p) / mx * 100)) + '%;border-radius:5px;background:var(--' + (x.p >= 0 ? "good" : "bad") + ')"></div></td><td>' + mc(x.p30) + "</td></tr>" +
+        (op ? '<tr><td colspan="4" style="padding:2px 4px 10px">' + secxHTML(x.k, x.n) + "</td></tr>" : "");
+    }).join("") + "</table></div>" + '<p class="note" style="margin:6px 0 0">Click a sector to see its stocks, best performer first. Click it again to close.</p>' + "</details>";
   }
   // trending stocks
   const st = (M.stocks || []).filter(x => isFinite(+x.pct)).map(x => ({s: x.s, p: +x.p, pct: +x.pct, val: +x.val, nearHi: +x.nearHi, nearLo: +x.nearLo}));
