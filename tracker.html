@@ -656,20 +656,20 @@ function ldRun(bars0) {
   if (b.length < 40) return null;
   const V = LD.atr.map(l => ldST(b, LD.fac, l)), F = ldST(b, LD.fFac, LD.fAtr), n = b.length, ema = new Array(n).fill(NaN);
   if (n >= LD.emaLen) { let e = 0; for (let i = 0; i < LD.emaLen; i++) e += b[i].close; e /= LD.emaLen; ema[LD.emaLen - 1] = e; const k = 2 / (LD.emaLen + 1); for (let i = LD.emaLen; i < n; i++) { e = b[i].close * k + e * (1 - k); ema[i] = e; } }
-  let pos = 0, entryI = -1, exitI = -1, exitDir = 0, pL = false, pS = false, gate = "";
+  let pos = 0, entryI = -1, exitI = -1, exitDir = 0, pL = false, pS = false, gate = ""; const evs = [];
   for (let i = 0; i < n; i++) {
     if (!isFinite(V[2].d[i]) || !isFinite(F.d[i])) { pL = pS = false; continue; }
     const up = V.reduce((a, x) => a + (x.d[i] < 0 ? 1 : 0), 0), propL = up >= 2, propS = 3 - up >= 2, fUp = F.d[i] < 0, fAdv = isFinite(F.st[i - 1]) ? (fUp ? F.st[i] > F.st[i - 1] : F.st[i] < F.st[i - 1]) : false;
     const gL = !LD.gate || (fUp && fAdv), gS = !LD.gate || (!fUp && fAdv), cL = !LD.confirm || pL, cS = !LD.confirm || pS, noE = !LD.useEma || !isFinite(ema[i]), eL = noE || b[i].close > ema[i], eS = noE || b[i].close < ema[i];
     let p = pos, ex = false;
-    if (p === 1 && ((LD.regimeExit && !fUp) || (LD.voteExit && !propL))) { ex = true; exitI = i; exitDir = 1; p = 0; }
-    else if (p === -1 && ((LD.regimeExit && fUp) || (LD.voteExit && !propS))) { ex = true; exitI = i; exitDir = -1; p = 0; }
-    if (p === 0 && !ex) { if (propL && gL && cL && eL) { p = 1; entryI = i; } else if (propS && gS && cS && eS) { p = -1; entryI = i; } }
+    if (p === 1 && ((LD.regimeExit && !fUp) || (LD.voteExit && !propL))) { ex = true; exitI = i; exitDir = 1; p = 0; evs.push({time: b[i].time, t: "exitL"}); }
+    else if (p === -1 && ((LD.regimeExit && fUp) || (LD.voteExit && !propS))) { ex = true; exitI = i; exitDir = -1; p = 0; evs.push({time: b[i].time, t: "exitS"}); }
+    if (p === 0 && !ex) { if (propL && gL && cL && eL) { p = 1; entryI = i; evs.push({time: b[i].time, t: "buy"}); } else if (propS && gS && cS && eS) { p = -1; entryI = i; evs.push({time: b[i].time, t: "sell"}); } }
     pos = p; pL = propL; pS = propS;
     if (i === n - 1) gate = pos ? "in position" : (propL || propS) ? ((LD.gate && ((propL ? 1 : 0) !== (fUp ? 1 : 0))) ? "blocked: wrong regime" : (LD.gate && !fAdv) ? "waiting: filter not advancing" : (propL ? !eL : !eS) ? "blocked by the 200 EMA" : "waiting: confirm") : "no proposal";
   }
   const last = n - 1, lastDay = Math.floor((b[last].time + 19800) / 86400), tm = t => { const q = new Date((t + 19800) * 1000), hm = String(q.getUTCHours()).padStart(2, "0") + ":" + String(q.getUTCMinutes()).padStart(2, "0"); return Math.floor((t + 19800) / 86400) === lastDay ? hm : q.getUTCDate() + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][q.getUTCMonth()] + " " + hm; };
-  const o = {pos, n, last: b[last].close, asOf: tm(b[last].time), gate, ema: n >= LD.emaLen, sl: F.st[last]};
+  const o = {ev: evs, line: b.map((x, i) => isFinite(F.st[i]) ? {time: x.time, value: F.st[i], color: F.d[i] < 0 ? "#16a34a" : "#dc2626"} : null).filter(Boolean), pos, n, last: b[last].close, asOf: tm(b[last].time), gate, ema: n >= LD.emaLen, sl: F.st[last]};
   if (pos) { o.entry = b[entryI].close; o.since = tm(b[entryI].time); o.fresh = entryI >= last - 2; o.sl0 = F.st[entryI]; }
   else if (exitI === last) o.exit = exitDir;
   return o;
@@ -762,6 +762,16 @@ async function ixChartDraw() {
   candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
   let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(bars.map(b => ({time: b.time, value: b.vol, color: b.close >= b.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
   try { indAttach(chart, candle, bars, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+  let ladNote = "";
+  if (tf === "5" && !planOn) try {
+    const lr = ldRun(bars);
+    if (lr) {
+      candle.setMarkers(lr.ev.map(e => ({time: e.time, position: (e.t === "buy" || e.t === "exitS") ? "belowBar" : "aboveBar", color: e.t === "buy" ? "#16a34a" : e.t === "sell" ? "#dc2626" : "#d97706", shape: e.t === "buy" ? "arrowUp" : e.t === "sell" ? "arrowDown" : "circle", text: e.t === "buy" ? "BUY" : e.t === "sell" ? "SELL" : e.t === "exitL" ? "EXIT L" : "EXIT S"})));
+      const ls = chart.addLineSeries({lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false}); ls.setData(lr.line);
+      if (lr.pos) { candle.createPriceLine({price: lr.entry, color: "#2563eb", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Entry"}); candle.createPriceLine({price: lr.sl, color: c.dn, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Stop"}); }
+      ladNote = " SuperTrend Ladder: BUY and SELL arrows, orange dots for exits, and the green or red line is the stop (the slow filter line)." + (lr.pos ? " Dashed lines: your entry " + fmt(lr.entry, 2) + " and the stop " + fmt(lr.sl, 2) + " now." : " No trade is on right now.");
+    }
+  } catch (e) {}
   /* trade idea levels, when the stock is on the Trade ideas list */
   let lv = null, side = "";
   if (IDEAS_LAST) [[IDEAS_LAST.L, "Long"], [IDEAS_LAST.S, "Short"]].forEach(a => a[0].forEach(x => { if (!lv && String(x.s).toUpperCase() === sym.toUpperCase() && x.lv) { lv = x.lv; side = a[1]; } }));
@@ -770,7 +780,7 @@ async function ixChartDraw() {
   try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const last = bars[n - 1].time, d = new Date(last + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: last}); } } catch (e) { chart.timeScale().fitContent(); }
   IX_CH = chart;
   if (planOn) tpRender(chart, candle, sym, tf, IX_SEL.dir || (side === "Long" ? 1 : side === "Short" ? -1 : 0), IX_SEL.tok).catch(() => {});
-  say((intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + (lv ? " Dashed lines: " + side + " trigger, stop and target from the Trade ideas screen." : "") + " Scroll or zoom on the chart.");
+  say((intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + (lv ? " Dashed lines: " + side + " trigger, stop and target from the Trade ideas screen." : "") + " Scroll or zoom on the chart." + ladNote);
 }
 const ixList = sym => Array.from(document.querySelectorAll("#ixbody [data-ixchart]")).filter(x => x.getAttribute("data-ixchart") === sym && !x.closest(".dockrow"));
 function ixDock() {
