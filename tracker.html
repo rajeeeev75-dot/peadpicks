@@ -3253,6 +3253,41 @@ function secxToggle(row) {
 }
 document.addEventListener("click", ev => { const r = ev.target && ev.target.closest ? ev.target.closest("[data-secrow]") : null; if (r) secxToggle(r); });
 document.addEventListener("keydown", ev => { if (ev.key !== "Enter" && ev.key !== " ") return; const r = ev.target && ev.target.closest ? ev.target.closest("[data-secrow]") : null; if (r) { ev.preventDefault(); secxToggle(r); } });
+/* ===== MARKET MOOD: one 0-100 score from trend, today's move, breadth, sectors, VIX and 10-day momentum ===== */
+function moodCalc(M, secs, idx) {
+  const parts = [], clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lin = (v, a, b) => clamp((v - a) / (b - a), 0, 1) * 100;
+  const n50 = idx("NIFTY 50"), vix = idx("INDIA VIX"); let cl = null; try { const bs = HIST && HIST[BENCH_TICKER]; if (bs && bs.length > 30) cl = bs.map(b => +b.close).filter(isFinite); } catch (e) {}
+  const live = n50 && isFinite(+n50.last) ? +n50.last : (cl ? cl[cl.length - 1] : NaN);
+  if (cl && isFinite(live)) {
+    const sma = n => (cl.length >= n ? cl.slice(-n).reduce((a, x) => a + x, 0) / n : NaN), s20 = sma(20), s50 = sma(50), s200 = sma(200), ab = [s20, s50, s200].map(x => (isFinite(x) ? live > x : null)), have = ab.filter(x => x !== null);
+    if (have.length) parts.push({k: "Trend", w: 30, v: have.filter(Boolean).length / have.length * 100, t: "Nifty " + fmt(live, 0) + " is " + [["20", ab[0]], ["50", ab[1]], ["200", ab[2]]].filter(x => x[1] !== null).map(x => (x[1] ? "above" : "below") + " its " + x[0] + "-day average").join(", ")});
+    const back = cl.length >= 11 ? cl[cl.length - 11] : NaN; if (isFinite(back)) { const r = (live / back - 1) * 100; parts.push({k: "10-day move", w: 10, v: lin(r, -3, 3), t: "Nifty " + pct(r, 1) + " over about 10 sessions"}); }
+  }
+  if (n50 && isFinite(+n50.pct)) parts.push({k: "Today", w: 15, v: lin(+n50.pct, -1, 1), t: "Nifty " + pct(+n50.pct, 2) + " today"});
+  const b = idx("NIFTY 500") && (+idx("NIFTY 500").adv + +idx("NIFTY 500").dec) > 0 ? idx("NIFTY 500") : (M.nifty50 || null);
+  if (b && (+b.adv + +b.dec) > 0) { const a = +b.adv, d = +b.dec; parts.push({k: "Breadth", w: 20, v: a / (a + d) * 100, t: a + " stocks up, " + d + " down" + (idx("NIFTY 500") === b ? " (Nifty 500)" : " (Nifty 50)")}); }
+  if (secs && secs.length >= 5) { const up = secs.filter(x => x.p > 0).length; parts.push({k: "Sectors", w: 10, v: up / secs.length * 100, t: up + " of " + secs.length + " sectors are up today"}); }
+  if (vix && isFinite(+vix.last)) { const L = +vix.last, lv = L <= 12 ? 100 : L <= 15 ? 75 : L <= 18 ? 50 : L <= 22 ? 25 : 0, ch = isFinite(+vix.pct) ? clamp(-(+vix.pct) * 3, -15, 15) : 0; parts.push({k: "Volatility", w: 15, v: clamp(lv + ch, 0, 100), t: "India VIX " + fmt(L, 2) + (isFinite(+vix.pct) ? " (" + pct(+vix.pct, 1) + ")" : "") + ", " + (L <= 15 ? "calm" : L <= 18 ? "normal" : L <= 22 ? "nervous" : "fearful")}); }
+  const tw = parts.reduce((a, x) => a + x.w, 0); if (!tw) return null;
+  return {score: Math.round(parts.reduce((a, x) => a + x.v * x.w, 0) / tw), parts, cov: Math.round(tw)};
+}
+function moodGauge(score) {
+  const cx = 160, cy = 160, R = 120, rw = 26, pt = (a, r) => [cx + r * Math.cos(a * Math.PI / 180), cy - r * Math.sin(a * Math.PI / 180)], arc = (a0, a1, id) => { const p0 = pt(a0, R), p1 = pt(a1, R), q0 = pt(a1, R - rw), q1 = pt(a0, R - rw); return '<path d="M' + p0[0].toFixed(1) + " " + p0[1].toFixed(1) + " A" + R + " " + R + " 0 0 1 " + p1[0].toFixed(1) + " " + p1[1].toFixed(1) + " L" + q0[0].toFixed(1) + " " + q0[1].toFixed(1) + " A" + (R - rw) + " " + (R - rw) + " 0 0 0 " + q1[0].toFixed(1) + " " + q1[1].toFixed(1) + ' Z" fill="url(#' + id + ')"/>'; };
+  const sc = Math.max(0, Math.min(100, score)), frac = sc < 40 ? sc / 40 / 3 : sc < 60 ? 1 / 3 + (sc - 40) / 20 / 3 : 2 / 3 + (sc - 60) / 40 / 3, ang = 180 - frac * 180, tip = pt(ang, R - 8), z = sc < 40 ? "Bear" : sc < 60 ? "Dull" : "Bull", zc = sc < 40 ? "#ef4444" : sc < 60 ? "#f59e0b" : "#16a34a";
+  const tick = a => { const p0 = pt(a, R + 4), p1 = pt(a, R - rw - 4); return '<line x1="' + p0[0].toFixed(1) + '" y1="' + p0[1].toFixed(1) + '" x2="' + p1[0].toFixed(1) + '" y2="' + p1[1].toFixed(1) + '" stroke="#94a3b8" stroke-width="3"/>'; };
+  const lab = (a, t, c) => { const p = pt(a, R + 24); return '<text x="' + p[0].toFixed(1) + '" y="' + p[1].toFixed(1) + '" text-anchor="middle" font-size="17" font-weight="700" fill="' + c + '">' + t + "</text>"; };
+  return '<svg viewBox="0 0 320 200" width="100%" style="max-width:360px" role="img" aria-label="Market mood ' + z + " " + sc + '"><defs><linearGradient id="mgb" x1="0" x2="1"><stop offset="0" stop-color="#dc2626"/><stop offset="1" stop-color="#f97316"/></linearGradient><linearGradient id="mgd" x1="0" x2="1"><stop offset="0" stop-color="#fb923c"/><stop offset="1" stop-color="#f59e0b"/></linearGradient><linearGradient id="mgu" x1="0" x2="1"><stop offset="0" stop-color="#22c55e"/><stop offset="1" stop-color="#166534"/></linearGradient></defs>' +
+    arc(180, 120, "mgb") + arc(120, 60, "mgd") + arc(60, 0, "mgu") + tick(120) + tick(60) + lab(150, "Bear", "#ef4444") + lab(90, "Dull", "#f59e0b") + lab(30, "Bull", "#16a34a") +
+    '<line x1="' + cx + '" y1="' + cy + '" x2="' + tip[0].toFixed(1) + '" y2="' + tip[1].toFixed(1) + '" stroke="#3b82f6" stroke-width="7" stroke-linecap="round"/><circle cx="' + cx + '" cy="' + cy + '" r="12" fill="#0f172a" stroke="#3b82f6" stroke-width="5"/>' +
+    '<text x="' + cx + '" y="' + (cy + 38) + '" text-anchor="middle" font-size="26" font-weight="800" fill="' + zc + '">' + sc + "%</text></svg>";
+}
+function moodHTML(M, secs, idx) {
+  const m = moodCalc(M, secs, idx); if (!m) return "";
+  const z = m.score < 40 ? ["Bear", "r", "Weak market: be selective, trade smaller, prefer shorts or stay out."] : m.score < 60 ? ["Dull", "n", "Mixed or sideways market: breakouts fail more often, so take only the best setups."] : ["Bull", "g", "Healthy market: long setups have better odds."];
+  const rows = m.parts.map(x => "<tr><td><b>" + esc(x.k) + '</b></td><td style="white-space:normal">' + esc(x.t) + '</td><td class="num" style="color:var(--' + (x.v >= 60 ? "good" : x.v < 40 ? "bad" : "mute") + ')">' + Math.round(x.v) + "</td></tr>").join("");
+  return '<div class="card" style="margin-top:12px"><div style="display:flex;flex-wrap:wrap;gap:14px 24px;align-items:center"><div style="flex:1 1 280px;text-align:center">' + moodGauge(m.score) + '</div><div style="flex:2 1 320px;min-width:260px"><h3 style="margin:0 0 4px">Market mood: <span class="chip ' + z[1] + '" style="font-size:1rem;padding:3px 14px">' + z[0] + " " + m.score + '%</span></h3><p class="note" style="margin:0 0 8px">' + esc(z[2]) + '</p><div class="wrap"><table class="acctbl" style="font-size:.88rem"><thead><tr><th>Factor</th><th>Reading</th><th class="num">Score</th></tr></thead><tbody>' + rows + "</tbody></table></div></div></div>" +
+    '<p class="note" style="margin:8px 0 0">One score from 0 to 100: trend (30%), breadth (20%), today\'s move (15%), India VIX (15%), 10-day move (10%) and sectors (10%). Under 40 is Bear, 40 to 60 is Dull and over 60 is Bull. A factor with no data is left out' + (m.cov < 100 ? " (" + m.cov + "% of the weight is available now)" : "") + ". It is a simple reading of price and breadth, not a tested signal.</p></div>";
+}
 function marketHTML() {
   const head = "<h2>Market today</h2>", msg = t => head + '<div class="card"><p class="note" style="margin:0">' + esc(t) + "</p></div>";
   if (marketState === "none") return msg("Market breadth, sector moves and top movers come from NSE through a small Cloudflare Worker, not from your sheet. Deploy worker.js, then paste its address into MARKET_API_URL near the top of this file.");
@@ -3271,6 +3306,7 @@ function marketHTML() {
   if (secs.length) h += '<div class="tile' + tcl(secs[0].p) + '"><small>Strongest sector</small><b>' + esc(secs[0].n) + "</b><span>" + pct(secs[0].p, 2) + " today</span></div>" +
     '<div class="tile' + tcl(secs[secs.length - 1].p) + '"><small>Weakest sector</small><b>' + esc(secs[secs.length - 1].n) + "</b><span>" + pct(secs[secs.length - 1].p, 2) + " today</span></div>";
   h += "</div>";
+  try { h += moodHTML(M, secs, idx); } catch (e) {}
   try { h += cuesHTML(M, mc, idx); } catch (e) {}
   // breadth
   const bar = (label, a, d, u) => {
@@ -4999,7 +5035,14 @@ const rmApi = (function () {
   function paint() { build(); view(); }
   function open() { build(); paint(); const S = ST[O.tf]; if (!busy && (!S || !S.t || Date.now() - S.t > (ZN_TTL[O.tf] || 6e5))) load(false); }
   setInterval(() => { try { if (current === "rm" && !document.hidden && !busy) { const S = ST[O.tf]; if (!S || !S.t || Date.now() - S.t > (ZN_TTL[O.tf] || 6e5)) load(false); } } catch (e) {} }, 60 * 1000);
-  function signals() { const m = {}; results().forEach(x => { const f = freshOf(x); if (f) m[x.sym] = {dir: f.dir, kind: f.kind, age: x.r.n - 1 - f.i, st: "fresh", score: f.score, plan: f.plan || null, neck: x.r.neck}; else if (x.r.aDir !== 0 && !x.r.broken) m[x.sym] = {dir: x.r.aDir, st: "armed", score: x.r.score, plan: null, neck: x.r.neck}; }); return {m, tf: (RM_TFS.find(t => t[0] === O.tf) || [0, O.tf])[1]}; }
+  function signals() { const m = {}; results().forEach(x => { const f = freshOf(x); if (f) m[x.sym] = {dir: f.dir, kind: f.kind, age: x.r.n - 1 - f.i, st: "fresh", score: f.score, plan: f.plan || null, neck: x.r.neck}; else if (x.r.aDir !== 0 && !x.r.broken) {
+      const r = x.r, sd = r.aDir, atr = r.atr, pp = r.p || [], p1 = pp[0] && pp[0].p, p2 = pp[1] && pp[1].p, p3 = pp[2] && pp[2].p; let plan = null;
+      if (isFinite(atr) && isFinite(p3) && isFinite(p1) && isFinite(p2) && isFinite(r.neck)) {   // trigger plan: enter on a close beyond the neckline, stop beyond point 3, as the signal plan does
+        const entry = r.neck + sd * atr * RM_P.breakBuf, stop = p3 - sd * atr * RM_P.invalBuf, risk = Math.abs(entry - stop);
+        if (risk > 0 && (entry - stop) * sd > 0) { const t1 = entry + sd * risk, mm = r.neck + sd * Math.abs(p2 - p1), mmOk = (mm - entry) * sd > risk, t2 = mmOk ? mm : entry + sd * 2 * risk; plan = {sd, entry, stop, risk, t1, t2, armed: true}; }
+      }
+      m[x.sym] = {dir: sd, st: "armed", score: r.score, plan, neck: r.neck};
+    } }); return {m, tf: (RM_TFS.find(t => t[0] === O.tf) || [0, O.tf])[1]}; }
   return {open, load, view, signals, _t: {simExit, results}};
 })();
 const rmPaint = () => rmApi.open();
@@ -5069,7 +5112,7 @@ const cbApi = (function () {
     if (d.idea && d.idea.x && d.idea.x.lv) { const v = d.idea.x.lv; add("Trade idea trigger", v.t, v.st, v.tg, "levels from the Intraday screen"); }
     if (d.zone && d.zone.z) { const z = d.zone.z; add("Zone proximal line", z.prox, z.dist, z.target, (z.type === "D" ? "demand " : "supply ") + z.pat + " zone, " + d.zone.tf); }
     if (d.st && isFinite(d.st.stop)) { const x = d.st, r = Math.abs(x.close - x.stop); add("SuperTrend 15m, exit at 2R", x.close, x.stop, x.close + (x.side === 1 ? 2 : -2) * r, "now, stop at the slowest line"); }
-    if (d.rm && d.rm.plan) { const p = d.rm.plan; add("123 plan, exit at T1 (1R)", p.entry, p.stop, p.t1, "signal bar close, " + d.rm.tf); add("123 plan, exit at T2", p.entry, p.stop, p.t2, "measured move or 2R, " + d.rm.tf); }
+    if (d.rm && d.rm.plan) { const p = d.rm.plan; const ar = d.rm.st === "armed", nm = ar ? "123 trigger at the neckline" : "123 plan"; add(nm + ", exit at T1 (1R)", p.entry, p.stop, p.t1, (ar ? "armed: enters on a close beyond the neckline, stop beyond point 3, " : "signal bar close, ") + d.rm.tf); add(nm + ", exit at T2", p.entry, p.stop, p.t2, "measured move or 2R, " + d.rm.tf); }
     if (daily && daily.length > 40) {
       const n0 = daily.length, today = new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Kolkata"}), nb = daily[n0 - 1].time >= today && n0 > 1 ? n0 - 1 : n0, b = daily.slice(0, nb), n = b.length;
       const A = znAtr(b.map(x => x.high), b.map(x => x.low), b.map(x => x.close), 14).ATR, atr = A[n - 1];
@@ -5158,7 +5201,7 @@ const cbApi = (function () {
   }
 
   /* ---------- chart panel ---------- */
-  let SEL = null, CH = null, CANDLE = null, LINES = [], PL = [], PN = null;
+  let SEL = null, CH = null, CANDLE = null, LINES = [], PL = [], PN = null, LASTPX = NaN;
   const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
   async function barsOf(sym, tf) {
     const key = sym + "|" + tf; let o = IXC[key];
@@ -5173,7 +5216,7 @@ const cbApi = (function () {
     if (d.oi) { L.push(row("OI spurt", (r.side === 1 ? "Long" : "Short") + " build-up: open interest " + sgn(+d.oi.r.pct, 0) + " (change " + Math.round(+d.oi.r.chg).toLocaleString("en-IN") + "), price " + sgn(+d.oi.q.pct, 1))); }
     if (d.zone) { const z = d.zone.z; L.push(row("Zone", (z.type === "D" ? "Demand" : "Supply") + " zone (" + z.pat + ") on " + d.zone.tf + ": proximal " + px2(z.prox) + ", distal " + px2(z.dist) + ", target " + px2(z.target) + ", strength " + Math.round(z.prob) + "%, " + Math.abs(d.zone.away).toFixed(1) + "% from price. Active on: " + d.zone.tfs.join(", "))); }
     if (d.st) { const x = d.st; L.push(row("SuperTrend", (x.side === 1 ? "LONG" : "SHORT") + " on 15m since " + x.when + " (" + x.bars + " bars), " + x.votes + " of 3 lines agree. Entry " + px2(x.entry) + ", now " + px2(x.close) + " (" + sgn(x.pl, 2) + "), stop " + px2(x.stop))); }
-    if (d.rm) { const x = d.rm; L.push(row("123 reversal", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 on " + x.tf + ", " + (x.st === "fresh" ? x.kind.toLowerCase() + " signal " + x.age + " bars ago" : "armed, waiting for the neckline") + (isFinite(x.score) ? ", quality " + Math.round(x.score) + "/100" : "") + (x.plan ? ". Plan: entry " + px2(x.plan.entry) + ", stop " + px2(x.plan.stop) + ", T1 " + px2(x.plan.t1) + ", T2 " + px2(x.plan.t2) : ""))); }
+    if (d.rm) { const x = d.rm; L.push(row("123 reversal", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 on " + x.tf + ", " + (x.st === "fresh" ? x.kind.toLowerCase() + " signal " + x.age + " bars ago" : "armed, waiting for the neckline") + (isFinite(x.score) ? ", quality " + Math.round(x.score) + "/100" : "") + (x.plan ? (x.st === "armed" ? ". Trigger plan (on a close beyond the neckline): entry " : ". Plan: entry ") + px2(x.plan.entry) + ", stop " + px2(x.plan.stop) + ", T1 " + px2(x.plan.t1) + ", T2 " + px2(x.plan.t2) : ""))); }
     if (tc) { const sec = r.tcSec; L.push(row("Season", "Over the next 2 weeks it rose in " + Math.round(tc.prob) + "% of " + tc.n + " past years, average " + sgn(tc.avg * 100, 1) + (tc.sec ? ". " + E(tc.sec) + " sector: " + (sec ? Math.round(sec.prob) + "% of " + sec.n + " years" : "n/a") : ""))); }
     if (d.news) { const o = d.news.o; L.push(row("News", o.used.slice(0, 4).map(u => (u.sc > 0 ? "&#9650; " : "&#9660; ") + E(u.x.title) + ' <small class="note" style="margin:0">(' + E([u.x.tag, ageText(u.x.date)].filter(Boolean).join(", ")) + ")</small>").join("<br>") + '<br><small class="note" style="margin:0">Net impact ' + (o.net > 0 ? "+" : "") + o.net + " (headlines of the last 2 days scored by keywords; at least 2 needed to count as a screen)</small>")); }
     if (pd) L.push(row("PEAD", "Score <b>" + Math.round(pd.total) + "/100</b> (" + E(pd.rec.toLowerCase()) + "), reported " + (pd.d === 0 ? "today" : pd.d + " days ago") + (isFinite(pd.react) ? ", first-session reaction " + sgn(pd.react, 1) : "") + (isFinite(pd.revY) ? ". Sales " + sgn(pd.revY, 0) + " YoY, profit " + sgn(pd.npY, 0) + " YoY" : "") + (pd.fwdPe > 0 ? ", forward P/E " + pd.fwdPe.toFixed(1) : "")));
@@ -5187,6 +5230,7 @@ const cbApi = (function () {
   function drawLines() {
     if (!CANDLE) return;
     LINES.forEach(l => { try { CANDLE.removePriceLine(l); } catch (e) {} }); LINES = [];
+    if (isFinite(LASTPX)) { try { LINES.push(CANDLE.createPriceLine({price: LASTPX, color: "#64748b", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "Price"})); } catch (e) {} }
     const p = SEL && PL[SEL.plan]; if (!p) return;
     [[p.entry, "#2563eb", "Entry"], [p.stop, "#dc2626", "Stop"], [p.target, "#16a34a", "Target"]].forEach(a => { try { LINES.push(CANDLE.createPriceLine({price: a[0], color: a[1], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[2]})); } catch (e) {} });
   }
@@ -5204,7 +5248,7 @@ const cbApi = (function () {
     candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
     let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(bars.map(b => ({time: b.time, value: b.vol, color: b.close >= b.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
     try { indAttach(chart, candle, bars, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
-    CH = chart; CANDLE = candle; drawLines();
+    LASTPX = bars[bars.length - 1].close; CH = chart; CANDLE = candle; drawLines();
     const n = bars.length;
     try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = bars[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
     if (note) note.textContent = (intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.") + " Dashed lines show the entry logic selected below.";
