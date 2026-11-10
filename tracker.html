@@ -578,7 +578,7 @@ function optionsHTML(O, label, errTxt, fold) {
     (isFinite(+O.atmIv) ? '<div class="tile"><small>At-the-money IV</small><b>' + (+O.atmIv).toFixed(1) + '%</b><span>strike ' + n0(O.atm) + "</span></div>" : "") + "</div>";
   if (isFinite(+O.ceOi) && isFinite(+O.peOi)) {
     const tot = (lab, oi, ch, cls) => { oi = +oi; ch = +ch; const base = oi - ch, p = isFinite(ch) && base > 0 ? ch / base * 100 : NaN; return '<div class="tile ' + cls + '"><small>' + lab + '</small><b>' + n0(oi) + "</b><span>" + (isFinite(ch) ? "net change " + sg(ch) + (isFinite(p) ? " (" + (p > 0 ? "+" : "") + p.toFixed(2) + "%)" : "") : "") + "</span></div>"; };
-    h += '<div class="tiles">' + tot("Total call OI (all strikes)", O.ceOi, O.ceChg, "dn") + tot("Total put OI (all strikes)", O.peOi, O.peChg, "up") + "</div>";
+    h += '<div class="tiles">' + tot("Total call OI (all strikes)", O.ceOi, O.ceChg, "dn") + tot("Total put OI (all strikes)", O.peOi, O.peChg, "up") + (() => { const d = +O.peOi - +O.ceOi, dc = +O.peChg - +O.ceChg, cls = d > 0 ? "up" : d < 0 ? "dn" : "fl"; return '<div class="tile ' + cls + '"><small>Net OI (put minus call)</small><b>' + (d > 0 ? "Bullish bias" : d < 0 ? "Bearish bias" : "Balanced") + "</b><span>Difference " + sg(d) + (isFinite(dc) ? "<br>Today's change in difference " + sg(dc) : "") + "</span></div>"; })() + "</div>";
   }
   const lvl = (arr) => (arr || []).map(x => [n0(x.strike), n0(x.oi), '<span class="num" style="color:var(--' + (x.chg >= 0 ? "good" : "bad") + ')">' + sg(x.chg) + "</span>"]);
   const oiTbls = tbl(["Call strike", "Call OI", "Change"], lvl(O.resistance)) + tbl(["Put strike", "Put OI", "Change"], lvl(O.support));
