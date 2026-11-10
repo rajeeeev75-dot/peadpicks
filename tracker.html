@@ -3250,7 +3250,8 @@ function secxHTML(k, label) {
   if (!rows.length) return '<p class="note" style="margin:6px 8px">' + (SECX_BUSY[k] || !SECX_TRIED[mem[0]] ? "Loading stocks..." : "Could not load prices for this sector's stocks.") + "</p>";
   const up = rows.filter(x => x.pct > 0).length, dn = rows.filter(x => x.pct < 0).length;
   const col = v => '<span class="num" style="color:var(--' + (v >= 0 ? "good" : "bad") + ')">' + pct(v, 2) + "</span>";
-  const body = rows.map((x, i) => "<tr><td>" + (i + 1) + "</td><td><b>" + esc(x.s) + "</b>" + (i === 0 ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px">top stock</span>' : i === rows.length - 1 && rows.length > 2 ? ' <span class="chip r" style="font-size:.7rem;padding:1px 6px">weakest</span>' : "") + '</td><td class="num">' + fmt(x.p, 2) + "</td><td>" + col(x.pct) + "</td></tr>").join("");
+  const star = sy => { let on = false; try { on = bmApi.has(sy); } catch (e) {} return '<span class="bmstar' + (on ? " on" : "") + '" data-bms="' + esc(sy) + '">' + (on ? "\u2605" : "\u2606") + "</span>"; };
+  const body = rows.map((x, i) => '<tr data-pcopen="' + esc(x.s) + '" style="cursor:pointer" title="Tap to open the chart"><td>' + (i + 1) + "</td><td>" + star(x.s) + "<b>" + esc(x.s) + "</b>" + (i === 0 ? ' <span class="chip g" style="font-size:.7rem;padding:1px 6px">top stock</span>' : i === rows.length - 1 && rows.length > 2 ? ' <span class="chip r" style="font-size:.7rem;padding:1px 6px">weakest</span>' : "") + ' <a class="tvl" href="' + znTv(x.s, "D") + '" target="_blank" rel="noopener" style="font-size:.8rem">TV &#8599;</a></td><td class="num">' + fmt(x.p, 2) + "</td><td>" + col(x.pct) + "</td></tr>").join("");
   return '<div style="margin:4px 6px 0"><div class="note" style="margin:0 0 4px">' + esc(label || k) + ": " + rows.length + " stocks, " + up + " up, " + dn + " down" + (rows.length < mem.length ? " (" + (mem.length - rows.length) + " without a price)" : "") + (SECX_BUSY[k] ? " &middot; loading more..." : "") + '</div><div class="wrap"><table><tr><th>#</th><th>Stock</th><th class="num">Price</th><th>Today</th></tr>' + body + "</table></div>" +
     '<div class="note" style="margin:4px 0 0;font-size:.76rem">Stock list is an approximation of the index members, ranked by today\'s change.</div></div>';
 }
@@ -5653,6 +5654,57 @@ const bmApi = (function () {
   let raf = 0; try { new MutationObserver(() => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; try { stars(); const bx = document.getElementById("bmcbox"); if (bx && !bx.dataset.d) draw(); if (document.getElementById("bmbox") && LIST.length) load(); } catch (e) {} }); }).observe(document.body, {childList: true, subtree: true}); } catch (e) {}
   setInterval(() => { try { if (!document.hidden && LIST.length && typeof current !== "undefined" && current === "ov") { load(); } } catch (e) {} }, 60e3);
   return {html, has: s => LIST.indexOf(s) >= 0, list: () => LIST.slice()};
+})();
+/* ===== CHART POPUP: opens a stock chart on top of the page, for lists that are redrawn often (e.g. sector stocks) ===== */
+const pcApi = (function () {
+  const E = esc, TFS = [["D", "Daily"], ["60", "1H"], ["15", "15m"], ["5", "5m"]]; let SYM = null, TF = "D", CH = null;
+  const f2 = v => (isFinite(v) ? v.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+  const nameOf = s => { try { if (ZN_IDXN[s]) return ZN_IDXN[s]; const q = n5Api.list().find(x => x.s === s); if (q) return q.n; } catch (e) {} return ""; };
+  async function bars(sym, tf) {
+    const key = sym + "|" + tf; let o = IXC[key];
+    if (!o || Date.now() - o.t > 45e3) {
+      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + (tf === "D" ? "DF" : tf), {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 5) IXC[key] = o = {t: Date.now(), bars: rows.map(x => ({time: tf === "D" ? String(x[0]).slice(0, 10) : x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; } catch (e) {}
+    }
+    return o && o.bars;
+  }
+  function wrapEl() {
+    let o = document.getElementById("pcpop");
+    if (!o) { o = document.createElement("div"); o.id = "pcpop"; o.style.cssText = "position:fixed;left:0;top:0;right:0;bottom:0;z-index:9999;background:rgba(0,0,0,.45);display:none;overflow:auto;padding:4vh 10px"; document.body.appendChild(o); }
+    return o;
+  }
+  function close() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } SYM = null; const o = document.getElementById("pcpop"); if (o) { o.style.display = "none"; o.innerHTML = ""; } }
+  function render() {
+    const o = wrapEl(), on = (() => { try { return bmApi.has(SYM); } catch (e) { return false; } })();
+    o.style.display = "block";
+    o.innerHTML = '<div class="card" style="max-width:980px;margin:0 auto" id="pccard"><div class="charttools" style="border:0;padding:0;margin-bottom:6px;justify-content:space-between"><span><span class="bmstar' + (on ? " on" : "") + '" data-bms="' + E(SYM) + '">' + (on ? "\u2605" : "\u2606") + "</span><b>" + E(SYM) + '</b> <span class="note" style="margin:0">' + E(nameOf(SYM)) + '</span></span><button type="button" class="cbtn" data-pcx="1">Close</button></div><div class="charttools">' + TFS.map(t => '<button type="button" class="cbtn" data-pctf="' + t[0] + '" aria-pressed="' + (t[0] === TF) + '">' + t[1] + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(SYM, TF === "D" ? "D" : TF) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a></div><div id="pcbox" style="height:420px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="pcnote" class="note" style="margin:6px 0 0">Loading chart...</div></div>';
+    draw();
+  }
+  async function draw() {
+    const box = document.getElementById("pcbox"); if (!box || !SYM) return; const sym = SYM, tf = TF, b = await bars(sym, tf), note = document.getElementById("pcnote");
+    if (SYM !== sym || TF !== tf || document.getElementById("pcbox") !== box) return;
+    const LW = window.LightweightCharts; if (!b || !LW) { if (note) note.textContent = "No chart data from your Worker. Use the TradingView link."; return; }
+    if (CH) { try { CH.remove(); } catch (e) {} CH = null; }
+    const c = colors(), intra = tf !== "D";
+    const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
+    candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    try { candle.createPriceLine({price: b[b.length - 1].close, color: "#f59e0b", lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: "Price " + f2(b[b.length - 1].close)}); } catch (e) {}
+    let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+    try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+    CH = chart; const n = b.length;
+    try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
+    if (note) note.textContent = intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.";
+  }
+  document.addEventListener("click", ev => {
+    const t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
+    if (t.closest("[data-pcx]") || t.id === "pcpop") { close(); return; }
+    const tf = t.closest("[data-pctf]"); if (tf) { TF = tf.dataset.pctf; render(); return; }
+    if (t.closest("#pcpop")) return;
+    if (t.closest("a") || t.closest(".bmstar")) return;
+    const r = t.closest("[data-pcopen]"); if (r) { SYM = String(r.dataset.pcopen).toUpperCase(); TF = "D"; render(); }
+  });
+  document.addEventListener("keydown", ev => { if (ev.key === "Escape" && SYM) close(); });
+  return {open: s => { SYM = String(s).toUpperCase(); TF = "D"; render(); }, close};
 })();
 /* ===== SUPERTREND SCREENER TAB: three SuperTrends vote on 15-minute bars, a slower SuperTrend regime filter must agree, plus a replay back-test of the same rules ===== */
 const stApi = (function () {
