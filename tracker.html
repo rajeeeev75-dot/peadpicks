@@ -559,7 +559,8 @@ function holdingHTML(s, c) {
 let OPT = null, OPT_ERR = "", optBusy = false;
 let OPT_BN = null, OPT_BN_ERR = "";
 function optBoxHTML() { return optionsHTML() + optionsHTML(OPT_BN, "Bank Nifty", OPT_BN_ERR); }
-function optionsHTML(O, label, errTxt) {
+function opOiPaint() { const b = document.getElementById("opoi"); if (!b) return; const open = b.querySelector("details") && b.querySelector("details").open; b.innerHTML = optionsHTML(undefined, undefined, undefined, true); if (open) { const d = b.querySelector("details"); if (d) d.open = true; } }
+function optionsHTML(O, label, errTxt, fold) {
   if (O === undefined) { O = OPT; label = "Nifty"; errTxt = OPT_ERR; }
   const h2 = '<h2 class="hb">&#127922; ' + esc(label) + ' options (OI)</h2>';
   if (!MARKET_API_URL) return "";
@@ -576,7 +577,8 @@ function optionsHTML(O, label, errTxt) {
     '<div class="tile up"><small>Top put OI (support)</small><b>' + (s1 ? n0(s1.strike) : "—") + "</b><span>" + (s1 ? "OI " + n0(s1.oi) + " (" + sg(s1.chg) + ")" : "") + "</span></div>" +
     (isFinite(+O.atmIv) ? '<div class="tile"><small>At-the-money IV</small><b>' + (+O.atmIv).toFixed(1) + '%</b><span>strike ' + n0(O.atm) + "</span></div>" : "") + "</div>";
   const lvl = (arr) => (arr || []).map(x => [n0(x.strike), n0(x.oi), '<span class="num" style="color:var(--' + (x.chg >= 0 ? "good" : "bad") + ')">' + sg(x.chg) + "</span>"]);
-  h += '<div class="card"><b>Biggest open interest</b>' + tbl(["Call strike", "Call OI", "Change"], lvl(O.resistance)) + tbl(["Put strike", "Put OI", "Change"], lvl(O.support)) + "</div>";
+  const oiTbls = tbl(["Call strike", "Call OI", "Change"], lvl(O.resistance)) + tbl(["Put strike", "Put OI", "Change"], lvl(O.support));
+  h += fold ? '<details class="card"><summary><b>Biggest open interest</b></summary>' + oiTbls + "</details>" : '<div class="card"><b>Biggest open interest</b>' + oiTbls + "</div>";
   const chips2 = [];
   if (isFinite(+O.volPcr)) chips2.push(["n", "Volume PCR " + (+O.volPcr).toFixed(2)]);
   if (isFinite(+O.ceChg) && isFinite(+O.peChg)) chips2.push([+O.peChg > +O.ceChg ? "g" : "r", "Today: put OI " + sg(O.peChg) + ", call OI " + sg(O.ceChg)]);
@@ -604,6 +606,7 @@ async function loadOptions() {
   } catch (e) { OPT_BN_ERR = e && e.name === "AbortError" ? "no answer after 25 seconds" : String((e && e.message) || e); }
   optBusy = false;
   const box = document.getElementById("optbox"); if (box) box.innerHTML = optBoxHTML();
+  try { opOiPaint(); } catch (e) {}
   refreshAn();
 }
 /* ===== NIFTY TAB: a market dashboard (not a stock page) ===== */
@@ -632,7 +635,7 @@ function fiiHTML() {
   if (hs.length) {
     const sum = n => hs.slice(0, n).reduce((a, x) => a + (x.fii && isFinite(x.fii.net) ? x.fii.net : 0), 0), sumD = n => hs.slice(0, n).reduce((a, x) => a + (x.dii && isFinite(x.dii.net) ? x.dii.net : 0), 0);
     if (hs.length >= 2) h += chips([[sum(hs.length) >= 0 ? "g" : "r", "FII last " + Math.min(5, hs.length) + " sessions: Rs " + cr(sum(Math.min(5, hs.length))) + " cr"], [sumD(hs.length) >= 0 ? "g" : "r", "DII last " + Math.min(5, hs.length) + " sessions: Rs " + cr(sumD(Math.min(5, hs.length))) + " cr"]]);
-    h += tbl(["Date", "FII buy", "FII sell", "FII net", "DII buy", "DII sell", "DII net"], hs.map(x => [esc(x.date), '<span class="num">' + fmt(x.fii && x.fii.buy, 0) + "</span>", '<span class="num">' + fmt(x.fii && x.fii.sell, 0) + "</span>", cc(x.fii && x.fii.net), '<span class="num">' + fmt(x.dii && x.dii.buy, 0) + "</span>", '<span class="num">' + fmt(x.dii && x.dii.sell, 0) + "</span>", cc(x.dii && x.dii.net)]));
+    h += '<details class="card"><summary><b>Date-wise FII and DII flows</b></summary>' + tbl(["Date", "FII buy", "FII sell", "FII net", "DII buy", "DII sell", "DII net"], hs.map(x => [esc(x.date), '<span class="num">' + fmt(x.fii && x.fii.buy, 0) + "</span>", '<span class="num">' + fmt(x.fii && x.fii.sell, 0) + "</span>", cc(x.fii && x.fii.net), '<span class="num">' + fmt(x.dii && x.dii.buy, 0) + "</span>", '<span class="num">' + fmt(x.dii && x.dii.sell, 0) + "</span>", cc(x.dii && x.dii.net)])) + "</details>";
   }
   return h + '<p class="note">Rs crore, NSE provisional figures published after the close. The table fills up day by day once the Worker has seen each day, so a longer history builds over time. FII/FPI means foreign portfolio investors, DII means domestic institutions.</p>';
 }
@@ -1601,7 +1604,7 @@ document.addEventListener("change", ev => {
   if (t.dataset.ksp) { const p = t.dataset.ksp.split(":"); (KS.pos[p[0]] = KS.pos[p[0]] || {})[p[1]] = t.value === "" ? "" : +t.value; ksSave(); ksPaint(); }
 });
 setInterval(() => { if (typeof current !== "undefined" && current === "op" && !document.hidden) { opStrip(); const a = document.activeElement; if (!(a && a.closest && a.closest("#ksbox"))) ksPaint(); } }, 15000);
-function opPaint() { const b = document.getElementById("opbody"); if (!b) return; b.innerHTML = '<div id="ksbox">' + ksHTML() + "</div>" + guideHTML(); opStrip(); try { ksCharts(); } catch (e) {} }
+function opPaint() { const b = document.getElementById("opbody"); if (!b) return; b.innerHTML = '<div id="ksbox">' + ksHTML() + "</div>" + guideHTML(); opStrip(); try { if (!OPT && !optBusy) loadOptions(); opOiPaint(); } catch (e) {} try { ksCharts(); } catch (e) {} }
 function niftyHTML(s, c, id) {
   NIFTY_CTX = {c};
   const idx = n => ((typeof MARKET !== "undefined" && MARKET && MARKET.indices) || []).find(x => String(x.name).toUpperCase() === n);
@@ -1655,7 +1658,6 @@ function niftyHTML(s, c, id) {
 
   h += '<div id="hwbox">' + hwHTML() + "</div>";
 
-  h += '<div id="fdbox">' + fiiHTML() + "</div>";
   h += '<div id="optbox">' + optBoxHTML() + "</div>";
   return h;
 }
@@ -3004,6 +3006,7 @@ function cuesHTML(M, mc, idx) {
   const fut = gl.filter(x => x.group === "US futures" && isFinite(+x.pct));
   if (fut.length) { const a = fut.reduce((t, x) => t + +x.pct, 0) / fut.length; tiles.push('<div class="tile' + tileCls(a) + '"><small>US futures (avg)</small><b>' + pct(a, 2) + "</b><span>" + (a > 0.3 ? "positive cue" : a < -0.3 ? "negative cue" : "flat cue") + "</span></div>"); }
   if (tiles.length) h += '<div class="tiles">' + tiles.join("") + "</div>";
+  h += '<div id="fdbox">' + fiiHTML() + "</div>";
   if (gl.length) {
     const groups = []; gl.forEach(x => { if (groups.indexOf(x.group) < 0) groups.push(x.group); });
     h += '<h2>Global cues and macro</h2><div class="two">' + groups.map(gr => '<div class="card" style="margin:0"><b>' + esc(gr) + "</b>" + tbl(["Market", "Level", "Change"], gl.filter(x => x.group === gr).map(x => [esc(x.name), '<span class="num">' + fmt(+x.last, x.sym === "USDINR=X" || x.sym === "^TNX" ? 3 : 2) + "</span>", (x.note ? '<span class="note" title="' + esc(x.note) + '">n/a (roll?)</span>' : mc(+x.pct))])) + "</div>").join("") + safeMacroCards() + "</div>";
@@ -3350,7 +3353,7 @@ function marketHTML() {
 }
 function safeCues() {
   try {
-    if (typeof MARKET === "undefined" || !MARKET) return ""; const M = MARKET, idx = n => (M.indices || []).find(x => String(x.name).toUpperCase() === n);
+    if (typeof MARKET === "undefined" || !MARKET) return '<div id="fdbox">' + fiiHTML() + "</div>"; const M = MARKET, idx = n => (M.indices || []).find(x => String(x.name).toUpperCase() === n);
     const mc = v => (isFinite(v) ? '<span class="num" style="color:var(--' + (v >= 0 ? "good" : "bad") + ')">' + pct(v, 2) + "</span>" : '<span class="num">—</span>');
     return cuesHTML(M, mc, idx);
   } catch (e) { return ""; }
@@ -3673,8 +3676,8 @@ function znSave() { try { localStorage.setItem("znOpt", JSON.stringify(ZO)); } c
 const znDate = s => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "-" + p[1] + "-" + p[0] : "—"; };
 const znTfName = tf => (ZN_TFS.find(x => x[0] === tf) || [0, tf])[1];
 const znIntra = tf => tf !== "D" && tf !== "W";
-const ZN_IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX"], ZN_IDXN = {NIFTY: "Nifty 50", BANKNIFTY: "Bank Nifty", FINNIFTY: "Fin Nifty", MIDCPNIFTY: "Midcap Nifty", SENSEX: "Sensex"};
-const znTv = (sym, tf) => "https://www.tradingview.com/chart/?symbol=" + (String(sym) === "SENSEX" ? "BSE" : "NSE") + "%3A" + encodeURIComponent(String(sym || "").replace(/[&-]/g, "_")) + (tf ? "&interval=" + tf : "");
+const ZN_IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "MCXGOLD", "MCXSILVER", "MCXCRUDE", "MCXNATGAS"], ZN_IDXN = {NIFTY: "Nifty 50", BANKNIFTY: "Bank Nifty", FINNIFTY: "Fin Nifty", MIDCPNIFTY: "Midcap Nifty", SENSEX: "Sensex", MCXGOLD: "MCX Gold", MCXSILVER: "MCX Silver", MCXCRUDE: "MCX Crude Oil", MCXNATGAS: "MCX Natural Gas"}, ZN_MCXTV = {MCXGOLD: "GOLD1!", MCXSILVER: "SILVER1!", MCXCRUDE: "CRUDEOIL1!", MCXNATGAS: "NATURALGAS1!"};
+const znTv = (sym, tf) => ZN_MCXTV[String(sym)] ? "https://www.tradingview.com/chart/?symbol=MCX%3A" + encodeURIComponent(ZN_MCXTV[String(sym)]) + (tf ? "&interval=" + tf : "") : "https://www.tradingview.com/chart/?symbol=" + (String(sym) === "SENSEX" ? "BSE" : "NSE") + "%3A" + encodeURIComponent(String(sym || "").replace(/[&-]/g, "_")) + (tf ? "&interval=" + tf : "");
 const znTvA = (sym, tf) => ' <a class="tvl" href="' + znTv(sym, tf) + '" target="_blank" rel="noopener" title="Open on TradingView">TV &#8599;</a>';
 const znP2 = n => String(n).padStart(2, "0");
 function znFmtT(t) { if (typeof t === "number") { const d = new Date(t * 1000); return znP2(d.getUTCDate()) + "-" + znP2(d.getUTCMonth() + 1) + " " + znP2(d.getUTCHours()) + ":" + znP2(d.getUTCMinutes()); } return znDate(t); }
@@ -5499,6 +5502,80 @@ const n5Api = (function () {
   return {open, list: () => LIST};
 })();
 const n5Paint = () => n5Api.open();
+/* ===== MCX TAB: gold, silver, crude oil and natural gas. Candles come from the Worker (global futures converted to MCX units), the TradingView link opens the real MCX contract. ===== */
+const mxApi = (function () {
+  const E = esc, $e = s => document.querySelector(s);
+  const L = [["MCXGOLD", "MCX Gold", "Rs per 10 g", "MCX:GOLD1!"], ["MCXSILVER", "MCX Silver", "Rs per kg", "MCX:SILVER1!"], ["MCXCRUDE", "MCX Crude Oil", "Rs per barrel", "MCX:CRUDEOIL1!"], ["MCXNATGAS", "MCX Natural Gas", "Rs per mmBtu", "MCX:NATURALGAS1!"]];
+  const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
+  let OPEN = null, TF = "D", CH = null, PN = null, built = false, DAILY = {}, TS = 0, BUSY = false;
+  const f2 = v => (isFinite(v) ? v.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+  const sg = v => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(2) + "%" : "-");
+  const tvOf = (s, tf) => "https://www.tradingview.com/chart/?symbol=" + encodeURIComponent(L.find(x => x[0] === s)[3]) + (tf ? "&interval=" + tf : "");
+  async function bars(sym, tf) {
+    const key = sym + "|" + tf; let o = IXC[key];
+    if (!o || Date.now() - o.t > 45e3) {
+      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + (tf === "D" ? "DF" : tf), {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 5) IXC[key] = o = {t: Date.now(), bars: rows.map(x => ({time: tf === "D" ? String(x[0]).slice(0, 10) : x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; } catch (e) {}
+    }
+    return o && o.bars;
+  }
+  async function load() {
+    if (BUSY || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return; BUSY = true;
+    try { await Promise.all(L.map(async x => { const b = await bars(x[0], "D"); if (b && b.length > 1) { const n = b.length, c = b[n - 1].close, pv = b[n - 2].close, at = k => (n > k ? b[n - 1 - k].close : NaN); DAILY[x[0]] = {c, o: b[n - 1].open, h: b[n - 1].high, l: b[n - 1].low, d: b[n - 1].time, pct: (c / pv - 1) * 100, w: (c / at(5) - 1) * 100, m: (c / at(21) - 1) * 100, hi: Math.max.apply(null, b.slice(-250).map(z => z.high)), lo: Math.min.apply(null, b.slice(-250).map(z => z.low))}; } })); TS = Date.now(); } catch (e) {}
+    BUSY = false; view();
+  }
+  function view() {
+    const host = $e("#mxgrid"); if (!host) return;
+    host.innerHTML = L.map(x => { const d = DAILY[x[0]], up = d && d.pct >= 0, on = OPEN === x[0];
+      return '<div class="card mxt" data-mxs="' + x[0] + '" style="cursor:pointer;margin:0' + (on ? ";outline:2px solid var(--a)" : "") + '"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><b>' + E(x[1]) + '</b><a class="tvl" href="' + tvOf(x[0], "D") + '" target="_blank" rel="noopener">TradingView &#8599;</a></div>' +
+        '<div class="note" style="margin:2px 0 6px">' + E(x[2]) + '</div>' +
+        (d ? '<div style="font-size:1.5rem;font-weight:800;color:var(--' + (up ? "good" : "bad") + ')">' + f2(d.c) + ' <span style="font-size:.95rem">' + sg(d.pct) + '</span></div>' +
+          '<div class="note" style="margin:6px 0 0">Day ' + f2(d.l) + ' - ' + f2(d.h) + '<br>5 days ' + sg(d.w) + ' &middot; 1 month ' + sg(d.m) + '<br>1 year range ' + f2(d.lo) + ' - ' + f2(d.hi) + '</div>' : '<div class="note" style="margin:6px 0 0">' + (BUSY ? "Loading..." : "No data from the Worker yet") + '</div>') + '</div>'; }).join("");
+    const st = $e("#mxstat"); if (st) st.textContent = TS ? "Updated " + new Date(TS).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"}) : "";
+  }
+  function removeChart() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } }
+  async function drawChart() {
+    if (!OPEN || !PN) return; const sym = OPEN, tf = TF, box = PN.querySelector("#mxbox"); if (!box) return;
+    const b = await bars(sym, tf), note = PN.querySelector("#mxnote");
+    if (OPEN !== sym || TF !== tf || !PN.querySelector("#mxbox")) return;
+    removeChart();
+    const LW = window.LightweightCharts;
+    if (!b || !LW) { if (note) note.textContent = "No chart data for " + sym + " from your Worker (deploy worker_v42.js)" + (LW ? "" : " (chart library missing)") + ". Use the TradingView link."; return; }
+    const c = colors(), intra = tf !== "D";
+    const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
+    candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    try { candle.createPriceLine({price: b[b.length - 1].close, color: "#f59e0b", lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: "Price " + f2(b[b.length - 1].close)}); } catch (e) {}
+    let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+    try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+    CH = chart; const n = b.length;
+    try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
+    if (note) note.textContent = (intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes. " : "Daily candles from your Cloudflare Worker. ") + "Prices are the global futures converted to MCX units, so they can differ a little from the MCX contract; use the TradingView link for the exact MCX chart.";
+  }
+  function panel() {
+    const slot = $e("#mxpanel"); if (!slot) return;
+    removeChart();
+    if (!OPEN) { slot.innerHTML = ""; PN = null; return; }
+    const r = L.find(x => x[0] === OPEN);
+    slot.innerHTML = '<div class="card" id="mxcard"><div class="charttools" style="border:0;padding:0;margin-bottom:6px"><b>' + E(r[1]) + '</b> <span class="note" style="margin:0">' + E(r[2]) + '</span></div><div class="charttools">' + TFS.map(t => '<button type="button" class="cbtn" data-mxtf="' + t[0] + '" aria-pressed="' + (t[0] === TF) + '">' + t[1] + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + tvOf(OPEN, TF === "D" ? "D" : TF) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-mxx="1">Close</button></div><div id="mxbox" style="height:400px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="mxnote" class="note" style="margin:6px 0 0">Loading chart...</div></div>';
+    PN = slot;
+  }
+  function build() {
+    const host = document.getElementById("mxbody"); if (!host || built) return; built = true;
+    host.innerHTML = '<div class="znhead"><div><h2>MCX</h2><span>Gold, silver, crude oil and natural gas</span></div><div class="znpills"><span>Chart inside the page</span><span>TradingView link</span><span>In Zone, 123, Cup &amp; Handle, SuperTrend and Combo</span></div></div>' +
+      '<div class="two" id="mxgrid" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px"></div><p class="note" id="mxstat" style="margin:8px 0"></p><div id="mxpanel" style="margin-top:10px"></div>' +
+      '<p class="note">Tap a commodity to open its chart. These four are included in the Zone, 123, Cup &amp; Handle, SuperTrend and Combo screeners (look for MCXGOLD, MCXSILVER, MCXCRUDE and MCXNATGAS in their lists). Yahoo has no MCX feed, so the Worker converts COMEX gold and silver, WTI crude and Henry Hub gas to MCX units using the dollar-rupee rate. Indian duty and local premium are not included unless you set MCX_PREM in the Worker.</p>';
+    host.addEventListener("click", ev => {
+      const t = ev.target; let b = t.closest("[data-mxtf]"); if (b) { TF = b.dataset.mxtf; panel(); drawChart(); return; }
+      if (t.closest("[data-mxx]")) { OPEN = null; panel(); view(); return; }
+      if (t.closest("a") || t.closest("[data-ind]") || t.closest("#mxcard")) return;
+      b = t.closest("[data-mxs]"); if (b) { const s = b.dataset.mxs; OPEN = OPEN === s ? null : s; panel(); view(); if (OPEN) { drawChart(); setTimeout(() => { const p = $e("#mxpanel"); if (p && p.scrollIntoView) p.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); } }
+    });
+  }
+  function open() { build(); view(); load(); if (OPEN && !CH) drawChart(); }
+  setInterval(() => { try { if (typeof current !== "undefined" && current === "mx" && !document.hidden) { load(); if (OPEN && TF !== "D") drawChart(); } } catch (e) {} }, 60e3);
+  return {open, list: () => L};
+})();
+const mxPaint = () => mxApi.open();
 /* ===== SUPERTREND SCREENER TAB: three SuperTrends vote on 15-minute bars, a slower SuperTrend regime filter must agree, plus a replay back-test of the same rules ===== */
 const stApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
@@ -6612,6 +6689,7 @@ function show(id) {
   if (id === "cb") { try { cbPaint(); } catch (e) {} }
   if (id === "st") { try { stPaint(); } catch (e) {} }
   if (id === "n5") { try { n5Paint(); } catch (e) {} }
+  if (id === "mx") { try { mxPaint(); } catch (e) {} }
   if (id === "cu") { try { cuPaint(); } catch (e) {} }
   if (id === "sw") { try { swPaint(); } catch (e) {} }
   if (id === "op") { try { opPaint(); } catch (e) {} }
@@ -6680,7 +6758,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button><button role="tab" data-t="mx" aria-selected="false" style="--a:#b45309;--b:#eab308">MCX</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -6717,6 +6795,10 @@ function render(stocks) {
     const n5 = document.createElement("section"); n5.className = "stock"; n5.id = "n5"; n5.style.cssText = "--a:#0f766e;--b:#2563eb";
     n5.innerHTML = '<div id="n5body"></div>'; views.appendChild(n5);
   }
+  if (!document.getElementById("mx")) {
+    const mx = document.createElement("section"); mx.className = "stock"; mx.id = "mx"; mx.style.cssText = "--a:#b45309;--b:#eab308";
+    mx.innerHTML = '<div id="mxbody"></div>'; views.appendChild(mx);
+  }
   if (!document.getElementById("sw")) {
     const sw = document.createElement("section"); sw.className = "stock"; sw.id = "sw"; sw.style.cssText = "--a:#0f766e;--b:#1d4ed8";
     sw.innerHTML = '<div id="swbody"></div>'; views.appendChild(sw);
@@ -6727,7 +6809,7 @@ function render(stocks) {
   }
   if (!document.getElementById("op")) {
     const op = document.createElement("section"); op.className = "stock"; op.id = "op"; op.style.cssText = "--a:#7c3aed;--b:#db2777";
-    op.dataset.ctk = SYMKEY; op.innerHTML = '<div class="znhead"><div><h2>OPTIONS</h2><span>Nifty chart with the sheet symbols, symbol guide and strategies</span></div><div class="znpills"><span>Smiley symbols</span><span>Strategies</span></div></div><div id="opstrip"></div><div class="chartslot"></div><div id="opbody"></div>'; views.appendChild(op);
+    op.dataset.ctk = SYMKEY; op.innerHTML = '<div class="znhead"><div><h2>OPTIONS</h2><span>Nifty chart with the sheet symbols, symbol guide and strategies</span></div><div class="znpills"><span>Smiley symbols</span><span>Strategies</span></div></div><div id="opstrip"></div><div id="opoi"></div><div class="chartslot"></div><div id="opbody"></div>'; views.appendChild(op);
   }
   if (!document.getElementById("rm")) {
     const rm = document.createElement("section"); rm.className = "stock"; rm.id = "rm"; rm.style.cssText = "--a:#7c3aed;--b:#db2777";
