@@ -1343,7 +1343,7 @@ function opN50() { const MM = typeof MARKET !== "undefined" ? MARKET : null; ret
 function opStripHTML() {
   const MM = typeof MARKET !== "undefined" ? MARKET : null, n50 = opN50();
   if (!n50) return '<p class="note">Waiting for the Nifty prices from your Worker...</p>';
-  let h = niftySessionHTML({p: +n50.last}); h = h.replace('<div class="tiles">', '<div class="tiles"><div class="tile' + tileCls(+n50.pct) + '"><small>Nifty 50</small><b>' + fmt(+n50.last, 2) + "</b><span>" + (isFinite(+n50.pct) ? pct(+n50.pct, 2) + " today" : "live") + "</span></div>"); const vix = ((MM && MM.indices) || []).find(x => String(x.name).toUpperCase() === "INDIA VIX");
+  let h = niftySessionHTML({p: +n50.last}); h = h.replace('<div class="tiles">', '<div class="tiles"><div class="tile' + tileCls(+n50.pct) + '"><small>Nifty 50</small><b>' + fmt(+n50.last, 2) + "</b><span>" + (isFinite(+n50.pct) ? pct(+n50.pct, 2) + " today" : "live") + "</span>" + (isFinite(+n50.prev) && +n50.prev > 0 ? "<span>Prev " + fmt(+n50.prev, 2) + "</span>" : "") + "</div>"); h = h.replace(/<div class="tile"><small>Previous close<\/small>.*?<\/div>/, ""); const vix = ((MM && MM.indices) || []).find(x => String(x.name).toUpperCase() === "INDIA VIX");
   if (vix && isFinite(+vix.last)) h = h.replace(/<\/div>\s*$/, '<div class="tile' + tileCls(+vix.pct) + '"><small>India VIX</small><b>' + fmt(+vix.last, 2) + "</b><span>" + (isFinite(+vix.pct) ? pct(+vix.pct, 2) + " today" : "") + "</span></div></div>");
   return h;
 }
