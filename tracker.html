@@ -3676,7 +3676,7 @@ function znSave() { try { localStorage.setItem("znOpt", JSON.stringify(ZO)); } c
 const znDate = s => { const p = String(s || "").split("-"); return p.length === 3 ? p[2] + "-" + p[1] + "-" + p[0] : "—"; };
 const znTfName = tf => (ZN_TFS.find(x => x[0] === tf) || [0, tf])[1];
 const znIntra = tf => tf !== "D" && tf !== "W";
-const ZN_IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "MCXGOLD", "MCXSILVER", "MCXCRUDE", "MCXNATGAS"], ZN_IDXN = {NIFTY: "Nifty 50", BANKNIFTY: "Bank Nifty", FINNIFTY: "Fin Nifty", MIDCPNIFTY: "Midcap Nifty", SENSEX: "Sensex", MCXGOLD: "MCX Gold", MCXSILVER: "MCX Silver", MCXCRUDE: "MCX Crude Oil", MCXNATGAS: "MCX Natural Gas"}, ZN_MCXTV = {MCXGOLD: "GOLD1!", MCXSILVER: "SILVER1!", MCXCRUDE: "CRUDEOIL1!", MCXNATGAS: "NATURALGAS1!"};
+const ZN_IDX = ["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "MCXGOLD", "MCXSILVER", "MCXCRUDE", "MCXNATGAS", "MCXCOPPER", "MCXALUM"], ZN_IDXN = {NIFTY: "Nifty 50", BANKNIFTY: "Bank Nifty", FINNIFTY: "Fin Nifty", MIDCPNIFTY: "Midcap Nifty", SENSEX: "Sensex", MCXGOLD: "MCX Gold", MCXSILVER: "MCX Silver", MCXCRUDE: "MCX Crude Oil", MCXNATGAS: "MCX Natural Gas", MCXCOPPER: "MCX Copper", MCXALUM: "MCX Aluminium"}, ZN_MCXTV = {MCXGOLD: "GOLD1!", MCXSILVER: "SILVER1!", MCXCRUDE: "CRUDEOIL1!", MCXNATGAS: "NATURALGAS1!", MCXCOPPER: "COPPER1!", MCXALUM: "ALUMINIUM1!"};
 const znTv = (sym, tf) => ZN_MCXTV[String(sym)] ? "https://www.tradingview.com/chart/?symbol=MCX%3A" + encodeURIComponent(ZN_MCXTV[String(sym)]) + (tf ? "&interval=" + tf : "") : "https://www.tradingview.com/chart/?symbol=" + (String(sym) === "SENSEX" ? "BSE" : "NSE") + "%3A" + encodeURIComponent(String(sym || "").replace(/[&-]/g, "_")) + (tf ? "&interval=" + tf : "");
 const znTvA = (sym, tf) => ' <a class="tvl" href="' + znTv(sym, tf) + '" target="_blank" rel="noopener" title="Open on TradingView">TV &#8599;</a>';
 const znP2 = n => String(n).padStart(2, "0");
@@ -5505,7 +5505,7 @@ const n5Paint = () => n5Api.open();
 /* ===== MCX TAB: gold, silver, crude oil and natural gas. Candles come from the Worker (global futures converted to MCX units), the TradingView link opens the real MCX contract. ===== */
 const mxApi = (function () {
   const E = esc, $e = s => document.querySelector(s);
-  const L = [["MCXGOLD", "MCX Gold", "Rs per 10 g", "MCX:GOLD1!"], ["MCXSILVER", "MCX Silver", "Rs per kg", "MCX:SILVER1!"], ["MCXCRUDE", "MCX Crude Oil", "Rs per barrel", "MCX:CRUDEOIL1!"], ["MCXNATGAS", "MCX Natural Gas", "Rs per mmBtu", "MCX:NATURALGAS1!"]];
+  const L = [["MCXGOLD", "MCX Gold", "Rs per 10 g", "MCX:GOLD1!"], ["MCXSILVER", "MCX Silver", "Rs per kg", "MCX:SILVER1!"], ["MCXCRUDE", "MCX Crude Oil", "Rs per barrel", "MCX:CRUDEOIL1!"], ["MCXNATGAS", "MCX Natural Gas", "Rs per mmBtu", "MCX:NATURALGAS1!"], ["MCXCOPPER", "MCX Copper", "Rs per kg", "MCX:COPPER1!"], ["MCXALUM", "MCX Aluminium", "Rs per kg", "MCX:ALUMINIUM1!"]];
   const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
   let OPEN = null, TF = "D", CH = null, PN = null, built = false, DAILY = {}, TS = 0, BUSY = false;
   const f2 = v => (isFinite(v) ? v.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
@@ -5561,9 +5561,9 @@ const mxApi = (function () {
   }
   function build() {
     const host = document.getElementById("mxbody"); if (!host || built) return; built = true;
-    host.innerHTML = '<div class="znhead"><div><h2>MCX</h2><span>Gold, silver, crude oil and natural gas</span></div><div class="znpills"><span>Chart inside the page</span><span>TradingView link</span><span>In Zone, 123, Cup &amp; Handle, SuperTrend and Combo</span></div></div>' +
+    host.innerHTML = '<div class="znhead"><div><h2>MCX</h2><span>Gold, silver, crude oil, natural gas, copper and aluminium</span></div><div class="znpills"><span>Chart inside the page</span><span>TradingView link</span><span>In Zone, 123, Cup &amp; Handle, SuperTrend and Combo</span></div></div>' +
       '<div class="two" id="mxgrid" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px"></div><p class="note" id="mxstat" style="margin:8px 0"></p><div id="mxpanel" style="margin-top:10px"></div>' +
-      '<p class="note">Tap a commodity to open its chart. These four are included in the Zone, 123, Cup &amp; Handle, SuperTrend and Combo screeners (look for MCXGOLD, MCXSILVER, MCXCRUDE and MCXNATGAS in their lists). Yahoo has no MCX feed, so the Worker converts COMEX gold and silver, WTI crude and Henry Hub gas to MCX units using the dollar-rupee rate. Indian duty and local premium are not included unless you set MCX_PREM in the Worker.</p>';
+      '<p class="note">Tap a commodity to open its chart. These four are included in the Zone, 123, Cup &amp; Handle, SuperTrend and Combo screeners (look for MCXGOLD, MCXSILVER, MCXCRUDE, MCXNATGAS, MCXCOPPER and MCXALUM in their lists). Yahoo has no MCX feed, so the Worker converts COMEX gold, silver and copper, WTI crude, Henry Hub gas and aluminium futures to MCX units using the dollar-rupee rate. Indian duty and local premium are not included unless you set MCX_PREM in the Worker.</p>';
     host.addEventListener("click", ev => {
       const t = ev.target; let b = t.closest("[data-mxtf]"); if (b) { TF = b.dataset.mxtf; panel(); drawChart(); return; }
       if (t.closest("[data-mxx]")) { OPEN = null; panel(); view(); return; }
@@ -6106,7 +6106,7 @@ const cuApi = (function () {
     if (ST.busy || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
     if (!force && ST.t && Date.now() - ST.t < 20 * 60e3) return;
     ST.busy = true; ST.err = "";
-    try { const need = n5Api.list().map(x => x.s).filter(s => force || !B[s] || Date.now() - B[s].t > 20 * 60e3); BTS = {}; await fetchBars(need); ST.t = Date.now(); if (!Object.keys(B).length) ST.err = "no candles came back from the Worker"; }
+    try { const need = ZN_IDX.concat(n5Api.list().map(x => x.s)).filter(s => force || !B[s] || Date.now() - B[s].t > 20 * 60e3); BTS = {}; await fetchBars(need); ST.t = Date.now(); if (!Object.keys(B).length) ST.err = "no candles came back from the Worker"; }
     catch (e) { ST.err = String((e && e.message) || e); }
     ST.busy = false; view(); backtest();
   }
