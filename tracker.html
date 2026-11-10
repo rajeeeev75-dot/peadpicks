@@ -48,7 +48,7 @@ main{max-width:900px;margin:0 auto;padding:0 16px 48px}
 .dockrow>td{padding:8px 4px !important;background:transparent !important;white-space:normal !important}.dockrow:hover{background:transparent !important}td:has(>[data-ixchart])>b:first-child,td>b[data-tcsec]{cursor:pointer}
 .tabs{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin;scrollbar-color:rgba(100,100,120,.55) transparent;margin:-34px -16px 6px;padding:6px 16px 12px;position:sticky;top:0;z-index:30;transition:background .2s,box-shadow .2s;cursor:grab}.tabs.drag{cursor:grabbing;user-select:none}.tabs::-webkit-scrollbar{height:9px}.tabs::-webkit-scrollbar-thumb{background:rgba(100,100,120,.5);border-radius:6px}.tabs::-webkit-scrollbar-thumb:hover{background:rgba(100,100,120,.8)}.tabs::-webkit-scrollbar-track{background:transparent}.tabs.stuck{background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 14px rgba(0,0,0,.12)}
 .tabs button{font:inherit;font-weight:600;padding:10px 16px;border:2px solid transparent;border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer;box-shadow:var(--shadow);white-space:nowrap;flex:0 0 auto;transition:transform .12s}.tabs button:hover{transform:translateY(-2px)}
-.acctbl{width:100%;border-collapse:collapse;font-size:.92rem}.acctbl th,.acctbl td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}.acctbl th{font-size:.78rem;color:#fff !important;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,.25)}.acctbl .num{text-align:right}.cbdet td{white-space:normal;word-break:break-word}.cbdet td:first-child{white-space:nowrap;vertical-align:top}.card{min-width:0;max-width:100%}.acctbl tr.base td{color:var(--mute);font-style:italic}.accg{color:var(--good);font-weight:700}.accb{color:var(--bad);font-weight:700}
+.acctbl{width:100%;border-collapse:collapse;font-size:.92rem}.acctbl th,.acctbl td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}.acctbl th{font-size:.78rem;color:#fff !important;font-weight:700;text-shadow:0 1px 1px rgba(0,0,0,.25)}.acctbl .num{text-align:right}.bmstar{cursor:pointer;color:var(--mute);font-size:1.05em;margin-right:6px;user-select:none}.bmstar.on{color:#f59e0b}.bmstar:hover{color:#f59e0b}.cbdet td{white-space:normal;word-break:break-word}.cbdet td:first-child{white-space:nowrap;vertical-align:top}.card{min-width:0;max-width:100%}.acctbl tr.base td{color:var(--mute);font-style:italic}.accg{color:var(--good);font-weight:700}.accb{color:var(--bad);font-weight:700}
 .tabs button[aria-selected="true"]{color:#fff;background:linear-gradient(120deg,var(--a),var(--b))}
 .side{margin:0 0 10px}.side details{background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:6px 12px}.side summary{cursor:pointer;font-weight:700;padding:6px 2px}.side .sl{display:flex;flex-wrap:wrap;gap:6px;padding:6px 0 8px}.side button{font:inherit;font-weight:600;font-size:.88rem;padding:7px 11px;border:2px solid transparent;border-radius:9px;background:var(--bg);color:var(--ink);cursor:pointer;text-align:left}.side button:hover{transform:translateX(2px)}.side button[aria-selected="true"]{color:#fff;background:linear-gradient(120deg,var(--a),var(--b))}.side .sh{font-size:.72rem;color:var(--mute);margin:0 0 4px}
 @media(min-width:1000px){main{max-width:1180px}.shell{display:grid;grid-template-columns:178px minmax(0,1fr);gap:18px;align-items:start}.side{position:sticky;top:78px;max-height:calc(100vh - 96px);overflow:auto;margin:0}.side summary{pointer-events:none;list-style:none}.side summary::-webkit-details-marker{display:none}.side .sl{flex-direction:column;flex-wrap:nowrap}.side button{width:100%}.mc{min-width:0}}
@@ -1789,6 +1789,7 @@ function overviewHTML(rows) {
   }).join("");
   let h = "<h2>Watchlist</h2><div class=\"wrap\"><table><tr><th>Stock</th><th>Price</th><th>Today</th><th>From 52w high</th><th>Level below</th><th>Level above</th><th>R:R</th><th>PEAD</th><th>Status</th></tr>" + body + "</table></div>";
   h += '<p class="note">Tap a row to open that stock. R:R is the distance to the next saved level above divided by the distance to the next one below. Status is a prompt to look closer: Review now means a support broke, a stop was hit or the move today was large; Watch means price is near a level, stretched, or above a broker target.</p>';
+  try { h += bmApi.html(); } catch (e) {}
   h += '<div id="cues">' + safeCues() + "</div>";
   h += '<div id="mkt">' + safeMarket() + "</div>";
   h += safeMacro();
@@ -5576,6 +5577,79 @@ const mxApi = (function () {
   return {open, list: () => L};
 })();
 const mxPaint = () => mxApi.open();
+/* ===== BOOKMARKS: tap the star next to any stock or commodity to keep it in a list on the Overview. Saved in this browser only. ===== */
+const bmApi = (function () {
+  const KEY = "bm_v1", E = esc; let LIST = [], OPEN = null, TF = "D", CH = null, DATA = {}, BUSY = false;
+  try { const v = JSON.parse(localStorage.getItem(KEY) || "[]"); if (Array.isArray(v)) LIST = v.filter(x => typeof x === "string"); } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(LIST)); } catch (e) {} };
+  const nameOf = s => { try { if (ZN_IDXN[s]) return ZN_IDXN[s]; const q = n5Api.list().find(x => x.s === s); if (q) return q.n; } catch (e) {} return ""; };
+  const f2 = v => (isFinite(v) ? v.toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+  const sg = v => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(2) + "%" : "-");
+  const TFS = [["D", "Daily"], ["60", "1H"], ["15", "15m"], ["5", "5m"]];
+  async function bars(sym, tf) {
+    const key = sym + "|" + tf; let o = IXC[key];
+    if (!o || Date.now() - o.t > 45e3) {
+      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + (tf === "D" ? "DF" : tf), {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 5) IXC[key] = o = {t: Date.now(), bars: rows.map(x => ({time: tf === "D" ? String(x[0]).slice(0, 10) : x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; } catch (e) {}
+    }
+    return o && o.bars;
+  }
+  async function load() {
+    if (BUSY || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
+    const need = LIST.filter(s => !DATA[s] || Date.now() - DATA[s].t > 180e3); if (!need.length) return; BUSY = true;
+    try { for (let i = 0; i < need.length; i += 12) { const ch = need.slice(i, i + 12);
+      const r = await fetch(MARKET_API_URL + "?bars=" + ch.map(encodeURIComponent).join(",") + "&tf=D", {cache: "no-store"}), j = await r.json();
+      ch.forEach(s => { const b = j && j.bars && j.bars[s]; if (b && b.length > 1) { const n = b.length, c = +b[n - 1][4], pv = +b[n - 2][4]; DATA[s] = {t: Date.now(), c, pct: (c / pv - 1) * 100, d: String(b[n - 1][0]).slice(0, 10)}; } }); } } catch (e) {}
+    BUSY = false; paint();
+  }
+  function html() {
+    let h = '<h2 class="hb hbn">&#11088; Bookmarks</h2>';
+    if (!LIST.length) return '<div id="bmbox">' + h + '<div class="card"><p class="note" style="margin:0">Tap the &#9734; next to any stock or commodity (in Zone, 123, Combo, Cup &amp; Handle, Nifty 500, MCX and more) to bookmark it here. Bookmarks are saved in this browser only.</p></div></div>';
+    h += '<div class="wrap"><table><tr><th>Stock</th><th>Price</th><th>Today</th><th></th></tr>' + LIST.map(s => { const d = DATA[s], nm = nameOf(s), on = OPEN === s;
+      return '<tr data-bmc="' + E(s) + '" style="cursor:pointer' + (on ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td><b>' + E(s) + '</b>' + (nm ? ' <span class="note" style="margin:0">' + E(nm) + "</span>" : "") + '</td><td class="num">' + (d ? f2(d.c) : "...") + '</td><td class="num" style="color:var(--' + (d && d.pct >= 0 ? "good" : "bad") + ')">' + (d ? sg(d.pct) : "") + '</td><td style="white-space:nowrap"><a class="tvl" href="' + znTv(s, "D") + '" target="_blank" rel="noopener">TV &#8599;</a> <button type="button" class="cbtn" data-bmrm="' + E(s) + '" title="Remove bookmark">&#9733; Remove</button></td></tr>'; }).join("") + "</table></div>";
+    if (OPEN && LIST.indexOf(OPEN) >= 0) h += '<div class="card" id="bmpanel"><div class="charttools" style="border:0;padding:0;margin-bottom:6px"><b>' + E(OPEN) + '</b> <span class="note" style="margin:0">' + E(nameOf(OPEN)) + '</span></div><div class="charttools">' + TFS.map(t => '<button type="button" class="cbtn" data-bmtf="' + t[0] + '" aria-pressed="' + (t[0] === TF) + '">' + t[1] + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, TF === "D" ? "D" : TF) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-bmx="1">Close</button></div><div id="bmcbox" style="height:380px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="bmnote" class="note" style="margin:6px 0 0"></div></div>';
+    return '<div id="bmbox">' + h + "</div>";
+  }
+  function paint() { const b = document.getElementById("bmbox"); if (!b) return; if (CH) { try { CH.remove(); } catch (e) {} CH = null; } b.outerHTML = html(); try { stars(); } catch (e) {} draw(); }
+  async function draw() {
+    const box = document.getElementById("bmcbox"); if (!OPEN || !box || box.dataset.d) return; box.dataset.d = "1";
+    const sym = OPEN, tf = TF, b = await bars(sym, tf), note = document.getElementById("bmnote");
+    if (OPEN !== sym || TF !== tf || document.getElementById("bmcbox") !== box) return;
+    const LW = window.LightweightCharts; if (!b || !LW) { if (note) note.textContent = "No chart data from your Worker. Use the TradingView link."; return; }
+    const c = colors(), intra = tf !== "D";
+    const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
+    candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    try { candle.createPriceLine({price: b[b.length - 1].close, color: "#f59e0b", lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: "Price " + f2(b[b.length - 1].close)}); } catch (e) {}
+    let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+    try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+    CH = chart; const n = b.length;
+    try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
+    if (note) note.textContent = intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.";
+  }
+  const toggle = s => { s = String(s || "").toUpperCase(); if (!s) return; const i = LIST.indexOf(s); if (i >= 0) { LIST.splice(i, 1); if (OPEN === s) OPEN = null; } else LIST.push(s); save(); paint(); load(); };
+  /* stars: added next to every stock row or tile that carries a symbol */
+  const SRC = [["[data-zrow]", "zrow"], ["[data-n5s]", "n5s"], ["[data-cus]", "cus"], ["[data-cbsym]", "cbsym"], ["[data-sts]", "sts"], ["tr.row[data-sym]", "sym"], ["[data-mxs]", "mxs"], ["tr.row[data-tk]", "tk"]];
+  function stars() {
+    SRC.forEach(a => document.querySelectorAll(a[0]).forEach(el => {
+      if (el.querySelector(".bmstar")) return; let s = String(el.dataset[a[1]] || ""); if (a[1] === "tk") s = s.split(":").pop().trim(); s = s.toUpperCase(); if (!s) return;
+      const on = LIST.indexOf(s) >= 0, sp = document.createElement("span"); sp.className = "bmstar" + (on ? " on" : ""); sp.dataset.bms = s; sp.title = on ? "Remove bookmark" : "Bookmark"; sp.textContent = on ? "★" : "☆";
+      const host = el.tagName === "TR" ? el.querySelector("td") : (el.querySelector("div") || el); if (host) host.insertBefore(sp, host.firstChild);
+    }));
+    document.querySelectorAll(".bmstar").forEach(sp => { const on = LIST.indexOf(sp.dataset.bms) >= 0; sp.classList.toggle("on", on); const t = on ? "★" : "☆"; if (sp.textContent !== t) sp.textContent = t; });
+  }
+  document.addEventListener("click", ev => {
+    const t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
+    const st = t.closest(".bmstar"); if (st) { ev.preventDefault(); ev.stopPropagation(); toggle(st.dataset.bms); return; }
+    const rm = t.closest("[data-bmrm]"); if (rm) { ev.preventDefault(); ev.stopPropagation(); toggle(rm.dataset.bmrm); return; }
+    const tf = t.closest("[data-bmtf]"); if (tf) { TF = tf.dataset.bmtf; paint(); return; }
+    if (t.closest("[data-bmx]")) { OPEN = null; paint(); return; }
+    if (t.closest("a") || t.closest("[data-ind]") || t.closest("#bmpanel")) return;
+    const row = t.closest("[data-bmc]"); if (row) { const s = row.dataset.bmc; OPEN = OPEN === s ? null : s; paint(); }
+  }, true);
+  let raf = 0; try { new MutationObserver(() => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; try { stars(); const bx = document.getElementById("bmcbox"); if (bx && !bx.dataset.d) draw(); if (document.getElementById("bmbox") && LIST.length) load(); } catch (e) {} }); }).observe(document.body, {childList: true, subtree: true}); } catch (e) {}
+  setInterval(() => { try { if (!document.hidden && LIST.length && typeof current !== "undefined" && current === "ov") { load(); } } catch (e) {} }, 60e3);
+  return {html, has: s => LIST.indexOf(s) >= 0, list: () => LIST.slice()};
+})();
 /* ===== SUPERTREND SCREENER TAB: three SuperTrends vote on 15-minute bars, a slower SuperTrend regime filter must agree, plus a replay back-test of the same rules ===== */
 const stApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
