@@ -2998,6 +2998,29 @@ function ideasHTML(M, mc, opt) {
 const GIFT_CLOSE_MANUAL = {"2026-10-27": 22749.5, "2026-10-28": 22733};
 // tile colour by direction: green up, red down, grey flat (India VIX follows its own price direction like every other box)
 function tileCls(p) { return isFinite(p) ? (p > 0.05 ? " up" : p < -0.05 ? " dn" : " fl") : ""; }
+/* ===== US STOCKS AND INDIAN ADRs (Overview) ===== */
+const usApi = (function () {
+  let D = null, busy = false, t = 0, err = "";
+  const num = (v, d) => (isFinite(+v) ? (+v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d}) : "-");
+  async function load() {
+    if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL || busy || Date.now() - t < 120e3) return;
+    busy = true; t = Date.now();
+    try { const r = await fetch(MARKET_API_URL + "?us=1", {cache: "no-store"}), j = await r.json(); if (j && Array.isArray(j.us) && j.us.length) { D = j.us; err = ""; } else err = (j && j.error) || "no data yet. Redeploy the Worker (worker_v43.js)"; }
+    catch (e) { err = String((e && e.message) || e); }
+    busy = false; const b = document.getElementById("usbox"); if (b) b.innerHTML = html();
+  }
+  function html() {
+    if (!D) return '<h2>US stocks and Indian ADRs</h2><p class="note">' + (err ? "Not loaded: " + esc(err) : "Loading...") + "</p>";
+    const groups = []; D.forEach(x => { if (groups.indexOf(x.group) < 0) groups.push(x.group); });
+    const mc = v => (isFinite(v) ? '<span class="num" style="color:var(--' + (v >= 0 ? "good" : "bad") + ')">' + pct(v, 2) + "</span>" : '<span class="num">-</span>');
+    const adr = D.filter(x => /^Indian/.test(x.group) && x.sym !== "INDA" && isFinite(+x.pct)); let tile = "";
+    if (adr.length) { const a = adr.reduce((q, x) => q + +x.pct, 0) / adr.length; tile = '<div class="tiles"><div class="tile' + tileCls(a) + '"><small>Indian ADRs (average)</small><b>' + pct(a, 2) + "</b><span>" + adr.length + " ADRs · " + (a > 0.5 ? "positive cue for these stocks" : a < -0.5 ? "negative cue for these stocks" : "flat cue") + "</span></div></div>"; }
+    const tm = D.map(x => x.time).filter(Boolean).sort().pop();
+    return "<h2>US stocks and Indian ADRs</h2>" + tile + '<div class="two">' + groups.map(g => '<div class="card" style="margin:0"><b>' + esc(g) + "</b>" + tbl(["Stock", "Price (US$)", "Change"], D.filter(x => x.group === g).map(x => ['<a class="tvl" href="https://www.tradingview.com/symbols/' + encodeURIComponent(x.sym) + '/" target="_blank" rel="noopener">' + esc(x.name) + "</a>", '<span class="num">' + num(x.last, 2) + "</span>", mc(+x.pct)])) + "</div>").join("") + "</div>" +
+      '<p class="note">US prices come from Yahoo Finance through your Worker, delayed up to about 15 minutes' + (tm ? ", latest quote " + esc(tm.replace("T", " ").slice(0, 16)) + " UTC" : "") + ". The US market trades about 7:00 pm to 2:30 am India time (it shifts by an hour with US daylight saving), so during the Indian day these show the last US close. An ADR is a US-traded share of an Indian company (one ADR can represent more or fewer shares than the NSE share), so compare the change in percent, not the price.</p>";
+  }
+  return {load, html};
+})();
 function cuesHTML(M, mc, idx) {
   const n50 = idx("NIFTY 50"), vix = idx("INDIA VIX"), g = M.gift, gl = M.global || [];
   let h = "";
@@ -3402,9 +3425,11 @@ function marketHTML() {
 }
 function safeCues() {
   try {
-    if (typeof MARKET === "undefined" || !MARKET) return '<div id="fdbox">' + fiiHTML() + "</div>"; const M = MARKET, idx = n => (M.indices || []).find(x => String(x.name).toUpperCase() === n);
+    try { usApi.load(); } catch (e) {}
+    const usb = (() => { try { return '<div id="usbox">' + usApi.html() + "</div>"; } catch (e) { return ""; } })();
+    if (typeof MARKET === "undefined" || !MARKET) return '<div id="fdbox">' + fiiHTML() + "</div>" + usb; const M = MARKET, idx = n => (M.indices || []).find(x => String(x.name).toUpperCase() === n);
     const mc = v => (isFinite(v) ? '<span class="num" style="color:var(--' + (v >= 0 ? "good" : "bad") + ')">' + pct(v, 2) + "</span>" : '<span class="num">—</span>');
-    return cuesHTML(M, mc, idx);
+    return cuesHTML(M, mc, idx) + usb;
   } catch (e) { return ""; }
 }
 function safeMarket() { try { return marketHTML(); } catch (e) { return '<h2>Market today</h2><div class="card"><p class="note" style="margin:0">Problem drawing market data: ' + esc(e && e.message) + "</p></div>"; } }
