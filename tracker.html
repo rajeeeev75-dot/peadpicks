@@ -1479,6 +1479,9 @@ function nzSignals() {
   for (let back = 0; back <= 8; back++) { const D = ksPlus(today, -back), list = symList(D); if (list && list.length) out.push({date: D, list}); }
   return out;
 }
+const nzKey = t => String(t).replace(/<[^>]*>/g, "").replace(/\d+/g, "#");
+const nzHidGet = () => { try { return JSON.parse(localStorage.getItem("nzHide") || "{}") || {}; } catch (e) { return {}; } };
+document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-nzh]") : null; if (!b) return; const H = nzHidGet(), k = b.dataset.nzh; if (H[k]) delete H[k]; else H[k] = 1; try { localStorage.setItem("nzHide", JSON.stringify(H)); } catch (e) {} ksPaint(); });
 function nzPanel() {
   const today = ksIST(), sigs = nzSignals(), bars = ksBars(), S = KS.step || 100, HG = 400, n50 = opN50(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars && bars.length ? bars[bars.length - 1].close : NaN);
   const byDate = {}; sigs.forEach(g => { byDate[g.date] = g.list; });
@@ -1488,7 +1491,8 @@ function nzPanel() {
   const strikeFor = (D, d) => { const b = barOf(D); return b ? (d === 1 ? ksFloor(b.low - KS.buf, S) : ksCeil(b.high + KS.buf, S)) : NaN; };
   const chip = e => '<span class="kspill ' + (e.d === 1 ? "pe" : "ce") + '" style="font-size:.9rem">' + (SYM_EMO[e.k] || e.k) + (e.d === 1 ? " &uarr;" : " &darr;") + "</span>";
   const status = D => { const nd = nextTD(D), ex = expOf(D); return ksDow(D) === 2 ? '<span class="ksbad">Ignored: the signal came on an expiry day</span>' : nd > today ? "Starts " + ksDayName(nd) : nd === today ? '<span class="ksok">ACTIVE TODAY</span>' : "Still alive (till " + ksDayName(ex) + ")"; };
-  const card = (cls, title, st, body) => '<div class="kscard ' + cls + '" style="margin-bottom:12px"><div class="kshd"><b>' + title + "</b><small>" + st + '</small></div><div class="kssec">' + body + "</div></div>";
+  const HID = nzHidGet();
+  const card = (cls, title, st, body) => { const key = nzKey(title); if (HID[key]) return ""; return '<div class="kscard ' + cls + '" style="margin-bottom:12px"><div class="kshd"><b>' + title + "</b><small>" + st + ' <button type="button" class="cbtn" data-nzh="' + key + '" style="font-size:.78rem;padding:2px 8px;margin-left:6px">Hide</button></small></div><div class="kssec">' + body + "</div></div>"; };
   const hero = (d, strike, facts) => { const c = d === 1 ? "pe" : "ce"; return '<div class="kshero ' + c + '"><div><div class="kssell">SELL</div><div class="ksstrike">' + (isFinite(strike) ? fmt(strike, 0) : "—") + '</div></div><span class="kspill ' + c + '">' + (d === 1 ? "PE" : "CE") + '</span><div class="ksfacts">' + facts + "</div></div>"; };
   const hedge = (d, strike, pts, same) => (isFinite(strike) ? '<div class="kshedge">&#128737; <b>Hedge: BUY ' + fmt(d === 1 ? strike - pts : strike + pts, 0) + " " + (d === 1 ? "PE" : "CE") + "</b> (" + pts + " points further out" + (same ? ", same expiry and same minute" : "") + ")</div>" : "");
   const para = t => '<div style="margin-top:10px;font-size:1rem;line-height:1.5">' + t + "</div>";
@@ -1597,6 +1601,8 @@ function nzPanel() {
     list.filter(e => e.k !== "S" && e.k !== "F" && SM.indexOf(e.k) < 0 && e.k !== "BS" && e.k !== "BP" && e.k !== "AR" && e.k !== "OL" && e.k !== "OH").forEach(e => other.push(SYM_EMO[e.k] + " " + ksDayName(D)));
   });
   const sh = symSheetState === "error" ? '<p class="note" style="margin:8px 0 0">The Symbols sheet could not be read, so this uses the built-in history only.</p>' : "";
+  const hk = Object.keys(HID);
+  if (hk.length) html += '<p class="note" style="margin:8px 0">Hidden strategies (tap to show again): ' + hk.map(k => '<button type="button" class="cbtn" data-nzh="' + k + '" style="font-size:.82rem;padding:3px 10px;margin:2px">' + k + " &#10005;</button>").join(" ") + "</p>";
   return '<h2 class="hb hbn">&#128197; Today\'s strategy (from your symbols)</h2><div class="card">' + (html || '<p style="margin:0">No signal in the last few days that has a coded strategy, so nothing is active.</p>') +
     '<p class="note" style="margin:8px 0 0">Symbols come from the Symbols tab of your sheet (Date, Up or Down, then the symbols: Star, Ball, Violet, Yellow, Bro, Red, Blue, the Bull Point 0 to 8, O=L, O=H and the Green or Red Arrow as ARR). A signal is known at the close, so it is traded from the next trading day. Market holidays are not known here, so check the expiry date.</p>' +
     '<p class="note" style="margin:8px 0 0"><b>Not covered yet</b> because the sheet has no such symbol: White and Blue Arrow, Z and EYE, flags, and the market direction. Those strategies (Butterfly, SSS, Power Mode, One entry in a year and NZDP Types 2 and 3) still need those symbols added to the sheet.' + (other.length ? " Ice cream and highest bull or bear symbols have no rule here." : "") + "</p>" + sh + "</div>";
