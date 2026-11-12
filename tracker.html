@@ -577,8 +577,9 @@ function optionsHTML(O, label, errTxt, fold) {
     '<div class="tile up"><small>Top put OI (support)</small><b>' + (s1 ? n0(s1.strike) : "—") + "</b><span>" + (s1 ? "OI " + n0(s1.oi) + " (" + sg(s1.chg) + ")" : "") + "</span></div>" +
     (isFinite(+O.atmIv) ? '<div class="tile"><small>At-the-money IV</small><b>' + (+O.atmIv).toFixed(1) + '%</b><span>strike ' + n0(O.atm) + "</span></div>" : "") + "</div>";
   if (isFinite(+O.ceOi) && isFinite(+O.peOi)) {
-    const tot = (lab, oi, ch, cls) => { oi = +oi; ch = +ch; const base = oi - ch, p = isFinite(ch) && base > 0 ? ch / base * 100 : NaN; return '<div class="tile ' + cls + '"><small>' + lab + '</small><b>' + n0(oi) + "</b><span>" + (isFinite(ch) ? "net change " + sg(ch) + (isFinite(p) ? " (" + (p > 0 ? "+" : "") + p.toFixed(2) + "%)" : "") : "") + "</span></div>"; };
-    h += '<div class="tiles">' + tot("Total call OI (all strikes)", O.ceOi, O.ceChg, "dn") + tot("Total put OI (all strikes)", O.peOi, O.peChg, "up") + (() => { const d = +O.peOi - +O.ceOi, dc = +O.peChg - +O.ceChg, cls = d > 0 ? "up" : d < 0 ? "dn" : "fl"; return '<div class="tile ' + cls + '"><small>Net OI (put minus call)</small><b>' + (d > 0 ? "Bullish bias" : d < 0 ? "Bearish bias" : "Balanced") + "</b><span>Difference " + sg(d) + (isFinite(dc) ? "<br>Today's change in difference " + sg(dc) : "") + "</span></div>"; })() + "</div>";
+    const LOT = (typeof KS !== "undefined" && +KS.lot) || 65, oq = v => { const a = Math.abs(v), t = a >= 1e7 ? (a / 1e7).toFixed(2) + " Cr" : a >= 1e5 ? (a / 1e5).toFixed(2) + " L" : a >= 1e3 ? (a / 1e3).toFixed(2) + " K" : String(Math.round(a)); return (v < 0 ? "-" : "") + t; }, oqs = v => (v > 0 ? "+" : "") + oq(v);
+    const tot = (lab, oi, ch, cls) => { oi = +oi; ch = +ch; const base = oi - ch, p = isFinite(ch) && base > 0 ? ch / base * 100 : NaN; return '<div class="tile ' + cls + '"><small>' + lab + '</small><b>' + oq(oi * LOT) + "</b><span>" + (isFinite(ch) ? "net change " + oqs(ch * LOT) + (isFinite(p) ? " (" + (p > 0 ? "+" : "") + p.toFixed(2) + "%)" : "") : "") + "<br>" + n0(oi) + " contracts (lot " + LOT + ")</span></div>"; };
+    h += '<div class="tiles">' + tot("Total call OI (all strikes)", O.ceOi, O.ceChg, "dn") + tot("Total put OI (all strikes)", O.peOi, O.peChg, "up") + (() => { const d = +O.peOi - +O.ceOi, dc = +O.peChg - +O.ceChg, dp = d / (+O.peOi + +O.ceOi) * 100, cls = d > 0 ? "up" : d < 0 ? "dn" : "fl"; return '<div class="tile ' + cls + '"><small>Net OI (put minus call)</small><b>' + (d > 0 ? "Bullish bias" : d < 0 ? "Bearish bias" : "Balanced") + "</b><span>Difference " + oqs(d * LOT) + (isFinite(dp) ? " (" + (dp > 0 ? "+" : "") + dp.toFixed(2) + "%)" : "") + (isFinite(dc) ? "<br>Today's change in difference " + oqs(dc * LOT) : "") + "</span></div>"; })() + "</div>";
   }
   const lvl = (arr) => (arr || []).map(x => [n0(x.strike), n0(x.oi), '<span class="num" style="color:var(--' + (x.chg >= 0 ? "good" : "bad") + ')">' + sg(x.chg) + "</span>"]);
   const oiTbls = tbl(["Call strike", "Call OI", "Change"], lvl(O.resistance)) + tbl(["Put strike", "Put OI", "Change"], lvl(O.support));
@@ -5111,7 +5112,7 @@ const cbApi = (function () {
   let F = {side: "Both", min: 3};
   try { const sv = JSON.parse(localStorage.getItem("cbF") || "null"); if (sv) F = Object.assign(F, sv); } catch (e) {}
   const save = () => { try { localStorage.setItem("cbF", JSON.stringify(F)); } catch (e) {} };
-  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["news", "News impact (last 2 days)", "News"], ["mkt", "Market direction agrees", "Mkt"]];
+  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["st", "SuperTrend (daily signal + 15m trigger)", "SuperTrend"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["news", "News impact (last 2 days)", "News"], ["mkt", "Market direction agrees", "Mkt"]];
   const px2 = v => (isFinite(v) ? fmt(v, v < 100 ? 2 : 1) : "-");
   const sgn = (v, d = 1) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) + "%" : "-");
   let PT = null, last = 0, LASTR = {};
@@ -5136,6 +5137,7 @@ const cbApi = (function () {
     } catch (e) {}
     let rmTf = "";
     try { const g = rmApi.signals(); rmTf = g.tf; Object.keys(g.m).forEach(sym => { const x = g.m[sym]; give(sym, x.dir, "rm", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 " + (x.st === "fresh" ? x.kind.toLowerCase() + " " + x.age + " bars ago" : "armed") + " (" + g.tf + ")", isFinite(x.score) ? String(Math.round(x.score)) : "", Object.assign({tf: g.tf}, x)); }); } catch (e) {}
+    try { const m = sdApi.signals(); Object.keys(m).forEach(sym => { const x = m[sym]; give(sym, x.side, "st", "SuperTrend " + (x.side === 1 ? "BUY" : "SELL") + ": daily Ladder signal with a 15m trigger (" + (x.state === "trigger" ? "trigger on the last bar" : "in trade") + ")", x.side === 1 ? "BUY" : "SELL", x); }); } catch (e) {}
     const tcm = {}, tcs = {};
     try { const sn = tcApi.season(14); Object.keys(sn.m).forEach(sym => { const x = sn.m[sym]; tcm[sym] = x; tcs[x.sec] = sn.sm[x.sec]; if (x.prob >= 60 && x.avg > 0) give(sym, 1, "tc", "Rose in " + Math.round(x.prob) + "% of past years over the next 2 weeks", Math.round(x.prob) + "%", {x}); else if (x.prob <= 40 && x.avg < 0) give(sym, -1, "tc", "Fell in " + Math.round(100 - x.prob) + "% of past years over the next 2 weeks", Math.round(100 - x.prob) + "%", {x}); }); } catch (e) {}
     const pdm = {};
@@ -5154,7 +5156,7 @@ const cbApi = (function () {
     return {rows, mb, rmTf};
   }
   function load(force) {
-    try { znLoad(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {}
+    try { znLoad(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { sdApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {}
     last = Date.now();
   }
 
@@ -5169,7 +5171,7 @@ const cbApi = (function () {
     };
     if (d.idea && d.idea.x && d.idea.x.lv) { const v = d.idea.x.lv; add("Trade idea trigger", v.t, v.st, v.tg, "levels from the Intraday screen"); }
     if (d.zone && d.zone.z) { const z = d.zone.z; add("Zone proximal line", z.prox, z.dist, z.target, (z.type === "D" ? "demand " : "supply ") + z.pat + " zone, " + d.zone.tf); }
-    if (d.st && isFinite(d.st.stop)) { const x = d.st, r = Math.abs(x.close - x.stop); add("SuperTrend 15m, exit at 2R", x.close, x.stop, x.close + (x.side === 1 ? 2 : -2) * r, "now, stop at the slowest line"); }
+    if (d.st && isFinite(d.st.stop)) { const x = d.st; add("SuperTrend daily + 15m, exit at 2R", x.entry, x.stop, x.target, "daily Ladder signal with a 15m trigger"); }
     if (d.rm && d.rm.plan) { const p = d.rm.plan; const ar = d.rm.st === "armed", nm = ar ? "123 trigger at the neckline" : "123 plan"; add(nm + ", exit at T1 (1R)", p.entry, p.stop, p.t1, (ar ? "armed: enters on a close beyond the neckline, stop beyond point 3, " : "signal bar close, ") + d.rm.tf); add(nm + ", exit at T2", p.entry, p.stop, p.t2, "measured move or 2R, " + d.rm.tf); }
     if (daily && daily.length > 40) {
       const n0 = daily.length, today = new Date().toLocaleDateString("en-CA", {timeZone: "Asia/Kolkata"}), nb = daily[n0 - 1].time >= today && n0 > 1 ? n0 - 1 : n0, b = daily.slice(0, nb), n = b.length;
@@ -5273,7 +5275,7 @@ const cbApi = (function () {
     if (d.idea) { const x = d.idea.x; L.push(row("Trade idea", "Score " + x.sc + "/10" + (x.lv ? ". Trigger " + px2(x.lv.t) + ", stop " + px2(x.lv.st) + ", target " + px2(x.lv.tg) : ""))); }
     if (d.oi) { L.push(row("OI spurt", (r.side === 1 ? "Long" : "Short") + " build-up: open interest " + sgn(+d.oi.r.pct, 0) + " (change " + Math.round(+d.oi.r.chg).toLocaleString("en-IN") + "), price " + sgn(+d.oi.q.pct, 1))); }
     if (d.zone) { const z = d.zone.z; L.push(row("Zone", (z.type === "D" ? "Demand" : "Supply") + " zone (" + z.pat + ") on " + d.zone.tf + ": proximal " + px2(z.prox) + ", distal " + px2(z.dist) + ", target " + px2(z.target) + ", strength " + Math.round(z.prob) + "%, " + Math.abs(d.zone.away).toFixed(1) + "% from price. Active on: " + d.zone.tfs.join(", "))); }
-    if (d.st) { const x = d.st; L.push(row("SuperTrend", (x.side === 1 ? "LONG" : "SHORT") + " on 15m since " + x.when + " (" + x.bars + " bars), " + x.votes + " of 3 lines agree. Entry " + px2(x.entry) + ", now " + px2(x.close) + " (" + sgn(x.pl, 2) + "), stop " + px2(x.stop))); }
+    if (d.st) { const x = d.st; L.push(row("SuperTrend", (x.side === 1 ? "BUY" : "SELL") + ": daily Ladder signal on " + x.sigDate + " (" + x.since + " days ago), 15m trigger " + (x.state === "trigger" ? "on the last bar" : "fired, in trade") + ". Entry " + px2(x.entry) + ", now " + px2(x.ref) + ", stop " + px2(x.stop) + ", target " + px2(x.target) + ".")); }
     if (d.rm) { const x = d.rm; L.push(row("123 reversal", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 on " + x.tf + ", " + (x.st === "fresh" ? x.kind.toLowerCase() + " signal " + x.age + " bars ago" : "armed, waiting for the neckline") + (isFinite(x.score) ? ", quality " + Math.round(x.score) + "/100" : "") + (x.plan ? (x.st === "armed" ? ". Trigger plan (on a close beyond the neckline): entry " : ". Plan: entry ") + px2(x.plan.entry) + ", stop " + px2(x.plan.stop) + ", T1 " + px2(x.plan.t1) + ", T2 " + px2(x.plan.t2) : ""))); }
     if (tc) { const sec = r.tcSec; L.push(row("Season", "Over the next 2 weeks it rose in " + Math.round(tc.prob) + "% of " + tc.n + " past years, average " + sgn(tc.avg * 100, 1) + (tc.sec ? ". " + E(tc.sec) + " sector: " + (sec ? Math.round(sec.prob) + "% of " + sec.n + " years" : "n/a") : ""))); }
     if (d.news) { const o = d.news.o; L.push(row("News", o.used.slice(0, 4).map(u => (u.sc > 0 ? "&#9650; " : "&#9660; ") + E(u.x.title) + ' <small class="note" style="margin:0">(' + E([u.x.tag, ageText(u.x.date)].filter(Boolean).join(", ")) + ")</small>").join("<br>") + '<br><small class="note" style="margin:0">Net impact ' + (o.net > 0 ? "+" : "") + o.net + " (headlines of the last 2 days scored by keywords; at least 2 needed to count as a screen)</small>")); }
@@ -5367,7 +5369,7 @@ const cbApi = (function () {
     const rows = R.rows.filter(r => r.score >= F.min && (F.side === "Both" || (F.side === "Long" ? r.side === 1 : r.side === -1)));
     const st = (name, n) => name + (n ? " <b>" + n + "</b>" : " <i>waiting</i>");
     const cnt = k => R.rows.filter(r => r.has[k]).length;
-    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · " + st("News", cnt("news")) + " · Market: " + E(R.mb.t);
+    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("SuperTrend", cnt("st")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · " + st("News", cnt("news")) + " · Market: " + E(R.mb.t);
     let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th>' + SRC.map(x => '<th title="' + E(x[1]) + '" style="text-align:center">' + E(x[2]) + "</th>").join("") + '</tr></thead><tbody>';
     h += rows.length ? rows.slice(0, 80).map((r, i) => {
       const q = r.q, chg = q ? +q.pct : NaN, sel = SEL && SEL.sym === r.sym;
@@ -5844,8 +5846,7 @@ const sdApi = (function () {
         if (flip && beyond && kd[j] >= 0 && L.pos[kd[j]] === side) { found = j; break; } }
       if (found < 0) { out.noTrig++; continue; }
       const eb = found + 1, ent = B[eb].open, tr2 = runTrade(B, eb, side, ent, risk0, dayEndFn(side));
-      const grid = {}; [1, 1.5, 2].forEach(sl => [1.5, 2, 3].forEach(rr => { grid[sl + "|" + rr] = runTrade(B, eb, side, ent, sl * L.at[s], dayEndFn(side), rr).R; }));
-      out.new15.push(Object.assign({sym, side, date: dd[s], entry: ent, when: B[eb].time, risk: risk0, f: feat(found, side, kd[found] - s), grid}, tr2));
+      out.new15.push(Object.assign({sym, side, date: dd[s], entry: ent, when: B[eb].time, risk: risk0, f: feat(found, side, kd[found] - s)}, tr2));
     }
     /* live view: a daily signal that is active now */
     const side = out.pos; if (side) { const since = k - (side === 1 ? lastBuy : lastSell), t = out.new15.length ? out.new15[out.new15.length - 1] : null, sig = side === 1 ? lastBuy : lastSell;
@@ -5881,8 +5882,9 @@ const sdApi = (function () {
   }
   const schedule = () => { if (PT) return; PT = setTimeout(() => { PT = null; try { if (typeof current !== "undefined" && current === "sd") view(); } catch (e) {} }, 500); };
   const pf = v => (v === Infinity ? "inf" : isFinite(v) ? v.toFixed(2) : "-");
-  const XFL = [["long", "Long only"], ["vol", "Volume 1.5x"], ["vwap", "With VWAP"], ["early", "Day 1 only"], ["am", "Before 12:00"]];
+  const XFL = [["long", "Long only"]];
   let XF = {}; try { XF = JSON.parse(localStorage.getItem("sdXF") || "{}") || {}; } catch (e) {}
+  if (XF.long === undefined) XF.long = true;
   const passOne = (k, c) => { const f = c.f || {}; return k === "long" ? c.side === 1 : k === "vol" ? f.vr >= 1.5 : k === "vwap" ? f.aboveV === true : k === "early" ? f.early === true : f.am === true; };
   const passX = c => XFL.every(a => !XF[a[0]] || passOne(a[0], c));
   function statRow(lab, s, note) { return "<tr><td><b>" + lab + "</b>" + (note ? '<div class="note" style="margin:0">' + note + "</div>" : "") + '</td><td class="num">' + s.n + '</td><td class="num">' + (isFinite(s.win) ? s.win.toFixed(1) + "%" : "-") + '</td><td class="num" style="color:var(--' + (s.avg >= 0 ? "good" : "bad") + ')">' + (isFinite(s.avg) ? (s.avg > 0 ? "+" : "") + s.avg.toFixed(2) + "R" : "-") + '</td><td class="num">' + pf(s.pf) + '</td><td class="num">' + (isFinite(s.tot) ? (s.tot > 0 ? "+" : "") + s.tot.toFixed(1) + "R" : "-") + "</td></tr>"; }
@@ -5895,14 +5897,10 @@ const sdApi = (function () {
     let v = ""; if (N.n >= 1 && Bb.n >= 1) { const d = N.win - Bb.win, da = N.avg - Bb.avg, few = Math.min(N.n, Bb.n) < 30; v = "<b>Verdict:</b> " + (few ? "too few trades to conclude (need at least 30 in each row). " : "") + "B has a " + (d >= 0 ? "higher" : "lower") + " win rate by " + Math.abs(d).toFixed(1) + " points and an average result " + (da >= 0 ? "better" : "worse") + " by " + Math.abs(da).toFixed(2) + "R than A. "; }
     h += '<p class="note">' + v + "1R means the profit equals the stop distance (" + P.slm + " x daily ATR). Target " + P.rr + "R.</p>";
     /* extra filters, one at a time */
-    const rowsF = XFL.map(a => ({lab: a[1], st: sumStats(STATS.new15.filter(x => passOne(a[0], x)))})), ok = rowsF.filter(r => r.st.n >= 30).sort((a, b) => b.st.avg - a.st.avg)[0];
-    h += "<h3>2. Can extra filters improve B?</h3><div class=\"wrap\"><table>" + HD.replace("Test", "Filter added to B") + rowsF.map(r => statRow(r.lab, r.st)).join("") + "</table></div>";
-    h += '<p class="note">' + (ok ? "<b>Best single filter with 30+ trades:</b> " + ok.lab + " (" + (ok.st.avg >= 0 ? "+" : "") + ok.st.avg.toFixed(2) + "R average over " + ok.st.n + " trades). " : "No filter has 30+ trades yet. ") + "Picking the best of several filters on only 60 days is partly luck, so use the filter buttons above the list and judge them forward, not on this table alone.</p>";
-    /* stop and target grid */
-    const base = STATS.new15.filter(passX), gh = [1.5, 2, 3];
-    h += "<h3>3. Stop and target size (average R per trade" + (anyX ? ", with your filters" : "") + ")</h3><div class=\"wrap\"><table><tr><th>Stop \\ Target</th>" + gh.map(r => "<th>" + r + "R</th>").join("") + "</tr>" +
-      [1, 1.5, 2].map(sl => "<tr><td><b>" + sl + " x ATR</b></td>" + gh.map(rr => { const a = base.map(x => ({R: x.grid && x.grid[sl + "|" + rr]})).filter(x => isFinite(x.R)), st = sumStats(a); return '<td class="num" style="color:var(--' + (st.avg >= 0 ? "good" : "bad") + ')">' + (isFinite(st.avg) ? (st.avg > 0 ? "+" : "") + st.avg.toFixed(2) + "R" : "-") + "<div class=\"note\" style=\"margin:0\">" + (isFinite(st.win) ? st.win.toFixed(0) + "% win" : "") + "</div></td>"; }).join("") + "</tr>").join("") + "</table></div>";
-    h += '<h3>4. Daily Ladder alone, full history</h3><div class="wrap"><table>' + HD.replace("Test", "Signals") + statRow("All signals", A, "about 5 years, enter next morning") + statRow("Long only", LL) + statRow("Short only", SS) + "</table></div>";
+    const LO = sumStats(STATS.new15.filter(x => x.side === 1)), SO = sumStats(STATS.new15.filter(x => x.side === -1));
+    h += "<h3>2. Long side vs short side (B)</h3><div class=\"wrap\"><table>" + HD.replace("Test", "Side") + statRow("Long only", LO) + statRow("Short only", SO) + "</table></div>";
+    h += '<p class="note">Shorts lost money here and in the five year test, so the list shows long (BUY) signals only. Turn off "Long only" above to see SELL signals too.</p>';
+    h += '<h3>3. Daily Ladder alone, full history</h3><div class="wrap"><table>' + HD.replace("Test", "Signals") + statRow("All signals", A, "about 5 years, enter next morning") + statRow("Long only", LL) + statRow("Short only", SS) + "</table></div>";
     return h + '<p class="note">The 15m tests use only the last ~60 days of 15 minute candles, because Yahoo gives no more. Treat small samples as a hint, not proof.</p>';
   }
   function rowsLive() {
@@ -5929,7 +5927,7 @@ const sdApi = (function () {
   }
   function build() {
     const host = document.getElementById("sdbody"); if (!host || host.dataset.b) return; host.dataset.b = "1";
-    host.innerHTML = '<div class="znhead"><div><h2>Daily + 15m</h2><span>Daily SuperTrend Ladder sets the side; a 15 minute flip sets the entry. Only stocks with a 15m trigger are listed.</span></div><div class="znpills"><span>Stop ' + P.slm + ' x daily ATR</span><span>Target ' + P.rr + 'R</span><span>Entry window ' + P.maxDays + ' days</span></div></div><div id="sdlist"></div><p class="note">Rules: the daily Ladder (3 SuperTrends 8, 15, 22 at factor 2, filter 20 at factor 3, EMA 200, 2 bar confirm) decides BUY or SELL on closed daily bars. Then a 15 minute SuperTrend (10, 2) flip with price beyond the 15m EMA 50, between 09:30 and 14:45, gives the entry at the next bar open. One entry per signal. Exit on the stop, the target or when the daily signal ends. Tap a row for the chart. Extra filters: Volume 1.5x = trigger bar volume at least 1.5 times the last 20 bars; With VWAP = price on the right side of the day VWAP; Day 1 only = trigger on the first day after the daily signal; Before 12:00 = trigger before noon.</p><details id="sdd" style="margin-top:14px"><summary style="cursor:pointer;font-weight:700;padding:8px 0">Backtest: does the 15m entry help? (tap to open)</summary><div id="sdstats"></div></details>';
+    host.innerHTML = '<div class="znhead"><div><h2>SuperTrend</h2><span>Daily SuperTrend Ladder sets the side; a 15 minute flip sets the entry. Only stocks with a 15m trigger are listed.</span></div><div class="znpills"><span>Stop ' + P.slm + ' x daily ATR</span><span>Target ' + P.rr + 'R</span><span>Entry window ' + P.maxDays + ' days</span></div></div><div id="sdlist"></div><p class="note">Rules: the daily Ladder (3 SuperTrends 8, 15, 22 at factor 2, filter 20 at factor 3, EMA 200, 2 bar confirm) decides BUY or SELL on closed daily bars. Then a 15 minute SuperTrend (10, 2) flip with price beyond the 15m EMA 50, between 09:30 and 14:45, gives the entry at the next bar open. One entry per signal. Exit on the stop, the target or when the daily signal ends. Tap a row for the chart. Long only (on by default) hides SELL signals.</p><details id="sdd" style="margin-top:14px"><summary style="cursor:pointer;font-weight:700;padding:8px 0">Backtest: does the 15m entry help? (tap to open)</summary><div id="sdstats"></div></details>';
     host.addEventListener("click", ev => {
       const t = ev.target; let b = t.closest("[data-sdf]"); if (b) { FLT = b.dataset.sdf; view(); return; }
       b = t.closest("[data-sdx]"); if (b) { XF[b.dataset.sdx] = !XF[b.dataset.sdx]; try { localStorage.setItem("sdXF", JSON.stringify(XF)); } catch (e) {} view(); return; }
@@ -5940,7 +5938,7 @@ const sdApi = (function () {
   function levelsOf(sym) { const r = (RES || []).find(x => x.sym === sym); if (!r || !r.cur) return null; const c = r.cur, t = c.trade; if (!t) return null; return {entry: t.entry, stop: t.entry - c.side * c.risk, target: t.entry + c.side * P.rr * c.risk}; }
   function open() { build(); view(); load(); }
   setInterval(() => { try { if (typeof current !== "undefined" && current === "sd" && !document.hidden) load(); } catch (e) {} }, 120e3);
-  return {open, rows: rowsLive, signals: () => { const m = {}; rowsLive().forEach(c => { if (c.state === "trigger" || c.state === "in") m[c.sym] = {side: c.side, state: c.state}; }); return m; }};
+  return {open, load, rows: rowsLive, signals: () => { const m = {}; rowsLive().forEach(c => { if (passX(c) && (c.state === "trigger" || c.state === "in")) { const en = c.trade ? c.trade.entry : c.ref; m[c.sym] = {side: c.side, state: c.state, entry: en, stop: en - c.side * c.risk, target: en + c.side * P.rr * c.risk, ref: c.ref, sigDate: c.sigDate, since: c.since}; } }); return m; }};
 })();
 const sdPaint = () => sdApi.open();
 /* ===== SUPERTREND SCREENER TAB: three SuperTrends vote on 15-minute bars, a slower SuperTrend regime filter must agree, plus a replay back-test of the same rules ===== */
@@ -7126,7 +7124,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button><button role="tab" data-t="mx" aria-selected="false" style="--a:#b45309;--b:#eab308">MCX</button><button role="tab" data-t="sd" aria-selected="false" style="--a:#0e7490;--b:#16a34a">Daily + 15m</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + idxBtns + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="sd" aria-selected="false" style="--a:#0e7490;--b:#16a34a">SuperTrend</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button><button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button><button role="tab" data-t="mx" aria-selected="false" style="--a:#b45309;--b:#eab308">MCX</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
