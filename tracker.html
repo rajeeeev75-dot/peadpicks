@@ -1827,7 +1827,8 @@ function stockHTML(s, c, id) {
 }
 
 function overviewHTML(rows) {
-  const body = rows.map(r => {
+  const ovIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
+  const body = rows.filter(r => !ovIx(r)).map(r => {
     const s = r.s, c = r.c, st = status(r.A);
     return '<tr data-go="' + r.id + '"><td><b>' + esc(s.short) + '</b> <a class="tvl" href="' + tvUrl(s.ticker) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open on TradingView">&#8599;</a></td><td class="num">' + fmt(c.p) + '</td><td class="num">' + pct(c.chg) + '</td><td class="num">' +
       (isFinite(c.hi) && isFinite(c.p) ? pct((c.p / c.hi - 1) * 100) : "—") + '</td><td class="num">' +
