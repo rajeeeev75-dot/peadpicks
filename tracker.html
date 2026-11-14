@@ -5813,8 +5813,9 @@ const sdApi = (function () {
     let a = 0; for (let i = 0; i < n; i++) a += tr(i); a /= n; o[n - 1] = a; for (let i = n; i < N; i++) { a = (a * (n - 1) + tr(i)) / n; o[i] = a; } return o;
   }
   /* the daily Ladder, replayed bar by bar exactly like the Pine script. pos[i] is the position after the close of daily bar i */
-  function ladder(D) {
-    const N = D.length, s1 = superTrend(D, 8, 2), s2 = superTrend(D, 15, 2), s3 = superTrend(D, 22, 2), fl = superTrend(D, 20, 3), em = emaArr(D, 200), at = atrArr(D, 14);
+  function ladder(D, S) {
+    S = S || 1;
+    const N = D.length, s1 = superTrend(D, 8 * S, 2), s2 = superTrend(D, 15 * S, 2), s3 = superTrend(D, 22 * S, 2), fl = superTrend(D, 20 * S, 3), em = emaArr(D, 200 * S), at = atrArr(D, 14 * S);
     const pos = new Array(N).fill(0), buy = new Array(N).fill(false), sell = new Array(N).fill(false), propL = new Array(N).fill(false), propS = new Array(N).fill(false); let p0 = 0;
     for (let i = 0; i < N; i++) {
       const up = (s1.dir[i] === 1 ? 1 : 0) + (s2.dir[i] === 1 ? 1 : 0) + (s3.dir[i] === 1 ? 1 : 0), valid = s1.dir[i] !== 0 && s2.dir[i] !== 0 && s3.dir[i] !== 0 && fl.dir[i] !== 0;
@@ -5887,10 +5888,65 @@ const sdApi = (function () {
     }
     return out;
   }
+  /* ===== HOURLY HIGHER TIMEFRAME TEST: the same Ladder on 1-hour candles (lengths x S), optional 15m trigger, compared with the daily Ladder ===== */
+  const H60 = {}, HS = [2, 4, 7], HST = {busy: false, done: 0, total: 0, fail: 0, err: "", t: 0}; let HRES = null;
+  const hEnd = b => Math.min(b.time + 3600, Math.floor(b.time / 86400) * 86400 + 930 * 60);
+  function closedH(b) { const now = Date.now() / 1000 + 19800; let n = b.length; while (n && hEnd(b[n - 1]) > now) n--; return n === b.length ? b : b.slice(0, n); }
+  function analyseH(sym, S) {
+    const H0 = H60[sym]; if (!H0 || H0.length < 200 * S + 150) return null;
+    const H = closedH(H0), L = ladder(H, S), N = H.length, eH = H.map(hEnd), out = {long: [], base: [], new15: [], noTrig: 0};
+    for (let s = 0; s < N - 1; s++) { const side = L.buy[s] ? 1 : L.sell[s] ? -1 : 0; if (!side || !(L.at[s] > 0)) continue;
+      out.long.push(Object.assign({sym, side}, runTrade(H, s + 1, side, H[s + 1].open, P.slm * L.at[s], i => L.pos[i - 1] !== side))); }
+    const raw = B15[sym]; if (!raw || raw.length < 200) return out; const B = closed15(raw), M = B.length; if (M < 100) return out;
+    const st = superTrend(B, P.tAtr, P.tFac), em = emaArr(B, P.e15), kh = new Array(M).fill(-1); let q = 0;
+    for (let j = 0; j < M; j++) { while (q + 1 < N && eH[q + 1] <= B[j].time) q++; kh[j] = eH[q] <= B[j].time ? q : -1; }
+    const dayEnd = side => i => kh[i] >= 0 && kh[i] !== kh[i - 1] && L.pos[kh[i]] !== side;
+    for (let s = 0; s < N - 1; s++) { const side = L.buy[s] ? 1 : L.sell[s] ? -1 : 0; if (!side || eH[s] < B[0].time || !(L.at[s] > 0)) continue;
+      let j0 = -1; for (let j = 0; j < M; j++) if (B[j].time >= eH[s]) { j0 = j; break; } if (j0 < 0) continue;
+      const risk = P.slm * L.at[s]; out.base.push(Object.assign({sym, side}, runTrade(B, j0, side, B[j0].open, risk, dayEnd(side))));
+      let found = -1; for (let j = j0; j < M - 1 && B[j].time < eH[s] + P.maxDays * 86400; j++) { const mm = mod(B[j].time); if (!(mm >= 570 && mm < 885)) continue;
+        const flip = side === 1 ? st.dir[j] === 1 && st.dir[j - 1] !== 1 : st.dir[j] === -1 && st.dir[j - 1] !== -1, beyond = side === 1 ? B[j].close > em[j] : B[j].close < em[j];
+        if (flip && beyond && kh[j] >= 0 && L.pos[kh[j]] === side) { found = j; break; } }
+      if (found < 0) { out.noTrig++; continue; }
+      out.new15.push(Object.assign({sym, side}, runTrade(B, found + 1, side, B[found + 1].open, risk, dayEnd(side))));
+    }
+    return out;
+  }
+  function computeH() {
+    const R = {}; HS.forEach(S => { const all = {long: [], base: [], new15: [], noTrig: 0, syms: 0};
+      Object.keys(H60).forEach(sym => { let a = null; try { a = analyseH(sym, S); } catch (e) {} if (!a) return; all.syms++; all.long.push.apply(all.long, a.long); all.base.push.apply(all.base, a.base); all.new15.push.apply(all.new15, a.new15); all.noTrig += a.noTrig; }); R[S] = all; });
+    HRES = R;
+  }
+  async function loadH() {
+    if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL || HST.busy) return;
+    const uni = ZN_IDX.concat(ZN_FNO).filter(s => !H60[s]); if (!uni.length) { computeH(); schedule(); return; }
+    HST.busy = true; HST.done = 0; HST.total = uni.length; HST.fail = 0; HST.err = ""; schedule();
+    const jobs = []; for (let i = 0; i < uni.length; i += 6) jobs.push(uni.slice(i, i + 6)); let nx = 0;
+    const run = async () => { while (nx < jobs.length) { const ch = jobs[nx++];
+      try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=60X", {cache: "no-store"}), j = await r.json();
+        Object.keys(j.bars || {}).forEach(sy => { H60[sy] = j.bars[sy].map(x => ({time: +x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0})); });
+        HST.fail += (j.failed || []).length; if (j.error) HST.err = /use \?bars/i.test(j.error) ? "The Worker does not serve hourly history yet. Deploy worker_v44.js." : j.error;
+      } catch (e) { HST.fail += ch.length; HST.err = String((e && e.message) || e); }
+      HST.done += ch.length; schedule(); } };
+    await Promise.all([run(), run(), run()]);
+    HST.busy = false; HST.t = Date.now(); try { computeH(); } catch (e) { HST.err = "calculation failed: " + e.message; } schedule();
+  }
+  function hourlyHTML() {
+    let h = '<h3>4. Hourly higher timeframe (HTF) test</h3><p class="note">Replaces the daily Ladder with the same Ladder on 1-hour candles. Lengths are multiplied by x (2, 4 or 7); x7 is roughly the same time span as the daily setting. Stop, target and the 15m trigger are unchanged. Long side only.</p>';
+    h += '<div class="charttools"><button type="button" class="cbtn" data-sdh="1"' + (HST.busy ? " disabled" : "") + ">" + (HRES ? "Reload hourly data" : "Run hourly test") + "</button><span class=\"note\" style=\"margin:0 8px\">" + (HST.busy ? "Loading hourly candles " + HST.done + " of " + HST.total + "..." : HST.t ? "Done" + (HST.fail ? " (" + HST.fail + " failed)" : "") : "Loads about 2 years of hourly candles for every stock. Takes a minute or two.") + "</span></div>";
+    if (HST.err) h += '<p class="note" style="color:var(--bad)">' + E(HST.err) + "</p>";
+    if (!HRES) return h;
+    const lo = a => sumStats(a.filter(x => x.side === 1)), rows = [["Daily Ladder alone (reference)", lo(STATS ? STATS.long : []), "about 5 years"], ["Daily + 15m trigger (reference)", lo(STATS ? STATS.new15 : []), "last ~60 days"]];
+    HS.forEach(S => { const r = HRES[S]; if (!r) return; rows.push(["Hourly x" + S + " alone", lo(r.long), "about 2 years, " + r.syms + " stocks"], ["Hourly x" + S + " + 15m trigger", lo(r.new15), "last ~60 days; " + r.noTrig + " never triggered"]); });
+    h += '<div class="wrap"><table>' + HD.replace("Test", "Version") + rows.map(r => statRow(r[0], r[1], r[2])).join("") + "</table></div>";
+    const pick = (lab, a) => { const ok = a.filter(r => r[1].n >= 30 && isFinite(r[1].avg)); if (!ok.length) return lab + ": too few trades to compare (need at least 30 in a row). "; const best = ok.reduce((m, r) => (r[1].avg > m[1].avg ? r : m), ok[0]); return lab + ": best is <b>" + E(best[0]) + "</b> (" + (best[1].avg >= 0 ? "+" : "") + best[1].avg.toFixed(2) + "R average, " + best[1].win.toFixed(1) + "% wins). "; };
+    const v = "<b>Verdict.</b> " + pick("Signal alone", rows.filter(r => /alone/.test(r[0]))) + pick("With the 15m trigger", rows.filter(r => /15m trigger/.test(r[0]))) + (rows.some(r => /^Hourly/.test(r[0]) && r[1].n >= 30) ? "Switch the higher timeframe to hourly only if hourly wins in both groups. " : "");
+    return h + '<p class="note">' + v + "The two groups cover different periods, so they are compared separately. Small samples are a hint, not proof.</p>";
+  }
   function compute() {
     const res = [], all = {long: [], base: [], new15: [], noTrig: 0, syms: 0, w15: 0};
     Object.keys(DB).forEach(sym => { let a = null; try { a = analyse(sym); } catch (e) {} if (!a) return; res.push(a); all.syms++; if (B15[sym]) all.w15++; all.long.push.apply(all.long, a.long); all.base.push.apply(all.base, a.base); all.new15.push.apply(all.new15, a.new15); all.noTrig += a.noTrig; });
-    RES = res; STATS = all;
+    RES = res; STATS = all; if (HRES) { try { computeH(); } catch (e) {} }
   }
   async function load(force) {
     if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL || ST.busy) return;
@@ -5930,6 +5986,7 @@ const sdApi = (function () {
     h += "<h3>2. Long side vs short side (B)</h3><div class=\"wrap\"><table>" + HD.replace("Test", "Side") + statRow("Long only", LO) + statRow("Short only", SO) + "</table></div>";
     h += '<p class="note">Shorts lost money here and in the five year test, so the list shows long (BUY) signals only. Turn off "Long only" above to see SELL signals too.</p>';
     h += '<h3>3. Daily Ladder alone, full history</h3><div class="wrap"><table>' + HD.replace("Test", "Signals") + statRow("All signals", A, "about 5 years, enter next morning") + statRow("Long only", LL) + statRow("Short only", SS) + "</table></div>";
+    try { h += hourlyHTML(); } catch (e) {}
     return h + '<p class="note">The 15m tests use only the last ~60 days of 15 minute candles, because Yahoo gives no more. Treat small samples as a hint, not proof.</p>';
   }
   function rowsLive() {
@@ -5960,7 +6017,7 @@ const sdApi = (function () {
     host.addEventListener("click", ev => {
       const t = ev.target; let b = t.closest("[data-sdf]"); if (b) { FLT = b.dataset.sdf; view(); return; }
       b = t.closest("[data-sdx]"); if (b) { XF[b.dataset.sdx] = !XF[b.dataset.sdx]; try { localStorage.setItem("sdXF", JSON.stringify(XF)); } catch (e) {} view(); return; }
-      if (t.closest("[data-sdrl]")) { load(true); return; } if (t.closest("[data-sdmore]")) { SHOWN += 60; view(); return; }
+      if (t.closest("[data-sdh]")) { loadH(); return; } if (t.closest("[data-sdrl]")) { load(true); return; } if (t.closest("[data-sdmore]")) { SHOWN += 60; view(); return; }
       if (t.closest("a") || t.closest(".bmstar")) return; b = t.closest("[data-sdopen]"); if (b) { try { pcApi.open(b.dataset.sdopen, levelsOf(b.dataset.sdopen), "15"); } catch (e) {} }
     });
   }
