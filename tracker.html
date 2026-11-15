@@ -7143,9 +7143,22 @@ const ptApi = (function () {
     });
     if (ch) save();
   }
+  const starred = () => { try { return bmApi.list().slice(0, 30); } catch (e) { return []; } };
+  function starStrip() {
+    const el = $p("#ptstar"); if (!el) return; const L = starred();
+    el.innerHTML = '<div class="ptstarbar"><b>⭐ Starred stocks</b> <span class="note" style="margin:0">tap one to fill the form with its live price</span></div>' +
+      (L.length ? '<div class="ptchips2">' + L.map(sy => { const px = Q[sy]; return '<button type="button" class="ptstarchip" data-sym="' + esc(sy) + '"><b>' + esc(sy) + '</b><span>' + (isFinite(px) ? f2(px) : "…") + "</span></button>"; }).join("") + "</div>"
+        : '<div class="note" style="margin:4px 0 0">No starred stocks yet. Tap the ☆ next to any stock on the page and it will appear here.</div>');
+  }
+  function pickStar(sy) {
+    setKind("stock"); const a = $p("#ptsym"), e = $p("#ptentry"), q = $p("#ptqty"); if (a) a.value = sy; if (e) e.value = "";
+    const px = Q[sy]; MSG = sy + " selected" + (isFinite(px) ? ", live price " + f2(px) : "") + ". Enter the quantity (and stop and target), then press Add paper trade.";
+    draw(); if (q) { try { q.focus(); } catch (e2) {} }
+    if (!isFinite(px)) refresh(true);
+  }
   async function refresh(force) {
-    const syms = stocksOpen().map(t => t.sym);
-    await Promise.all([quotes(syms, force)].concat(syms.filter((s, i, a) => a.indexOf(s) === i).slice(0, 12).map(bars)));
+    const syms = stocksOpen().map(t => t.sym), st = starred();
+    await Promise.all([quotes(syms.concat(st), force)].concat(syms.filter((s, i, a) => a.indexOf(s) === i).slice(0, 12).map(bars)));
     auto(); draw();
   }
   const kindName = t => (t.kind === "stock" ? "Stock" : "Option");
@@ -7193,7 +7206,7 @@ const ptApi = (function () {
     return tiles(c) + '<div class="wrap" style="margin-top:10px"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg return</th><th class="num">Net P&amp;L</th></tr></thead><tbody>' + grp("All closed trades", () => true) + grp("Stocks", t => t.kind === "stock") + grp("Options", t => t.kind === "option") + tags.map(g => grp("Tag: " + esc(g), t => t.tag === g)).join("") + "</tbody></table></div>" +
       '<p class="note">Net of costs (stocks ' + SET.cost + '% round trip, options Rs ' + (SET.ocost || 0) + " per lot). With fewer than about 30 closed trades this says little; one or two big trades can decide the result.</p>";
   }
-  function draw() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s) s.innerHTML = summary(); if (m) m.textContent = MSG; preview(); inlineDraw(); }
+  function draw() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s) s.innerHTML = summary(); if (m) m.textContent = MSG; preview(); starStrip(); inlineDraw(); }
   function setKind(k) {
     KIND = k; const a = $p("#ptfs"), b = $p("#ptfo"); if (a) a.style.display = k === "stock" ? "" : "none"; if (b) b.style.display = k === "option" ? "" : "none";
     host.querySelectorAll(".ptk").forEach(x => x.classList.toggle("on", x.getAttribute("data-k") === k)); preview();
@@ -7256,7 +7269,7 @@ const ptApi = (function () {
     '.ptdot{position:absolute;top:-4px;width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid #0e7490;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.4)}.ptlv{display:flex;justify-content:space-between;gap:6px;font-size:.72rem;font-weight:600}' +
     '.ptact{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px dashed var(--pb);padding-top:10px}.ptact button,.ptchart{padding:6px 13px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;cursor:pointer;font:inherit;font-weight:600}' +
     '.ptact .ptcls{background:#0e7490;color:#fff;border-color:#0e7490}.ptact .ptupd{background:#2563eb;color:#fff;border-color:#2563eb}.ptact .ptdel,.ptcl .ptdel{border:0;background:none;color:var(--mute);padding:6px}.ptpx{padding:7px 10px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;font:inherit}' +
-    '.ptlink{padding:6px 13px;border-radius:10px;border:1px solid var(--pb);color:inherit;text-decoration:none;font-weight:600;white-space:nowrap;display:inline-block}.ptlink:hover{background:rgba(128,128,128,.12)}.ptinline{border:1px solid var(--pb);border-radius:14px;padding:8px;margin:-4px 0 12px}.ptcbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.ptctf,.ptchide{padding:5px 12px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;cursor:pointer;font:inherit;font-weight:600}.ptctf.on{background:var(--a,#059669);color:#fff;border-color:transparent}.ptcgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}.ptcl{border:1px solid var(--pb);border-top:4px solid #94a3b8;border-radius:14px;padding:11px 13px}.ptempty{padding:16px;border:1px dashed var(--pb);border-radius:14px;text-align:center;color:var(--mute)}' +
+    '.ptstarbar{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px}.ptchips2{display:flex;gap:8px;flex-wrap:wrap}.ptstarchip{display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px;padding:7px 13px;border-radius:12px;border:1px solid var(--pb);background:rgba(245,158,11,.1);color:inherit;cursor:pointer;font:inherit;min-width:82px}.ptstarchip:hover{background:rgba(245,158,11,.22)}.ptstarchip span{font-size:.8rem;color:var(--mute)}.ptlink{padding:6px 13px;border-radius:10px;border:1px solid var(--pb);color:inherit;text-decoration:none;font-weight:600;white-space:nowrap;display:inline-block}.ptlink:hover{background:rgba(128,128,128,.12)}.ptinline{border:1px solid var(--pb);border-radius:14px;padding:8px;margin:-4px 0 12px}.ptcbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.ptctf,.ptchide{padding:5px 12px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;cursor:pointer;font:inherit;font-weight:600}.ptctf.on{background:var(--a,#059669);color:#fff;border-color:transparent}.ptcgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}.ptcl{border:1px solid var(--pb);border-top:4px solid #94a3b8;border-radius:14px;padding:11px 13px}.ptempty{padding:16px;border:1px dashed var(--pb);border-radius:14px;text-align:center;color:var(--mute)}' +
     '.ptgrid4{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}.pttile{border:1px solid var(--pb);border-radius:14px;padding:10px 14px;background:rgba(128,128,128,.07)}.pttile small{display:block;font-size:.7rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em}.pttile b{font-size:1.35rem}' +
     '.pth{margin:18px 0 6px;font-size:1.02rem;font-weight:800}.ptk{padding:9px 22px;border:0;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer}.ptk.on{background:var(--a,#059669);color:#fff}' +
     '@media(max-width:700px){.ptpos{grid-template-columns:1fr}}</style>';
@@ -7267,7 +7280,7 @@ const ptApi = (function () {
     host = el; if (built && el.querySelector("#ptmsg")) return; built = true;
     el.innerHTML = CSS + '<div class="ptwrap"><details id="ptdet" open><summary style="cursor:pointer;font-weight:800;font-size:1.15rem">Paper trading <span class="note" style="margin:0;font-weight:400">stocks and options, no real money</span></summary>' +
       '<p class="note">Stock prices come from your Worker, and stop and target are checked automatically. The feed has no option premiums, so for options you type the entry premium, update the current premium yourself, and close it by hand.</p>' +
-      '<div class="ptform"><div class="ptrow"><div class="ptseg"><button type="button" class="ptk on" data-k="stock">Stock</button><button type="button" class="ptk" data-k="option">Option</button></div><span id="ptmsg" class="note" style="margin:0"></span></div>' +
+      '<div id="ptstar" style="margin:8px 0 10px"></div><div class="ptform"><div class="ptrow"><div class="ptseg"><button type="button" class="ptk on" data-k="stock">Stock</button><button type="button" class="ptk" data-k="option">Option</button></div><span id="ptmsg" class="note" style="margin:0"></span></div>' +
       '<div id="ptfs" class="ptg">' + fld("Symbol", '<input id="ptsym" placeholder="e.g. BSE" autocomplete="off">') + fld("Direction", seg("ptside", ["long", "Buy"], ["short", "Short"], ["buy", "sell"])) + fld("Quantity", inp("ptqty", "Shares")) + fld("Entry price", inp("ptentry", "blank = live")) + fld("Stop", inp("ptstop", "optional")) + fld("Target", inp("pttgt", "optional")) + "</div>" +
       '<div id="ptfo" class="ptg" style="display:none">' + fld("Underlying", '<input id="ptusym" placeholder="NIFTY" value="NIFTY">') + fld("Type", seg("ptot", ["CE", "Call (CE)"], ["PE", "Put (PE)"], ["buy", "sell"])) + fld("Strike", inp("ptstrike", "e.g. 24500")) + fld("Expiry", '<input id="ptexp" type="date">') + fld("Direction", seg("ptoside", ["buy", "Buy"], ["sell", "Sell"], ["buy", "sell"])) + fld("Lots", inp("ptlots", "1")) + fld("Lot size", inp("ptlotsz", "units per lot")) + fld("Entry premium", inp("ptprem", "Rs")) + fld("Stop premium", inp("ptostop", "optional")) + fld("Target premium", inp("ptotgt", "optional")) + "</div>" +
       '<div id="ptprev" class="ptprev"></div><div class="ptg" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:0">' + fld("Tag", '<input id="pttag" placeholder="e.g. Concall Good">') + fld("Note", '<input id="ptnote" placeholder="why this trade">') + '<div style="display:flex;align-items:flex-end"><button id="ptadd" class="ptadd" type="button">Add paper trade</button></div></div></div>' +
@@ -7275,6 +7288,7 @@ const ptApi = (function () {
       '<details style="margin-top:12px"><summary style="cursor:pointer">Costs and tools</summary><div class="ptrow" style="margin-top:8px"><div class="ptf"><label>Stock round-trip cost %</label><input id="ptcost" size="6" value="' + SET.cost + '"></div><div class="ptf"><label>Option cost per lot (Rs)</label><input id="ptocost" size="6" value="' + (SET.ocost || 0) + '"></div><button id="ptsetsave" type="button" class="ptchart">Save costs</button><button id="ptcsv" type="button" class="ptchart">Copy all as CSV</button></div></details></details></div>';
     el.addEventListener("click", ev => {
       const t = ev.target && ev.target.closest ? ev.target.closest("button") : null; if (!t || !t.classList) return;
+      if (t.classList.contains("ptstarchip")) { pickStar(t.getAttribute("data-sym")); return; }
       if (t.id === "ptadd") addTrade(); else if (t.classList.contains("ptk")) setKind(t.getAttribute("data-k"));
       else if (t.classList.contains("ptsg")) { const h = $p("#" + t.getAttribute("data-for")); if (h) h.value = t.getAttribute("data-v"); t.parentNode.querySelectorAll(".ptsg").forEach(x => x.classList.toggle("on", x === t)); preview(); }
       else if (t.classList.contains("ptcls")) closeTrade(t.getAttribute("data-id")); else if (t.classList.contains("ptupd")) updatePrem(t.getAttribute("data-id"));
