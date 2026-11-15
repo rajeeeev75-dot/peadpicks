@@ -7095,7 +7095,7 @@ const ptApi = (function () {
   let LOG = [], SET = {cost: 0.25, ocost: 0, lots: {}};
   try { LOG = JSON.parse(localStorage.getItem(KEY) || "[]") || []; } catch (e) {}
   try { SET = Object.assign(SET, JSON.parse(localStorage.getItem(SKEY) || "{}") || {}); } catch (e) {}
-  let Q = {}, QT = 0, BARS = {}, BT = {}, BUSY = {}, MSG = "", KIND = "stock", host = null, built = false, TM = null, CID = null, CTF = "D", CH = null, CTOK = 0; const CB = {};
+  let Q = {}, QT = 0, BARS = {}, BT = {}, BUSY = {}, MSG = "", JOPEN = false, KIND = "stock", host = null, built = false, TM = null, CID = null, CTF = "D", CH = null, CTOK = 0; const CB = {};
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(LOG)); localStorage.setItem(SKEY, JSON.stringify(SET)); } catch (e) {} };
   const todayS = () => { const d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); };
   const $p = s => (host ? host.querySelector(s) : null);
@@ -7229,12 +7229,8 @@ const ptApi = (function () {
   }
   function summary() {
     const c = LOG.filter(t => t.status === "closed"); if (!c.length) return '<p class="note">Your trade journal appears after your first closed trade.</p>';
-    const grp = (nm, f) => { const a = c.filter(f); if (!a.length) return ""; const r = a.map(t => pnl(t, t.exit)), tot = r.reduce((x, y) => x + y.net, 0), w = r.filter(x => x.net > 0).length, ap = r.reduce((x, y) => x + y.pct, 0) / r.length;
-      return "<tr><td>" + nm + '</td><td class="num">' + a.length + '</td><td class="num">' + Math.round(w / a.length * 100) + '%</td><td class="num" style="' + col(ap) + '">' + pc(ap) + '</td><td class="num" style="' + col(tot) + '"><b>' + money(tot) + "</b></td></tr>"; };
-    const tags = c.map(t => t.tag).filter((x, i, a) => x && a.indexOf(x) === i);
     const ord = c.slice().sort((a, b) => ((a.exitDate || "") < (b.exitDate || "") ? 1 : -1));
-    return journal(ord) + '<details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Results by group</summary><div class="wrap" style="margin-top:10px"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg return</th><th class="num">Net P&amp;L</th></tr></thead><tbody>' + grp("All closed trades", () => true) + grp("Stocks", t => t.kind === "stock") + grp("Options", t => t.kind === "option") + tags.map(g => grp("Tag: " + esc(g), t => t.tag === g)).join("") + "</tbody></table></div></details>" +
-      '<p class="note">Net of costs (stocks ' + SET.cost + '% round trip, options Rs ' + (SET.ocost || 0) + " per lot). With fewer than about 30 closed trades this says little; one or two big trades can decide the result.</p>";
+    return '<details class="ptjdet"' + (JOPEN ? " open" : "") + '><summary style="cursor:pointer;font-weight:800;font-size:1.1rem">📒 Trade journal <span class="note" style="margin:0;font-weight:400">' + c.length + (c.length === 1 ? " closed trade" : " closed trades") + "</span></summary>" + journal(ord) + "</details>";
   }
   function draw() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s && !(document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("ptrev"))) s.innerHTML = summary(); if (m) m.textContent = MSG; preview(); starStrip(); inlineDraw(); }
   function setKind(k) {
@@ -7325,8 +7321,8 @@ const ptApi = (function () {
       '<div id="ptfs" class="ptg">' + fld("Symbol", '<input id="ptsym" placeholder="e.g. BSE" autocomplete="off">') + fld("Direction", seg("ptside", ["long", "Buy"], ["short", "Short"], ["buy", "sell"])) + fld("Quantity", inp("ptqty", "Shares")) + fld("Entry price", inp("ptentry", "blank = live")) + fld("Stop", inp("ptstop", "optional")) + fld("Target", inp("pttgt", "optional")) + "</div>" +
       '<div id="ptfo" class="ptg" style="display:none">' + fld("Underlying", '<input id="ptusym" placeholder="NIFTY" value="NIFTY">') + fld("Type", seg("ptot", ["CE", "Call (CE)"], ["PE", "Put (PE)"], ["buy", "sell"])) + fld("Strike", inp("ptstrike", "e.g. 24500")) + fld("Expiry", '<input id="ptexp" type="date">') + fld("Direction", seg("ptoside", ["buy", "Buy"], ["sell", "Sell"], ["buy", "sell"])) + fld("Lots", inp("ptlots", "1")) + fld("Lot size", inp("ptlotsz", "units per lot")) + fld("Entry premium", inp("ptprem", "Rs")) + fld("Stop premium", inp("ptostop", "optional")) + fld("Target premium", inp("ptotgt", "optional")) + "</div>" +
       '<div id="ptprev" class="ptprev"></div><div class="ptg" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:0">' + fld("Tag", '<input id="pttag" placeholder="e.g. Concall Good">') + fld("Note", '<input id="ptnote" placeholder="why this trade">') + '<div style="display:flex;align-items:flex-end"><button id="ptadd" class="ptadd" type="button">Add paper trade</button></div></div></div>' +
-      '<div class="pth">Open positions</div><div id="ptopen"></div><div class="pth">Closed trades</div><div id="ptclosed"></div><div class="pth">Trade journal</div><div id="ptsum"></div>' +
-      '<details style="margin-top:12px"><summary style="cursor:pointer">Costs and tools</summary><div class="ptrow" style="margin-top:8px"><div class="ptf"><label>Stock round-trip cost %</label><input id="ptcost" size="6" value="' + SET.cost + '"></div><div class="ptf"><label>Option cost per lot (Rs)</label><input id="ptocost" size="6" value="' + (SET.ocost || 0) + '"></div><button id="ptsetsave" type="button" class="ptchart">Save costs</button><button id="ptcsv" type="button" class="ptchart">Copy all as CSV</button></div></details></details></div>';
+      '<div class="pth">Open positions</div><div id="ptopen"></div><div class="pth">Closed trades</div><div id="ptclosed"></div><div id="ptsum" style="margin-top:14px"></div>' +
+      '</details></div>';
     el.addEventListener("click", ev => {
       const t = ev.target && ev.target.closest ? ev.target.closest("button") : null; if (!t || !t.classList) return;
       if (t.classList.contains("ptstarchip")) { pickStar(t.getAttribute("data-sym")); return; }
@@ -7340,6 +7336,7 @@ const ptApi = (function () {
       else if (t.id === "ptsetsave") { const c = parseFloat($p("#ptcost").value), o = parseFloat($p("#ptocost").value); if (isFinite(c) && c >= 0) SET.cost = c; if (isFinite(o) && o >= 0) SET.ocost = o; save(); MSG = "Costs saved."; draw(); }
       else if (t.id === "ptcsv") { const s = csv(); try { navigator.clipboard.writeText(s).then(() => { MSG = "CSV copied."; draw(); }, () => { MSG = "Copy failed."; draw(); }); } catch (e) { MSG = "Copy is not available here."; draw(); } }
     });
+    el.addEventListener("toggle", ev => { const d = ev.target; if (d && d.classList && d.classList.contains("ptjdet")) JOPEN = d.open; }, true);
     el.addEventListener("input", ev => { const t = ev.target; if (!t) return; if (t.classList && t.classList.contains("ptrev")) { const tr = LOG.find(x => x.id === t.getAttribute("data-id")); if (tr) { tr.review = t.value; save(); } return; } if (t.id === "ptusym") { const ls = SET.lots[String(t.value).trim().toUpperCase()]; const l = $p("#ptlotsz"); if (ls && l && !l.value) l.value = ls; } if (t.closest && t.closest(".ptform")) preview(); });
     setKind("stock"); draw();
     if (!TM) TM = setInterval(() => { try { if (current === "cc" && !document.hidden && LOG.some(t => t.status === "open")) refresh(false); } catch (e) {} }, 30000);
