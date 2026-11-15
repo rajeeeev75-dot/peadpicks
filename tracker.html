@@ -4145,13 +4145,13 @@ const ppApi = (function () {
     } catch (e) { META.err = String((e && e.message) || e); }
     if (txt == null) { try { const r = await fetch(PEAD_CSV_DIRECT + "?t=" + Date.now(), {cache: "no-store"}); if (!r.ok) throw new Error("HTTP " + r.status); txt = await r.text(); const lm = r.headers.get("last-modified"); if (lm) META.modified = lm; META.err = ""; } catch (e) { META.err = String((e && e.message) || e); } }
     try { if (typeof MARKET_API_URL !== "undefined" && MARKET_API_URL) { const r = await fetch(MARKET_API_URL + "?results=1", {cache: "no-store"}), j = await r.json(); if (j && Array.isArray(j.results)) { const m = {}; j.results.forEach(x => { const k = String(x.s || "").toUpperCase(); if (k && x.d) (m[k] = m[k] || []).push(x.d); }); RES = m; } } } catch (e) {}
-    if (txt != null) { try { DATA = parseCSV(txt); META.state = "ok"; META.fetchedAt = Date.now(); } catch (e) { META.state = "err"; META.err = "could not read the file"; } }
+    if (txt != null) { try { DATA = withManual(parseCSV(txt)); META.state = "ok"; META.fetchedAt = Date.now(); } catch (e) { META.state = "err"; META.err = "could not read the file"; } }
     else META.state = "err";
     busy = false; paint();
   }
   function paintStatus() {
     const el = $e("#ppstat"); if (!el) return;
-    el.textContent = META.state === "loading" ? "Loading..." : META.state === "err" ? "Could not load the PEAD data file (" + META.err + ")." : DATA.length + " stocks scored from the data file" + (META.modified ? ", file built " + new Date(META.modified).toLocaleString("en-IN", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata"}) + " IST" : "") + ". Checked " + new Date(META.fetchedAt).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"}) + ".";
+    el.textContent = META.state === "loading" ? "Loading..." : META.state === "err" ? "Could not load the PEAD data file (" + META.err + ")." : DATA.length + " stocks scored from the data file" + (DATA.some(x => x._manual) ? " (" + DATA.filter(x => x._manual).length + " entered by hand)" : "") + (META.modified ? ", file built " + new Date(META.modified).toLocaleString("en-IN", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata"}) + " IST" : "") + ". Checked " + new Date(META.fetchedAt).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit"}) + ".";
   }
   /* results announced in the last few days that the data file has not scored yet */
 
@@ -4219,6 +4219,119 @@ const ppApi = (function () {
     list.forEach(x => { const sym = String(x.s || "").toUpperCase(), age = ageOf(x.d); if (!sym || !(age >= 0 && age <= 4) || seen.has(sym)) return; if (have[sym] && have[sym] >= qEndBefore(x.d)) return; seen.add(sym); out.push({sym, n: x.n || sym, d: x.d, age, fno: fno.has(sym)}); });
     return out.sort((a, b) => a.age - b.age || (b.fno - a.fno) || (a.sym < b.sym ? -1 : 1));
   }
+  /* ---- results typed in by hand (for stocks whose new quarter is not in the data file yet); kept in this browser, dropped automatically once the data file has the quarter ---- */
+  let MAN = []; try { MAN = JSON.parse(localStorage.getItem("ppManual") || "[]") || []; } catch (e) {}
+  const manSave = () => { try { localStorage.setItem("ppManual", JSON.stringify(MAN)); } catch (e) {} };
+  let BASE = [];   // the data file's own rows (without hand-typed ones)
+  function withManual(arr) {
+    const out = arr.filter(x => !x._manual); BASE = out.slice();
+    MAN = MAN.filter(m => {
+      const k = symOfTk(m.ticker), i = out.findIndex(x => symOfTk(x.ticker) === k), mq = String(m.quarter_end || "").slice(0, 10);
+      if (i >= 0) { const q0 = String(out[i].quarter_end || "").slice(0, 10); if (q0 && q0 >= mq) return false; out.splice(i, 1); }
+      out.push(Object.assign({_manual: 1}, m)); return true;
+    });
+    manSave(); return out;
+  }
+  function manForm(sym) {
+    const box = $e("#ppman"); if (!box) return;
+    sym = String(sym || "").toUpperCase();
+    const pd = (pending().find(x => x.sym === sym) || {});
+    const inp = (id, w, ph) => '<input id="pm_' + id + '" type="text" inputmode="decimal" placeholder="' + (ph || "") + '" style="width:' + (w || 92) + 'px">';
+    const rowF = (lab, k) => "<tr><td style=\"white-space:nowrap\"><b>" + lab + "</b></td>" + ["c", "p", "y"].map(c => "<td>" + inp(k + c) + "</td>").join("") + "</tr>";
+    const saved = MAN.length ? '<p class="note" style="margin:10px 0 0">Entered by hand: ' + MAN.map(m => "<b>" + E(symOfTk(m.ticker)) + '</b> <button type="button" class="cbtn" data-pmdel="' + E(m.ticker) + '">remove</button>').join(" &nbsp; ") + "</p>" : "";
+    box.style.display = "";
+    box.innerHTML = '<b>Add results by hand</b> <span class="note">For results that are out but not in the data file yet. Scored with the same rules as the rest of the tab.</span>' +
+      '<p class="note" style="margin:8px 0 4px">Paste one line per quarter, in this order: <b>Revenue, EBITDA %, PBT, Net profit, EPS</b> (Rs crore). Short version: paste <b>2 lines</b>, the latest quarter and then the same quarter last year; the previous quarter is taken from the data file. Or paste 3 lines (latest, previous, same quarter last year) if the data file does not have the previous quarter yet. Put the symbol at the start of the first line, or in the Symbol box. Several stocks can be pasted together, each starting with its symbol. No thousands commas, please.</p>' +
+      '<textarea id="pm_paste" rows="4" spellcheck="false" style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:.92rem" placeholder="AARTISURF, 291.24, 10.30, 17.16, 12.50, 14.76&#10;272.87, 7.40, 12.19, 9.00, 10.63&#10;179.17, 5.20, 2.20, 1.56, 1.84"></textarea>' +
+      '<div class="charttools" style="border:0;padding:10px 0 0;gap:10px 14px"><label>Symbol <input id="pm_sym" type="text" style="width:130px" value="' + E(sym) + '" placeholder="AARTISURF"></label>' +
+      '<label>Result date <input id="pm_rd" type="date" value="' + E(pd.d || "") + '"></label>' +
+      '<label title="Leave blank to use the quarter that ended just before the result date">Quarter end <input id="pm_qe" type="date"></label>' +
+      '<label title="Leave blank to use the live price">Price (Rs) ' + inp("price", 84, "live") + '</label><label>Market cap (Rs cr) ' + inp("mcap", 84, "optional") + '</label><label>52-week high ' + inp("high52", 84, "optional") + '</label><label title="Sum of the last four quarters\' EPS. Optional; without it the forward P/E uses the latest quarter x 4">EPS, last 12 months ' + inp("epsttm", 84, "optional") + '</label></div>' +
+      '<p class="note" style="margin:6px 0 0">The result date is needed (it is filled in for stocks in the "just announced" list unless you paste several stocks, which use that list too). Price, market cap, 52-week high and EPS for 12 months apply when you paste a single stock.</p>' +
+      '<div style="margin-top:10px"><button type="button" class="cbtn" id="pmPaste">Save pasted results and score</button> <button type="button" class="cbtn" id="pmCancel">Close</button> <span class="note" id="pmmsg"></span></div>' +
+      '<details style="margin-top:12px"><summary class="note" style="cursor:pointer">Or type the numbers one box at a time</summary><div class="wrap" style="margin-top:10px"><table class="peadt"><tr><th></th><th>Latest quarter</th><th>Previous quarter</th><th>Same quarter last year</th></tr>' +
+      rowF("Revenue", "rev") + rowF("EBITDA margin %", "ebm") + rowF("Net profit", "np") + "<tr><td><b>EPS</b></td><td>" + inp("epsc") + "</td><td></td><td></td></tr></table></div>" +
+      '<div style="margin-top:10px"><button type="button" class="cbtn" id="pmSave">Save typed numbers and score</button></div></details>' + saved;
+    const t = $e("#pm_paste"); if (t) t.focus();
+  }
+  /* turn pasted lines into stocks: [{sym, rows: [[rev, ebitda%, pbt, np, eps], ...]}] */
+  function manParse(text, defSym) {
+    const stocks = [], errs = []; let cur = null;
+    const isNum = x => /^[-+]?(\d+\.?\d*|\.\d+)%?$/.test(x);
+    String(text || "").split(/\r?\n/).forEach(line => {
+      line = line.trim(); if (!line) return;
+      let cells = (line.indexOf("\t") >= 0 ? line.split("\t").map(x => x.replace(/,/g, "")) : line.split(/[\s,;|]+/)).map(x => x.trim()).filter(x => x !== "");
+      let sym = ""; if (cells.length && !isNum(cells[0])) sym = String(cells.shift()).toUpperCase().replace(/^(NSE|BSE):/, "");
+      if (!cells.length || !cells.every(isNum)) return;   // header or text line: skip
+      const n = cells.map(x => parseFloat(x));
+      if (n.length !== 5 && n.length !== 15) { errs.push("A line has " + n.length + " numbers; each quarter needs 5 (Revenue, EBITDA %, PBT, Net profit, EPS)."); return; }
+      if (sym) { cur = {sym, rows: []}; stocks.push(cur); }
+      else if (!cur) { if (!defSym) { errs.push("Put the symbol at the start of the first line or in the Symbol box."); return; } cur = {sym: defSym, rows: []}; stocks.push(cur); }
+      for (let i = 0; i < n.length; i += 5) cur.rows.push(n.slice(i, i + 5));
+    });
+    stocks.forEach(s => { if (s.rows.length > 3) errs.push(s.sym + ": " + s.rows.length + " lines found, expected 2 or 3."); });
+    return {stocks: stocks.filter(s => s.rows.length <= 3), errs};
+  }
+  async function manPaste() {
+    const say = t => { const n = $e("#pmmsg"); if (n) n.textContent = t; };
+    const sv = id => { const el = $e("#pm_" + id); return el ? String(el.value || "").trim() : ""; }, nv = id => num(sv(id));
+    const defSym = sv("sym").toUpperCase().replace(/^(NSE|BSE):/, "");
+    const P = manParse((($e("#pm_paste") || {}).value) || "", defSym);
+    if (!P.stocks.length) return say(P.errs[0] || "Paste the numbers first.");
+    const single = P.stocks.length === 1, skipped = P.errs.slice();
+    say("Getting live prices...");
+    const qp = {};
+    try { if (typeof MARKET_API_URL !== "undefined" && MARKET_API_URL) { const r = await fetch(MARKET_API_URL + "?quotes=" + encodeURIComponent(P.stocks.map(s => s.sym).slice(0, 20).join(",")), {cache: "no-store"}), j = await r.json().catch(() => null); if (j && Array.isArray(j.quotes)) j.quotes.forEach(q => { if (q && q.s && isFinite(+q.p)) qp[String(q.s).toUpperCase()] = +q.p; }); } } catch (e) {}
+    const added = [], notes = [], g = x => (isFinite(x) ? x : "");
+    P.stocks.forEach(st => {
+      const pe = pending().find(x => x.sym === st.sym), old = DATA.find(x => symOfTk(x.ticker) === st.sym);
+      const rd = (pe && pe.d) || sv("rd"); if (!rd) { skipped.push(st.sym + ": no result date (enter one above)."); return; }
+      const price = single && isFinite(nv("price")) ? nv("price") : qp[st.sym]; if (!isFinite(price)) { skipped.push(st.sym + ": no live price found; type the price in the Price box."); return; }
+      const qe0 = (single && sv("qe")) || qEndBefore(rd), c = st.rows[0], eb = r => (isFinite(r[0]) && isFinite(r[1]) ? +(r[0] * r[1] / 100).toFixed(2) : "");
+      let p, y;
+      if (st.rows.length === 3) { p = st.rows[1]; y = st.rows[2]; }
+      else if (st.rows.length === 2) {
+        y = st.rows[1];
+        const oF = BASE.find(x => symOfTk(x.ticker) === st.sym), fe = k => (oF ? num(oF[k]) : NaN);
+        if (!oF || String(oF.quarter_end || "").slice(0, 10) !== qEndBefore(qe0) || !isFinite(fe("rev_cur")) || !isFinite(fe("np_cur"))) { skipped.push(st.sym + ": the data file does not hold the previous quarter (" + qEndBefore(qe0) + "), so paste all 3 lines."); return; }
+        p = [fe("rev_cur"), fe("rev_cur") > 0 ? fe("ebitda_cur") / fe("rev_cur") * 100 : NaN, NaN, fe("np_cur"), fe("eps_cur")];
+        notes.push(st.sym + ": previous quarter (" + qEndBefore(qe0) + ") taken from the data file: revenue " + pf(p[0], 2) + ", net profit " + pf(p[3], 2) + ".");
+      } else { skipped.push(st.sym + ": the data file has the previous quarter but not the same quarter last year, so paste 2 lines (latest quarter, then the same quarter last year)."); return; }
+      const rec = {ticker: "NSE:" + st.sym, name: (pe && pe.n) || (old && old.name) || st.sym, price, mcap: single ? g(nv("mcap")) : "", high52: single ? g(nv("high52")) : "", eps_ttm: single ? g(nv("epsttm")) : "", eps_cur: c[4], quarter_end: qe0, result_date: rd,
+        rev_cur: c[0], rev_prev: p[0], rev_yoy: y[0], np_cur: c[3], np_prev: p[3], np_yoy: y[3], ebitda_cur: eb(c), ebitda_prev: eb(p), ebitda_yoy: eb(y)};
+      if (old) ["equity", "debt", "np_ttm", "pe", "mcap", "high52"].forEach(k => { if (old[k] != null && old[k] !== "" && (rec[k] === "" || rec[k] == null)) rec[k] = old[k]; });
+      MAN = MAN.filter(m => symOfTk(m.ticker) !== st.sym); MAN.push(rec); added.push(st.sym);
+    });
+    DATA = withManual(DATA);
+    const kept = added.filter(sy => MAN.some(m => symOfTk(m.ticker) === sy)), dropped = added.filter(sy => kept.indexOf(sy) < 0);
+    if (dropped.length) skipped.push(dropped.join(", ") + ": the data file already has this quarter or a newer one, so its own numbers are used.");
+    if (kept.length) { SQ = kept.length === 1 ? kept[0] : ""; const se = $e("#ppSearch"); if (se) se.value = SQ; openTk = kept.length === 1 ? "NSE:" + kept[0] : null; }
+    manForm(""); const b = $e("#ppman");
+    if (kept.length && !skipped.length && !notes.length) { if (b) b.style.display = "none"; } else { const m = $e("#pmmsg"); if (m) m.textContent = (kept.length ? "Saved " + kept.join(", ") + ". " : "") + skipped.concat(notes).join(" "); }
+    view(); paintStatus();
+  }
+  function manSaveForm() {
+    const v = id => { const el = $e("#pm_" + id); return el ? num(el.value) : NaN; }, sv = id => { const el = $e("#pm_" + id); return el ? String(el.value || "").trim() : ""; };
+    const say = t => { const n = $e("#pmmsg"); if (n) n.textContent = t; };
+    const sym = sv("sym").toUpperCase().replace(/^(NSE|BSE):/, "");
+    if (!sym) return say("Enter the symbol.");
+    if (!isFinite(v("price"))) return say("Enter the current price.");
+    if (!isFinite(v("revc")) || !isFinite(v("npc"))) return say("Latest-quarter revenue and net profit are needed.");
+    const rd = sv("rd"); if (!rd) return say("Enter the result date.");
+    const qe = sv("qe") || qEndBefore(rd);
+    const eb = k => { const r = v("rev" + k), m = v("ebm" + k); return isFinite(r) && isFinite(m) ? +(r * m / 100).toFixed(2) : ""; };
+    const g = x => (isFinite(x) ? x : "");
+    const old = DATA.find(x => symOfTk(x.ticker) === sym);
+    const rec = {ticker: "NSE:" + sym, name: sv("name") || (old && old.name) || sym, price: v("price"), mcap: g(v("mcap")), high52: g(v("high52")), eps_ttm: g(v("epsttm")), eps_cur: g(v("epsc")), quarter_end: qe, result_date: rd,
+      rev_cur: g(v("revc")), rev_prev: g(v("revp")), rev_yoy: g(v("revy")), np_cur: g(v("npc")), np_prev: g(v("npp")), np_yoy: g(v("npy")), ebitda_cur: eb("c"), ebitda_prev: eb("p"), ebitda_yoy: eb("y")};
+    if (old) ["equity", "debt", "np_ttm", "pe"].forEach(k => { if (old[k] != null && old[k] !== "" && !rec[k]) rec[k] = old[k]; });
+    MAN = MAN.filter(m => symOfTk(m.ticker) !== sym); MAN.push(rec);
+    DATA = withManual(DATA);
+    if (!MAN.some(m => symOfTk(m.ticker) === sym)) return say("The data file already has this stock's quarter or a newer one, so the file's numbers are used.");
+    SQ = sym; const se = $e("#ppSearch"); if (se) se.value = sym; openTk = rec.ticker;
+    manForm(""); const b = $e("#ppman"); if (b) b.style.display = "none";
+    view();
+  }
   let SQ = "";   // stock search text (not saved; clears on reload)
   function build() {
     const host = document.getElementById("ppbody"); if (!host || host.dataset.built) return; host.dataset.built = "1";
@@ -4230,8 +4343,8 @@ const ppApi = (function () {
       '<label title="BUY means the stock passes the rules that held up when past results were back-tested. It ignores the score, quality and days filters">Show <select id="ppSig"><option value="all">All results</option><option value="buy">BUY signals only</option></select></label>' +
       '<label>Min mcap (Rs cr) <input id="ppCap" type="number" style="width:84px" value="' + E(F.cap) + '"></label>' +
       '<label>Fwd P/E method <select id="ppMode"><option value="auto">Auto</option><option value="runrate">Run rate x4</option><option value="pead">Original PEAD</option></select></label>' +
-      '<button type="button" class="cbtn" id="ppReload">↻ Reload</button></div><div class="note" id="ppstat" style="margin:8px 0 0"></div></div>' +
-      '<div id="ppres"></div>';
+      '<button type="button" class="cbtn" id="ppReload">↻ Reload</button> <button type="button" class="cbtn" id="ppManToggle" title="Type in a result the data file does not have yet">+ Add result by hand</button></div><div class="note" id="ppstat" style="margin:8px 0 0"></div></div>' +
+      '<div class="card" id="ppman" style="display:none"></div><div id="ppres"></div>';
     $e("#ppDays").value = String(F.days); $e("#ppU").value = F.u || "all"; $e("#ppSig").value = F.sig || "all"; $e("#ppQ").value = F.q || "any"; $e("#ppMode").value = F.mode;
     host.addEventListener("toggle", ev => { const t = ev.target; if (t && t.classList && t.classList.contains("pbtd")) PBT_OPEN = t.open; }, true);
     host.addEventListener("input", ev => { const t = ev.target; if (!t || !t.id) return;
@@ -4241,6 +4354,12 @@ const ppApi = (function () {
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest || t.closest("a")) return;
       if (t.closest("#ppReload")) { load(true); return; }
+      if (t.closest("#ppManToggle")) { const b = $e("#ppman"); if (b && b.style.display !== "none") b.style.display = "none"; else manForm(SQ.trim().toUpperCase().replace(/^(NSE|BSE):/, "")); return; }
+      const po = t.closest("[data-pmopen]"); if (po) { manForm(po.dataset.pmopen); const b = $e("#ppman"); if (b) b.scrollIntoView({block: "center"}); return; }
+      if (t.closest("#pmSave")) { manSaveForm(); return; }
+      if (t.closest("#pmPaste")) { manPaste(); return; }
+      if (t.closest("#pmCancel")) { const b = $e("#ppman"); if (b) b.style.display = "none"; return; }
+      const pdl = t.closest("[data-pmdel]"); if (pdl) { MAN = MAN.filter(m => m.ticker !== pdl.dataset.pmdel); manSave(); DATA = withManual(DATA); manForm(""); view(); paintStatus(); return; }
       const th = t.closest("th[data-k]"); if (th && th.dataset.k) { const k = th.dataset.k; sortDir = sortKey === k ? -sortDir : (k === "fwdPe" || k === "d" || k === "ticker" ? 1 : -1); sortKey = k; view(); return; }
       const row = t.closest("[data-tk]"); if (row) { openTk = openTk === row.dataset.tk ? null : row.dataset.tk; view(); }
     });
@@ -4322,9 +4441,9 @@ const ppApi = (function () {
     rows.sort((a, b) => { const A = key[sortKey](a), B = key[sortKey](b); return (A > B ? 1 : A < B ? -1 : 0) * sortDir; });
     let h = "";
     const pend = pending().filter(x => !sq || sHit(x.sym, x.n));
-    if (sq) h += '<p class="note" style="margin:0 0 8px">Search: ' + rows.length + ' match' + (rows.length === 1 ? "" : "es") + ' for &quot;' + E(SQ.trim()) + '&quot;. The score, quality, days and market-cap filters are ignored while you search; clear the box to go back to them.</p>';
+    if (sq) h += '<p class="note" style="margin:0 0 8px">Search: ' + rows.length + ' scored match' + (rows.length === 1 ? "" : "es") + (pend.length ? " and " + pend.length + " just announced but not scored yet (" + pend.map(x => E(x.sym)).join(", ") + ": the data file has no numbers for the new quarter yet)" : "") + ' for &quot;' + E(SQ.trim()) + '&quot;. The score, quality, days and market-cap filters are ignored while you search; clear the box to go back to them.</p>';
     if (pend.length) {
-      h += '<div class="card ppnew"><b>Results just announced (' + pend.length + ')</b> <span class="note">Not scored yet. The data file is rebuilt by your GitHub action; these appear scored once it runs.</span><div class="ppchips">' +
+      h += '<div class="card ppnew"><b>Results just announced (' + pend.length + ')</b> <span class="note">Not scored yet. The data file is rebuilt by your GitHub action; these appear scored once it runs.</span> <button type="button" class="cbtn" data-pmopen="' + E(pend.length === 1 || sq ? pend[0].sym : "") + '">Enter the numbers by hand</button><div class="ppchips">' +
         pend.slice(0, 40).map(x => '<a class="ppchip' + (x.fno ? " f" : "") + '" href="' + tv(x.sym) + '" target="_blank" rel="noopener" title="' + E(x.n) + " | " + (x.age === 0 ? "today" : x.age === 1 ? "yesterday" : x.age + " days ago") + '">' + E(x.sym) + " <i>" + (x.age === 0 ? "today" : x.age === 1 ? "yest." : x.age + "d") + "</i></a>").join("") + (pend.length > 40 ? '<span class="note">+' + (pend.length - 40) + " more</span>" : "") + "</div></div>";
     }
     h += '<div class="dtiles">' + rows.slice(0, 4).map(x => '<div class="dtile" data-tk="' + E(x.s.ticker) + '" style="cursor:pointer"><small>' + E(symOfTk(x.s.ticker)) + '</small><b>' + pf(x.P.total, 0) + '</b><span><span class="tag" style="background:' + x.P.rec[1] + '">' + x.P.rec[0] + "</span> Fwd P/E " + pf(x.P.fwdPe) + "x</span></div>").join("") + "</div>";
@@ -4333,7 +4452,7 @@ const ppApi = (function () {
     h += rows.length ? rows.map(x => {
       const P = x.P, s = x.s, sy = symOfTk(s.ticker), o = openTk === s.ticker;
       const rec = x.ad && x.d >= 0 && x.d <= 3;
-      let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer' + (rec ? ";background:color-mix(in srgb,#16a34a 13%,var(--card));box-shadow:inset 4px 0 0 #16a34a" : "") + '"><td><b>' + E(sy) + '</b> <a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener" title="Open on TradingView">TV &#8599;</a> <span class="note">' + E(s.name) + '</span></td><td style="white-space:nowrap">' + (x.ad ? (rec ? '<span class="chip g" style="font-weight:700">Results ' + dTxt(x.ad) + "</span>" : E(dTxt(x.ad, true))) : '<span class="note" title="Not in the data file or the results calendar">not known</span>') + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td>' + rxCell(x) + bkCell(x) + '<td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td></tr>';
+      let r = '<tr class="row" data-tk="' + E(s.ticker) + '" style="cursor:pointer' + (rec ? ";background:color-mix(in srgb,#16a34a 13%,var(--card));box-shadow:inset 4px 0 0 #16a34a" : "") + '"><td><b>' + E(sy) + '</b>' + (s._manual ? ' <span class="chip" title="Typed in by hand, not from the data file">manual</span>' : "") + ' <a class="tvl" href="' + tv(sy) + '" target="_blank" rel="noopener" title="Open on TradingView">TV &#8599;</a> <span class="note">' + E(s.name) + '</span></td><td style="white-space:nowrap">' + (x.ad ? (rec ? '<span class="chip g" style="font-weight:700">Results ' + dTxt(x.ad) + "</span>" : E(dTxt(x.ad, true))) : '<span class="note" title="Not in the data file or the results calendar">not known</span>') + '</td><td class="num"><b>' + pf(P.total, 0) + '</b></td><td><span class="tag" style="background:' + P.rec[1] + '">' + P.rec[0] + '</span></td>' + rxCell(x) + bkCell(x) + '<td class="num ' + cls(P.revY) + '">' + pf(P.revY) + '%</td><td class="num ' + cls(P.npY) + '">' + pf(P.npY) + '%</td><td class="num">' + (P.fwdPe > 0 ? pf(P.fwdPe) + "x" : "N/A") + '</td><td class="num">' + pf(P.dist52) + '%</td><td class="num">' + (isFinite(x.d) ? x.d : "-") + '</td></tr>';
       if (o) r += '<tr class="det"><td colspan="11"><div style="position:sticky;left:0;box-sizing:border-box;width:min(1120px,calc(100vw - 72px))"><dl class="ppdl">' + [["Sales QoQ", pf(P.revQ) + "%"], ["Profit QoQ", pf(P.npQ) + "%"], ["EBITDA margin chg YoY", pf(P.ebY) + "pp"], ["Stock P/E", pf(P.pe) + "x"], ["ROE", pf(P.roe) + "%"], ["D/E", pf(P.de, 2) + "x"], ["Sales pts /20", pf(P.sSales)], ["Profit pts /15", pf(P.sNp)], ["EBITDA pts /10", pf(P.sEb)], ["Growth-to-PE pts /20", pf(P.sGpe)], ["Surprise pts /25", pf(P.sSur)], ["Consistency", P.pos + "/6 positive"], ["Volume adj", pf(P.volAdj) + "pt"], ["Result date in data file", E(s.result_date || "not given")], ["Quarter ended", E(s.quarter_end)], ["Announcement date used", x.ad ? E(x.ad) : "not known"]].concat((() => { const r = reactOf(sy); return r ? [["Market reaction", r.label + " (" + sg(r.react) + " in the first session)"], ["Opening gap", sg(r.gap)], ["Price since result", sg(r.since)], ["Close before result", pf(r.pre, 2)]] : []; })()).map(a => "<div><dt>" + a[0] + "</dt><dd>" + a[1] + "</dd></div>").join("") + '</dl>' + bkPanel(x) + '<div class="charttools" style="margin-top:12px">' + indBtns() + '</div><div id="ppchbox" data-sym="' + E(sy) + '" data-ad="' + E(x.ad || "") + '" style="height:360px;margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="ppchnote" class="note" style="margin:6px 0 0">Loading chart...</div></div></td></tr>';
       return r;
     }).join("") : '<tr><td colspan="12" class="note">' + (sq ? "No stock in the PEAD data file matches &quot;" + E(SQ.trim()) + "&quot;. Try part of the symbol or company name." : F.sig === "buy" ? (bkBusy ? "Checking price history for the rules..." : "No stock meets the BUY rules right now.") : "No stocks match these filters. Lower the minimum score or widen the results window.") + '</td></tr>';
