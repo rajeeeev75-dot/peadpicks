@@ -4311,7 +4311,7 @@ const ppApi = (function () {
       const q0 = oF ? String(oF.quarter_end || "").slice(0, 10) : "";
       /* result date: the "just announced" list, else the results calendar, else what you typed, else today */
       let rd = (pe && pe.d) || (single && sv("rd")) || "";
-      if (!rd) { const ds = AM[st.sym] ? [...AM[st.sym]].filter(d => !q0 || d > q0).sort() : []; if (ds.length) rd = ds[ds.length - 1]; }
+      if (!rd) { const nq = q0 ? ({"03-31": "06-30", "06-30": "09-30", "09-30": "12-31", "12-31": "03-31"}[q0.slice(5)] ? (q0.slice(5) === "12-31" ? (+q0.slice(0, 4) + 1) : q0.slice(0, 4)) + "-" + {"03-31": "06-30", "06-30": "09-30", "09-30": "12-31", "12-31": "03-31"}[q0.slice(5)] : q0) : "", ds = AM[st.sym] ? [...AM[st.sym]].filter(d => !nq || d > nq).sort() : [];   /* only dates after the NEW quarter ended, so an older announcement is never taken for it */ if (ds.length) rd = ds[ds.length - 1]; }
       if (!rd) { rd = today; notes.push(st.sym + ": result date not found, so today was used. Open Change automatic values to set it."); }
       let qe0 = (single && sv("qe")) || qEndBefore(rd), c = st.rows[0], eb = r => (isFinite(r[0]) && isFinite(r[1]) ? +(r[0] * r[1] / 100).toFixed(2) : "");
       const bb = bars[st.sym];
@@ -7085,6 +7085,185 @@ const swPaint = () => swApi.open();
 
 
 
+/* ===== CONCALLS: guidance posts from your bot, kept in a list and followed against the price ===== */
+// Optional: paste the published CSV link of a Google Sheet tab with the columns  date,symbol,name,quarter,sales_pct,profit_pct,sales_note,profit_note,tags
+// (date as 2026-11-14). Leave empty to use only what you paste into the box on the Concalls tab (saved in this browser).
+const CC_CSV_URL = "";
+const ccApi = (function () {
+  const KEY = "ccLog", MON = {jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12};
+  let LOG = []; try { LOG = JSON.parse(localStorage.getItem(KEY) || "[]") || []; } catch (e) {}
+  let FEED = [], FEEDERR = "", FEEDT = 0, BARS = {}, BUSY = {}, FILT = "all", MSG = "", built = false, REQ = {};
+  const host = () => document.getElementById("ccbody");
+  const $c = s => { const h = host(); return h ? h.querySelector(s) : null; };
+  const p2 = n => (n < 10 ? "0" : "") + n;
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(LOG)); } catch (e) {} };
+  const num = s => { const v = parseFloat(String(s).replace(/,/g, "")); return isFinite(v) ? v : NaN; };
+  const fmtD = d => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? (+m[3]) + " " + ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][+m[2] - 1] + " " + m[1] : esc(d || "-"); };
+  const pct = v => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(1) + "%" : "-");
+  const cls = v => (!isFinite(v) ? "" : v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
+
+  function growth(block, re) {
+    const m = re.exec(block); if (!m) return null;
+    const rest = m[4] || "", after = block.slice(m.index + m[0].length), q = /^\s*\n\s*(?:💬|")\s*([^\n]+)/.exec(after) || /^\n\s*💬\s*([^\n]+)/.exec(after);
+    const v = num(m[3]); if (!isFinite(v)) return null;
+    return {v: m[1] === "-" ? -Math.abs(v) : v, approx: !!m[2], fy: ((/FY\s?\d{2,4}/i.exec(rest) || [""])[0] || "").replace(/\s+/g, ""),
+      raised: /raised|upgrade|higher/i.test(rest), cut: /\bcut\b|lowered|downgrade|reduced/i.test(rest), isnew: /\bnew\b/i.test(rest), derived: /\[derived\]/i.test(rest),
+      quote: q ? q[1].replace(/^[“"]|[”"]$/g, "").trim() : ""};
+  }
+  function parseOne(block) {
+    const dm = /Call:\s*(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s+(\d{4})/i.exec(block); if (!dm || !MON[dm[2].toLowerCase()]) return null;
+    const date = dm[3] + "-" + p2(MON[dm[2].toLowerCase()]) + "-" + p2(+dm[1]);
+    let sym = "", name = "";
+    const lines = block.split(/\n/).map(x => x.trim()).filter(x => x && !/^screener$/i.test(x));
+    for (const ln of lines) { const m = /^(.*?)\s*\(([A-Z0-9&\-]{2,20})\)\s*$/.exec(ln); if (m && !/growth|call:/i.test(ln)) { sym = m[2]; name = m[1].trim(); break; } }
+    if (!sym) { const m = /NSE:\s*([A-Z0-9&\-]{2,20})/i.exec(block); if (m) sym = m[1].toUpperCase(); }
+    if (!sym) return null;
+    const qm = /Q[1-4]\s*FY\s?\d{2,4}/i.exec(block);
+    const sales = growth(block, /^[^\S\n]*(?:📈\s*)?(?:Sales|Revenue)[^\n:]*:\s*()([≈~]?)\s*(-?[\d,.]+)\s*%([^\n]*)/im), profit = growth(block, /^[^\S\n]*(?:📈\s*)?(?:Profit|PAT|Net profit)[^\n:]*:\s*()([≈~]?)\s*(-?[\d,.]+)\s*%([^\n]*)/im);
+    // the sign group (1) is unused by the pattern above, so negatives are read from the number itself
+    [sales, profit].forEach(g => { if (g && !isFinite(g.v)) g.v = NaN; });
+    if (!sales && !profit) return null;
+    return {id: sym + "|" + date + "|" + (qm ? qm[0].replace(/\s+/g, "").toUpperCase() : ""), sym, name, q: qm ? qm[0].replace(/\s+/g, " ").toUpperCase() : "", date, sales, profit, added: Date.now()};
+  }
+  function parsePosts(text) {
+    const out = [], re = /^[^\n]*Call:\s*\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}[^\n]*$/gim; let last = 0, m;
+    while ((m = re.exec(text))) { const e = parseOne(text.slice(last, m.index + m[0].length)); last = m.index + m[0].length; if (e) out.push(e); }
+    return out;
+  }
+  const all = () => { const seen = {}, out = []; LOG.concat(FEED).forEach(e => { if (e && e.id && !seen[e.id]) { seen[e.id] = 1; out.push(e); } }); return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)); };
+
+  async function loadFeed() {
+    if (!CC_CSV_URL || Date.now() - FEEDT < 10 * 60e3) return; FEEDT = Date.now();
+    try {
+      const r = await fetch(CC_CSV_URL, {cache: "no-store"}), t = await r.text(), rows = parseCSV(t); if (rows.length < 2) throw new Error("empty");
+      const h = rows[0].map(x => String(x).trim().toLowerCase()), ix = k => h.indexOf(k), g = (r2, k) => (ix(k) >= 0 ? String(r2[ix(k)] || "").trim() : "");
+      FEED = rows.slice(1).map(r2 => {
+        const sym = g(r2, "symbol").toUpperCase().replace(/^(NSE|BSE):/, ""), date = g(r2, "date").slice(0, 10), sv = num(g(r2, "sales_pct")), pv = num(g(r2, "profit_pct")), tg = g(r2, "tags").toLowerCase();
+        if (!sym || !/^\d{4}-\d{2}-\d{2}$/.test(date) || (!isFinite(sv) && !isFinite(pv))) return null;
+        const mk = (v, n) => (isFinite(v) ? {v, approx: false, fy: "", raised: /raised|upgrade/.test(tg), cut: /cut|lower/.test(tg), isnew: /new/.test(tg), derived: /derived/.test(tg), quote: n} : null);
+        return {id: sym + "|" + date + "|" + g(r2, "quarter").replace(/\s+/g, "").toUpperCase(), sym, name: g(r2, "name"), q: g(r2, "quarter").toUpperCase(), date, sales: mk(sv, g(r2, "sales_note")), profit: mk(pv, g(r2, "profit_note")), feed: true};
+      }).filter(Boolean); FEEDERR = "";
+    } catch (e) { FEEDERR = "Could not read the sheet feed (" + ((e && e.message) || e) + ")."; }
+  }
+  const mfetch = (u, ms) => { const ctl = typeof AbortController !== "undefined" ? new AbortController() : null, k = setTimeout(() => { if (ctl) ctl.abort(); }, ms || 8000); return fetch(u, {cache: "no-store", signal: ctl ? ctl.signal : undefined}).finally(() => clearTimeout(k)); };
+  async function getBars(sym) {
+    if (BARS[sym] !== undefined || BUSY[sym]) return; BUSY[sym] = 1;
+    try {
+      if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) throw 0;
+      const r = await mfetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF"), j = await r.json(), rows = j && j.bars && j.bars[sym];
+      BARS[sym] = rows && rows.length > 5 ? rows.map(x => ({t: String(x[0]).slice(0, 10), c: +x[4]})).filter(b => isFinite(b.c)) : null;
+    } catch (e) { BARS[sym] = null; }
+    delete BUSY[sym]; try { if (current === "cc") list(); } catch (e) {}
+  }
+  function track(e) {
+    const b = BARS[e.sym]; if (!b || !b.length) return null;
+    let at = null; for (let i = 0; i < b.length; i++) { if (b[i].t <= e.date) at = b[i]; else break; }
+    const first = b[0].t, lastb = b[b.length - 1];
+    if (!at || e.date < first) return null;
+    const ds = Math.round((Date.parse(lastb.t) - Date.parse(e.date)) / 864e5);
+    return {at: at.c, now: lastb.c, ret: (lastb.c / at.c - 1) * 100, days: ds};
+  }
+  const big = (g, n) => g && isFinite(g.v) && g.v >= n;
+  /* How strong the guidance READS. A fixed, simple rule; it has not been tested against price moves (the summary below will show that over time). */
+  function grade(e) {
+    const why = []; let pts = 0, cut = false;
+    const sg = e.sales, pg = e.profit;
+    if (sg && isFinite(sg.v)) { if (sg.v >= 25) { pts += 2; why.push("sales guide 25%+ (+2)"); } else if (sg.v >= 10) { pts += 1; why.push("sales guide 10-25% (+1)"); } else if (sg.v < 0) { cut = true; why.push("negative sales guide"); }
+      if (sg.v > 100) { pts -= 1; why.push("sales guide above 100%: check the base and what it covers (-1)"); } }
+    if (pg && isFinite(pg.v)) { if (pg.v >= 25) { pts += 2; why.push("profit guide 25%+ (+2)"); } else if (pg.v >= 10) { pts += 1; why.push("profit guide 10-25% (+1)"); } else if (pg.v < 0) { cut = true; why.push("negative profit guide"); } }
+    if ((sg && sg.cut) || (pg && pg.cut)) { cut = true; why.push("guidance cut"); }
+    if ((sg && sg.raised) || (pg && pg.raised)) { pts += 1; why.push("raised (+1)"); }
+    if (sg && pg && sg.v >= 15 && pg.v >= 15) { pts += 1; why.push("sales and profit both 15%+ (+1)"); }
+    if ((!sg || sg.derived) && (!pg || pg.derived)) { pts -= 1; why.push("numbers are derived by the bot, not stated (-1)"); }
+    if (!sg || !pg) why.push("only one of sales or profit given");
+    const label = cut ? "Weak" : pts >= 5 ? "Excellent" : pts >= 3 ? "Good" : pts >= 2 ? "Average" : "Weak";
+    return {pts, label, why};
+  }
+  const gcol = l => (l === "Excellent" ? "color:var(--good);font-weight:800" : l === "Good" ? "color:var(--good);font-weight:600" : l === "Average" ? "color:var(--warn);font-weight:600" : "color:var(--bad);font-weight:600");
+  function matches(e) {
+    if (FILT === "raised") return !!((e.sales && e.sales.raised) || (e.profit && e.profit.raised));
+    if (FILT === "s25") return big(e.sales, 25);
+    if (FILT === "p25") return big(e.profit, 25);
+    if (FILT === "both") return big(e.sales, 25) && big(e.profit, 25);
+    if (FILT === "good") { const l = grade(e).label; return l === "Excellent" || l === "Good"; }
+    return true;
+  }
+  function gcell(g) {
+    if (!g) return '<span class="note">-</span>';
+    const t = [g.raised ? '<span style="color:var(--good)" title="raised">⬆ raised</span>' : "", g.cut ? '<span style="color:var(--bad)">⬇ cut</span>' : "", g.isnew ? "✦ new" : "", g.derived ? '<span title="the bot worked this number out from the text; check the quote" style="color:var(--warn)">derived</span>' : ""].filter(Boolean).join(" · ");
+    return "<b>" + (g.approx ? "≈" : "") + g.v + "%</b>" + (g.fy ? ' <span class="note">' + esc(g.fy) + "</span>" : "") + (t ? '<div class="note" style="margin:2px 0 0">' + t + "</div>" : "");
+  }
+  function summary(items) {
+    const defs = [["All calls", () => true], ["Sales guide 25%+", e => big(e.sales, 25)], ["Profit guide 25%+", e => big(e.profit, 25)], ["Raised guidance", e => (e.sales && e.sales.raised) || (e.profit && e.profit.raised)], ["Guide under 25%", e => !big(e.sales, 25) && !big(e.profit, 25)], ["Grade Excellent", e => grade(e).label === "Excellent"], ["Grade Good", e => grade(e).label === "Good"], ["Grade Average or Weak", e => { const l = grade(e).label; return l === "Average" || l === "Weak"; }]];
+    const rows = defs.map(d => {
+      const t = items.filter(d[1]).map(e => track(e)).filter(x => x && x.days >= 5), r = t.map(x => x.ret).sort((a, b) => a - b);
+      if (r.length < 3) return ""; const avg = r.reduce((a, b) => a + b, 0) / r.length, med = r[Math.floor(r.length / 2)], up = r.filter(v => v > 0).length;
+      return "<tr><td>" + d[0] + '</td><td class="num">' + r.length + '</td><td class="num" style="' + cls(avg) + '">' + pct(avg) + '</td><td class="num" style="' + cls(med) + '">' + pct(med) + '</td><td class="num">' + Math.round(up / r.length * 100) + "%</td></tr>";
+    }).join("");
+    if (!rows) return '<p class="note">The summary appears once at least 3 calls are 5 or more days old and have a price.</p>';
+    return '<div class="wrap"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Calls</th><th class="num">Avg since call</th><th class="num">Median</th><th class="num">Up</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<p class="note">Calls are different ages and this is the price move only, not against the Nifty. With under 100 calls treat it as a rough view; a few big winners can lift the average.</p>';
+  }
+  function list() {
+    const el = $c("#cclist"); if (!el) return;
+    const items = all(), shown = items.filter(matches);
+    items.forEach(e => { if (!REQ[e.sym]) { REQ[e.sym] = 1; } });
+    const need = items.map(e => e.sym).filter((s, i, a) => a.indexOf(s) === i && BARS[s] === undefined && !BUSY[s]).slice(0, 6); need.forEach(s => getBars(s));
+    const rows = shown.map(e => {
+      const t = track(e), gr = grade(e), q = [e.sales && e.sales.quote ? "Sales: " + e.sales.quote : "", e.profit && e.profit.quote ? "Profit: " + e.profit.quote : ""].filter(Boolean);
+      return "<tr><td><b>" + esc(e.sym) + '</b><div class="note" style="margin:2px 0 0">' + esc(e.name || "") + "</div></td><td>" + fmtD(e.date) + '<div class="note" style="margin:2px 0 0">' + esc(e.q || "") + "</div></td><td>" + gcell(e.sales) + "</td><td>" + gcell(e.profit) + '</td><td><span style="' + gcol(gr.label) + '" title="' + esc(gr.why.join("; ")) + '">' + gr.label + '</span><div class="note" style="margin:2px 0 0;max-width:22ch">' + esc(gr.why.slice(0, 2).join("; ")) + "</div></td><td class=\"num\">" +
+        (t ? t.at.toFixed(1) : BARS[e.sym] === null ? '<span class="note" title="no price from the Worker">n/a</span>' : '<span class="note">…</span>') + '</td><td class="num">' + (t ? t.now.toFixed(1) : "") + '</td><td class="num" style="' + (t ? cls(t.ret) : "") + '"><b>' + (t ? pct(t.ret) : "-") + '</b><div class="note" style="margin:2px 0 0">' + (t ? (t.days < 0 ? "waiting for the next session" : t.days + " days") : "") + "</div></td><td>" +
+        (q.length ? '<details><summary style="cursor:pointer">Quotes</summary><div class="note" style="max-width:46ch">' + q.map(esc).join("<br>") + "</div></details>" : "") + '</td><td>' + (e.feed ? "" : '<button class="ccdel" data-id="' + esc(e.id) + '" title="remove" style="border:0;background:none;cursor:pointer;color:var(--mute)">✕</button>') + "</td></tr>";
+    }).join("");
+    const flt = [["all", "All"], ["good", "Excellent + Good"], ["raised", "Raised"], ["s25", "Sales 25%+"], ["p25", "Profit 25%+"], ["both", "Both 25%+"]].map(f => '<button class="ccf" data-f="' + f[0] + '" style="padding:5px 12px;border-radius:99px;border:1px solid var(--line,#ccc);background:' + (FILT === f[0] ? "var(--a,#0e7490)" : "transparent") + ";color:" + (FILT === f[0] ? "#fff" : "inherit") + ';cursor:pointer">' + f[1] + "</button>").join(" ");
+    el.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">' + flt + '</div>' +
+      (shown.length ? '<div class="wrap"><table class="acctbl"><thead><tr><th>Company</th><th>Call</th><th>Sales guide</th><th>Profit guide</th><th>Grade</th><th class="num">Price at call</th><th class="num">Now</th><th class="num">Since call</th><th></th><th></th></tr></thead><tbody>' + rows + "</tbody></table></div>" : '<div class="card empty">' + (items.length ? "No calls match this filter." : "No calls yet. Paste a post from your bot above, or add one by hand.") + "</div>") +
+      '<h3 style="margin:18px 0 6px">How the tracked calls did</h3>' + summary(items) + (FEEDERR ? '<p class="note" style="color:var(--bad)">' + esc(FEEDERR) + "</p>" : "") +
+      '<p class="note">Prices come from your Worker (daily closes). "Price at call" is the close on the call date, or the last close before it. Calls made after market hours react the next day, so the first day of the move is counted in "Since call". The <b>Grade</b> only says how strong the guidance reads (size, raised, both sales and profit, stated or derived); hover over it to see why. It is a fixed rule and has not been tested against price moves, so judge it by the summary table once you have enough calls. Numbers marked <b>derived</b> were worked out by the bot from the call text: check the quote, and check that a percentage on one revenue line is not being read as total sales.</p>';
+  }
+  function addPasted() {
+    const ta = $c("#ccpaste"), t = ta ? ta.value : ""; if (!t.trim()) { MSG = "Paste at least one post first."; msg(); return; }
+    const ps = parsePosts(t); if (!ps.length) { MSG = "No post found. Each post needs its company line with the symbol in brackets, a Sales or Profit growth line, and the 📅 Call: date line."; msg(); return; }
+    let add = 0, upd = 0; ps.forEach(p => { const i = LOG.findIndex(x => x.id === p.id); if (i >= 0) { LOG[i] = p; upd++; } else { LOG.push(p); add++; } });
+    save(); ta.value = ""; MSG = add + " added" + (upd ? ", " + upd + " updated" : "") + ": " + ps.map(p => p.sym).join(", ") + "."; msg(); list();
+  }
+  function addHand() {
+    const g = id => { const x = $c(id); return x ? x.value.trim() : ""; };
+    const sym = g("#ccsym").toUpperCase().replace(/^(NSE|BSE):/, ""), date = g("#ccdate"), sv = num(g("#ccsales")), pv = num(g("#ccprofit")), q = g("#ccq").toUpperCase();
+    if (!sym || !/^\d{4}-\d{2}-\d{2}$/.test(date) || (!isFinite(sv) && !isFinite(pv))) { MSG = "Enter the symbol, the call date as 2026-11-14, and at least one growth percentage."; msg(); return; }
+    const mk = v => (isFinite(v) ? {v, approx: false, fy: "", raised: false, cut: false, isnew: false, derived: false, quote: ""} : null);
+    const e = {id: sym + "|" + date + "|" + q.replace(/\s+/g, ""), sym, name: "", q, date, sales: mk(sv), profit: mk(pv), added: Date.now()};
+    const i = LOG.findIndex(x => x.id === e.id); if (i >= 0) LOG[i] = e; else LOG.push(e); save(); MSG = sym + " saved."; msg(); list();
+  }
+  const msg = () => { const m = $c("#ccmsg"); if (m) m.textContent = MSG; };
+  function csv() {
+    const L = ["date,symbol,name,quarter,sales_pct,profit_pct,sales_note,profit_note,tags"], q = s => '"' + String(s || "").replace(/"/g, '""') + '"';
+    all().forEach(e => { const tg = [(e.sales && e.sales.raised) || (e.profit && e.profit.raised) ? "raised" : "", (e.sales && e.sales.derived) || (e.profit && e.profit.derived) ? "derived" : ""].filter(Boolean).join(" ");
+      L.push([e.date, e.sym, q(e.name), q(e.q), e.sales ? e.sales.v : "", e.profit ? e.profit.v : "", q(e.sales && e.sales.quote), q(e.profit && e.profit.quote), tg].join(",")); });
+    return L.join("\n");
+  }
+  function build() {
+    const h = host(); if (!h || built) return; built = true;
+    h.innerHTML = '<h2 class="hb" style="background:linear-gradient(120deg,#0e7490,#2563eb)">Concalls</h2>' +
+      '<div class="card"><b>Add calls</b><p class="note">Paste one or more posts from your bot (the whole message, as it appears in Telegram). The page reads the symbol, quarter, call date, the sales and profit guidance, and the quotes, then follows the price from the call date.</p>' +
+      '<textarea id="ccpaste" rows="6" placeholder="Paste the bot post here…" style="width:100%;box-sizing:border-box;font:inherit;padding:8px;border-radius:8px"></textarea>' +
+      '<div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button id="ccadd" style="padding:7px 16px;border-radius:8px;border:0;background:#0e7490;color:#fff;cursor:pointer;font-weight:600">Add pasted posts</button><span id="ccmsg" class="note" style="margin:0"></span></div>' +
+      '<details><summary style="cursor:pointer">Or add one by hand</summary><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><input id="ccsym" placeholder="Symbol" size="10"><input id="ccdate" placeholder="Call date 2026-11-14" size="18"><input id="ccq" placeholder="Q2 FY27" size="9"><input id="ccsales" placeholder="Sales guide %" size="12"><input id="ccprofit" placeholder="Profit guide %" size="12"><button id="ccadd2" style="padding:5px 14px;border-radius:8px;cursor:pointer">Save</button></div></details>' +
+      '<div style="margin-top:8px"><button id="cccsv" style="padding:4px 12px;border-radius:8px;cursor:pointer">Copy all as CSV</button> <span class="note">Calls you paste are kept in this browser only. Copy the CSV to move them to a Google Sheet; a sheet link can be set as CC_CSV_URL near the top of the Concalls code.</span></div></div>' +
+      '<div class="card" style="margin-top:12px"><div id="cclist"></div></div>';
+    h.addEventListener("click", ev => {
+      const t = ev.target; if (!t) return;
+      if (t.id === "ccadd") addPasted(); else if (t.id === "ccadd2") addHand();
+      else if (t.id === "cccsv") { const s = csv(); try { navigator.clipboard.writeText(s).then(() => { MSG = "CSV copied."; msg(); }, () => { MSG = "Copy failed; select the text manually."; msg(); }); } catch (e) { MSG = "Copy is not available here."; msg(); } }
+      else if (t.classList && t.classList.contains("ccf")) { FILT = t.getAttribute("data-f"); list(); }
+      else if (t.classList && t.classList.contains("ccdel")) { const id = t.getAttribute("data-id"); LOG = LOG.filter(x => x.id !== id); save(); list(); }
+    });
+  }
+  function open() { build(); loadFeed().then(() => list()); list(); }
+  return {open, parsePosts};
+})();
+const ccPaint = () => ccApi.open();
+
 /* ===== APP ===== */
 let current = "ov", lastRows = [];
 function show(id) {
@@ -7099,6 +7278,7 @@ function show(id) {
   if (id === "tc") { try { tcPaint(); } catch (e) {} }
   if (id === "rm") { try { rmPaint(); } catch (e) {} }
   if (id === "cb") { try { cbPaint(); } catch (e) {} }
+  if (id === "cc") { try { ccPaint(); } catch (e) {} }
   if (id === "st") { try { stPaint(); } catch (e) {} }
   if (id === "n5") { try { n5Paint(); } catch (e) {} }
   if (id === "mx") { try { mxPaint(); } catch (e) {} }
@@ -7170,7 +7350,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cc" aria-selected="false" style="--a:#0e7490;--b:#2563eb">Concalls</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<div class="sl sidetop" style="background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:8px 12px;margin-bottom:10px">' + idxBtns + '<button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button><button role="tab" data-t="mx" aria-selected="false" style="--a:#b45309;--b:#eab308">MCX</button></div><details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -7198,6 +7378,10 @@ function render(stocks) {
   if (!document.getElementById("tc")) {
     const tc = document.createElement("section"); tc.className = "stock"; tc.id = "tc"; tc.style.cssText = "--a:#4f46e5;--b:#06b6d4";
     tc.innerHTML = '<div id="tcbody"></div>'; views.appendChild(tc);
+  }
+  if (!document.getElementById("cc")) {
+    const cc = document.createElement("section"); cc.className = "stock"; cc.id = "cc"; cc.style.cssText = "--a:#0e7490;--b:#2563eb";
+    cc.innerHTML = '<div id="ccbody"></div>'; views.appendChild(cc);
   }
   if (!document.getElementById("cb")) {
     const cb = document.createElement("section"); cb.className = "stock"; cb.id = "cb"; cb.style.cssText = "--a:#be123c;--b:#f59e0b";
@@ -7256,7 +7440,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "st" || current === "n5" || current === "cu" || current === "op" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "cc" || current === "st" || current === "n5" || current === "cu" || current === "op" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
