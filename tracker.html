@@ -4241,18 +4241,18 @@ const ppApi = (function () {
     const saved = MAN.length ? '<p class="note" style="margin:10px 0 0">Entered by hand: ' + MAN.map(m => "<b>" + E(symOfTk(m.ticker)) + '</b> <button type="button" class="cbtn" data-pmdel="' + E(m.ticker) + '">remove</button>').join(" &nbsp; ") + "</p>" : "";
     box.style.display = "";
     box.innerHTML = '<b>Add results by hand</b> <span class="note">For results that are out but not in the data file yet. Scored with the same rules as the rest of the tab.</span>' +
-      '<p class="note" style="margin:8px 0 4px">Paste one line per quarter, in this order: <b>Revenue, EBITDA %, PBT, Net profit, EPS</b> (Rs crore). Short version: paste <b>2 lines</b>, the latest quarter and then the same quarter last year; the previous quarter is taken from the data file. Or paste 3 lines (latest, previous, same quarter last year) if the data file does not have the previous quarter yet. Put the symbol at the start of the first line, or in the Symbol box. Several stocks can be pasted together, each starting with its symbol. No thousands commas, please.</p>' +
-      '<textarea id="pm_paste" rows="4" spellcheck="false" style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:.92rem" placeholder="AARTISURF, 291.24, 10.30, 17.16, 12.50, 14.76&#10;272.87, 7.40, 12.19, 9.00, 10.63&#10;179.17, 5.20, 2.20, 1.56, 1.84"></textarea>' +
-      '<div class="charttools" style="border:0;padding:10px 0 0;gap:10px 14px"><label>Symbol <input id="pm_sym" type="text" style="width:130px" value="' + E(sym) + '" placeholder="AARTISURF"></label>' +
-      '<label>Result date <input id="pm_rd" type="date" value="' + E(pd.d || "") + '"></label>' +
+      '<p class="note" style="margin:8px 0 4px">Paste one line per quarter, in this order: <b>Revenue, EBITDA %, PBT, Net profit, EPS</b> (Rs crore). Short version: paste <b>2 lines</b>, the latest quarter and then the same quarter last year; the previous quarter is taken from the data file. Or paste 3 lines (latest, previous, same quarter last year) if the data file does not have the previous quarter yet. Type the symbol in the Symbol box, so the lines hold numbers only. (To paste several stocks together instead, start the first line of each stock with its symbol.) No thousands commas, please. Result date, price, market cap, 52-week high and 12-month EPS are filled in automatically.</p>' +
+      '<div class="charttools" style="border:0;padding:6px 0 4px;gap:10px 14px"><label><b>Symbol</b> <input id="pm_sym" type="text" style="width:150px" value="' + E(sym) + '" placeholder="AARTISURF"></label></div>' +
+      '<textarea id="pm_paste" rows="4" spellcheck="false" style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:.92rem" placeholder="291.24, 10.30, 17.16, 12.50, 14.76&#10;272.87, 7.40, 12.19, 9.00, 10.63&#10;179.17, 5.20, 2.20, 1.56, 1.84"></textarea>' +
+      '<details style="margin-top:6px"><summary class="note" style="cursor:pointer">Change automatic values (optional)</summary><div class="charttools" style="border:0;padding:10px 0 0;gap:10px 14px"><label>Result date <input id="pm_rd" type="date" value="' + E(pd.d || "") + '"></label>' +
       '<label title="Leave blank to use the quarter that ended just before the result date">Quarter end <input id="pm_qe" type="date"></label>' +
       '<label title="Leave blank to use the live price">Price (Rs) ' + inp("price", 84, "live") + '</label><label>Market cap (Rs cr) ' + inp("mcap", 84, "optional") + '</label><label>52-week high ' + inp("high52", 84, "optional") + '</label><label title="Sum of the last four quarters\' EPS. Optional; without it the forward P/E uses the latest quarter x 4">EPS, last 12 months ' + inp("epsttm", 84, "optional") + '</label></div>' +
-      '<p class="note" style="margin:6px 0 0">The result date is needed (it is filled in for stocks in the "just announced" list unless you paste several stocks, which use that list too). Price, market cap, 52-week high and EPS for 12 months apply when you paste a single stock.</p>' +
+      '<p class="note" style="margin:6px 0 0">Everything here is filled in automatically: result date from the "just announced" list or the results calendar, price live, 52-week high from the daily candles, market cap and 12-month EPS from the data file. Type a value only to override it, when you paste a single stock.</p></details>' +
       '<div style="margin-top:10px"><button type="button" class="cbtn" id="pmPaste">Save pasted results and score</button> <button type="button" class="cbtn" id="pmCancel">Close</button> <span class="note" id="pmmsg"></span></div>' +
       '<details style="margin-top:12px"><summary class="note" style="cursor:pointer">Or type the numbers one box at a time</summary><div class="wrap" style="margin-top:10px"><table class="peadt"><tr><th></th><th>Latest quarter</th><th>Previous quarter</th><th>Same quarter last year</th></tr>' +
       rowF("Revenue", "rev") + rowF("EBITDA margin %", "ebm") + rowF("Net profit", "np") + "<tr><td><b>EPS</b></td><td>" + inp("epsc") + "</td><td></td><td></td></tr></table></div>" +
       '<div style="margin-top:10px"><button type="button" class="cbtn" id="pmSave">Save typed numbers and score</button></div></details>' + saved;
-    const t = $e("#pm_paste"); if (t) t.focus();
+    const t = $e(sym ? "#pm_paste" : "#pm_sym"); if (t) t.focus();
   }
   /* turn pasted lines into stocks: [{sym, rows: [[rev, ebitda%, pbt, np, eps], ...]}] */
   function manParse(text, defSym) {
@@ -4272,6 +4272,14 @@ const ppApi = (function () {
     stocks.forEach(s => { if (s.rows.length > 3) errs.push(s.sym + ": " + s.rows.length + " lines found, expected 2 or 3."); });
     return {stocks: stocks.filter(s => s.rows.length <= 3), errs};
   }
+  /* daily candles through the Worker: used for the live price fallback and the 52-week high */
+  async function manBars(sym) {
+    try {
+      if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return null;
+      const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF", {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym];
+      return rows && rows.length > 5 ? rows.map(x => ({t: String(x[0]).slice(0, 10), h: +x[2], c: +x[4]})).filter(b => isFinite(b.c)) : null;
+    } catch (e) { return null; }
+  }
   async function manPaste() {
     const say = t => { const n = $e("#pmmsg"); if (n) n.textContent = t; };
     const sv = id => { const el = $e("#pm_" + id); return el ? String(el.value || "").trim() : ""; }, nv = id => num(sv(id));
@@ -4279,27 +4287,48 @@ const ppApi = (function () {
     const P = manParse((($e("#pm_paste") || {}).value) || "", defSym);
     if (!P.stocks.length) return say(P.errs[0] || "Paste the numbers first.");
     const single = P.stocks.length === 1, skipped = P.errs.slice();
-    say("Getting live prices...");
-    const qp = {};
-    try { if (typeof MARKET_API_URL !== "undefined" && MARKET_API_URL) { const r = await fetch(MARKET_API_URL + "?quotes=" + encodeURIComponent(P.stocks.map(s => s.sym).slice(0, 20).join(",")), {cache: "no-store"}), j = await r.json().catch(() => null); if (j && Array.isArray(j.quotes)) j.quotes.forEach(q => { if (q && q.s && isFinite(+q.p)) qp[String(q.s).toUpperCase()] = +q.p; }); } } catch (e) {}
+    say("Getting prices, history and dates...");
+    const qp = {}, bars = {};
+    await Promise.all([
+      (async () => { try { if (typeof MARKET_API_URL !== "undefined" && MARKET_API_URL) { const r = await fetch(MARKET_API_URL + "?quotes=" + encodeURIComponent(P.stocks.map(s => s.sym).slice(0, 20).join(",")), {cache: "no-store"}), j = await r.json().catch(() => null); if (j && Array.isArray(j.quotes)) j.quotes.forEach(q => { if (q && q.s && isFinite(+q.p)) qp[String(q.s).toUpperCase()] = +q.p; }); } } catch (e) {} })(),
+      ...P.stocks.slice(0, 12).map(async st => { bars[st.sym] = await manBars(st.sym); })
+    ]);
     const added = [], notes = [], g = x => (isFinite(x) ? x : "");
+    const today = todayISO(), AM = annMap();
     P.stocks.forEach(st => {
-      const pe = pending().find(x => x.sym === st.sym), old = DATA.find(x => symOfTk(x.ticker) === st.sym);
-      const rd = (pe && pe.d) || sv("rd"); if (!rd) { skipped.push(st.sym + ": no result date (enter one above)."); return; }
-      const price = single && isFinite(nv("price")) ? nv("price") : qp[st.sym]; if (!isFinite(price)) { skipped.push(st.sym + ": no live price found; type the price in the Price box."); return; }
+      const pe = pending().find(x => x.sym === st.sym), old = DATA.find(x => symOfTk(x.ticker) === st.sym), oF = BASE.find(x => symOfTk(x.ticker) === st.sym), fe = k => (oF ? num(oF[k]) : NaN);
+      const q0 = oF ? String(oF.quarter_end || "").slice(0, 10) : "";
+      /* result date: the "just announced" list, else the results calendar, else what you typed, else today */
+      let rd = (pe && pe.d) || (single && sv("rd")) || "";
+      if (!rd) { const ds = AM[st.sym] ? [...AM[st.sym]].filter(d => !q0 || d > q0).sort() : []; if (ds.length) rd = ds[ds.length - 1]; }
+      if (!rd) { rd = today; notes.push(st.sym + ": result date not found, so today was used. Open Change automatic values to set it."); }
       const qe0 = (single && sv("qe")) || qEndBefore(rd), c = st.rows[0], eb = r => (isFinite(r[0]) && isFinite(r[1]) ? +(r[0] * r[1] / 100).toFixed(2) : "");
+      const bb = bars[st.sym];
+      const price = single && isFinite(nv("price")) ? nv("price") : (isFinite(qp[st.sym]) ? qp[st.sym] : (bb && bb.length ? bb[bb.length - 1].c : NaN));
+      if (!isFinite(price)) { skipped.push(st.sym + ": no price found for this symbol (check the spelling), or type one under Change automatic values."); return; }
       let p, y;
       if (st.rows.length === 3) { p = st.rows[1]; y = st.rows[2]; }
       else if (st.rows.length === 2) {
         y = st.rows[1];
-        const oF = BASE.find(x => symOfTk(x.ticker) === st.sym), fe = k => (oF ? num(oF[k]) : NaN);
-        if (!oF || String(oF.quarter_end || "").slice(0, 10) !== qEndBefore(qe0) || !isFinite(fe("rev_cur")) || !isFinite(fe("np_cur"))) { skipped.push(st.sym + ": the data file does not hold the previous quarter (" + qEndBefore(qe0) + "), so paste all 3 lines."); return; }
+        if (!oF || q0 !== qEndBefore(qe0) || !isFinite(fe("rev_cur")) || !isFinite(fe("np_cur"))) { skipped.push(st.sym + ": the data file does not hold the previous quarter (" + qEndBefore(qe0) + "), so paste all 3 lines."); return; }
         p = [fe("rev_cur"), fe("rev_cur") > 0 ? fe("ebitda_cur") / fe("rev_cur") * 100 : NaN, NaN, fe("np_cur"), fe("eps_cur")];
         notes.push(st.sym + ": previous quarter (" + qEndBefore(qe0) + ") taken from the data file: revenue " + pf(p[0], 2) + ", net profit " + pf(p[3], 2) + ".");
       } else { skipped.push(st.sym + ": the data file has the previous quarter but not the same quarter last year, so paste 2 lines (latest quarter, then the same quarter last year)."); return; }
-      const rec = {ticker: "NSE:" + st.sym, name: (pe && pe.n) || (old && old.name) || st.sym, price, mcap: single ? g(nv("mcap")) : "", high52: single ? g(nv("high52")) : "", eps_ttm: single ? g(nv("epsttm")) : "", eps_cur: c[4], quarter_end: qe0, result_date: rd,
+      /* 52-week high from the daily candles (or the file's own value) */
+      let hi = single && isFinite(nv("high52")) ? nv("high52") : NaN;
+      if (!isFinite(hi) && bb && bb.length) { const cut = new Date(Date.parse(today + "T00:00:00Z") - 365 * 864e5).toISOString().slice(0, 10); bb.forEach(b => { if (b.t >= cut && isFinite(b.h)) hi = isFinite(hi) ? Math.max(hi, b.h) : b.h; }); if (isFinite(hi)) hi = Math.max(hi, price); }
+      if (!isFinite(hi)) hi = fe("high52");
+      /* market cap: the file's market cap rescaled to today's price (share count does not change) */
+      let mc = single && isFinite(nv("mcap")) ? nv("mcap") : (fe("mcap") > 0 && fe("price") > 0 ? fe("mcap") * price / fe("price") : NaN);
+      /* trailing figures: the file's 12-month numbers, with the year-ago quarter swapped for the new one (only when the file holds the quarter right before) */
+      const prior = !!oF && q0 === qEndBefore(qe0);
+      let ttm = single && isFinite(nv("epsttm")) ? nv("epsttm") : NaN;
+      if (!isFinite(ttm) && prior && isFinite(y[4]) && isFinite(c[4])) { const b0 = fe("eps_ttm") > 0 ? fe("eps_ttm") : (fe("pe") > 0 && fe("price") > 0 ? fe("price") / fe("pe") : NaN); if (isFinite(b0)) ttm = b0 - y[4] + c[4]; }
+      if (!(ttm > 0)) { ttm = NaN; notes.push(st.sym + ": 12-month EPS could not be worked out, so the forward P/E uses the latest quarter x 4."); }
+      const npT = prior && isFinite(fe("np_ttm")) ? fe("np_ttm") - y[3] + c[3] : NaN;
+      const rec = {ticker: "NSE:" + st.sym, name: (pe && pe.n) || (old && old.name) || st.sym, price, mcap: g(mc), high52: g(hi), eps_ttm: g(ttm), pe: isFinite(ttm) ? +(price / ttm).toFixed(2) : "", np_ttm: g(npT), eps_cur: c[4], quarter_end: qe0, result_date: rd,
         rev_cur: c[0], rev_prev: p[0], rev_yoy: y[0], np_cur: c[3], np_prev: p[3], np_yoy: y[3], ebitda_cur: eb(c), ebitda_prev: eb(p), ebitda_yoy: eb(y)};
-      if (old) ["equity", "debt", "np_ttm", "pe", "mcap", "high52"].forEach(k => { if (old[k] != null && old[k] !== "" && (rec[k] === "" || rec[k] == null)) rec[k] = old[k]; });
+      if (oF) ["equity", "debt"].forEach(k => { if (oF[k] != null && oF[k] !== "") rec[k] = oF[k]; });
       MAN = MAN.filter(m => symOfTk(m.ticker) !== st.sym); MAN.push(rec); added.push(st.sym);
     });
     DATA = withManual(DATA);
