@@ -7095,7 +7095,7 @@ const ptApi = (function () {
   let LOG = [], SET = {cost: 0.25, ocost: 0, lots: {}};
   try { LOG = JSON.parse(localStorage.getItem(KEY) || "[]") || []; } catch (e) {}
   try { SET = Object.assign(SET, JSON.parse(localStorage.getItem(SKEY) || "{}") || {}); } catch (e) {}
-  let Q = {}, QT = 0, BARS = {}, BT = {}, BUSY = {}, MSG = "", KIND = "stock", host = null, built = false, TM = null;
+  let Q = {}, QT = 0, BARS = {}, BT = {}, BUSY = {}, MSG = "", KIND = "stock", host = null, built = false, TM = null, CID = null, CTF = "D", CH = null, CTOK = 0; const CB = {};
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(LOG)); localStorage.setItem(SKEY, JSON.stringify(SET)); } catch (e) {} };
   const todayS = () => { const d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); };
   const $p = s => (host ? host.querySelector(s) : null);
@@ -7160,21 +7160,22 @@ const ptApi = (function () {
     return '<div class="pttrack">' + tick(t.stop, "#ef4444", "Stop") + tick(t.target, "#22c55e", "Target") + tick(t.entry, "#3b82f6", "Entry") + (isFinite(px) ? '<b class="ptdot" title="Now ' + f2(px) + '" style="left:' + at(px) + '"></b>' : "") + "</div>" +
       '<div class="ptlv">' + [["Stop", t.stop, "#ef4444"], ["Entry", t.entry, "#3b82f6"], ["Target", t.target, "#16a34a"]].filter(x => isFinite(x[1])).sort((x, y) => x[1] - y[1]).map(x => '<span style="color:' + x[2] + '">' + x[0] + " " + f2(x[1]) + "</span>").join("") + "</div>";
   }
-  const chartBtn = t => '<button class="ptchart" data-id="' + esc(t.id) + '" title="' + (t.kind === "option" ? "Chart of the underlying with your strike marked (option premiums are not charted)" : "Open the chart with entry, stop and target") + '">📈 Chart' + (t.kind === "option" ? " (underlying)" : "") + "</button>";
+  const chartBtn = t => '<button class="ptchart" data-id="' + esc(t.id) + '" title="' + (t.kind === "option" ? "Chart of the underlying with your strike marked (option premiums are not charted)" : "Open the chart with entry, stop and target") + '">📈 ' + (CID === t.id ? "Hide chart" : "Chart" + (t.kind === "option" ? " (underlying)" : "")) + "</button>";
   function openRows() {
     const o = LOG.filter(t => t.status === "open"); if (!o.length) return '<div class="ptempty">No open positions. Add a trade above.</div>';
     return o.map(t => {
       const px = t.kind === "stock" ? last(t.sym) : t.cur, p = isFinite(px) ? pnl(t, px) : null, c = p ? (p.net > 0 ? "#16a34a" : p.net < 0 ? "#dc2626" : "#94a3b8") : "#94a3b8";
       const expired = t.kind === "option" && t.opt.expiry && t.opt.expiry < todayS();
-      return '<div class="ptpos" style="border-left-color:' + c + '"><div><div class="ptsym">' + esc(t.sym) + (t.kind === "option" ? " " + esc(t.opt.strike) + " " + esc(t.opt.type) : "") + '</div><div class="ptchips">' + chip(t.side === "long" ? "BUY" : (t.kind === "stock" ? "SHORT" : "SELL"), t.side === "long" ? "#16a34a" : "#dc2626") + chip(kindName(t), "#64748b") + chip(t.kind === "stock" ? t.qty + " qty" : t.lots + " x " + t.lotSize, "#475569") + (t.tag ? chip(esc(t.tag), "#0e7490") : "") + '</div><div class="note" style="margin:4px 0 0">' + esc(t.date) + (t.kind === "option" ? " · exp " + esc(t.opt.expiry || "-") : "") + (expired ? ' <b style="color:var(--bad)">expired: close it</b>' : "") + (t.note ? " · " + esc(t.note) : "") + '</div></div>' +
+      const card = '<div class="ptpos" style="border-left-color:' + c + '"><div><div class="ptsym">' + esc(t.sym) + (t.kind === "option" ? " " + esc(t.opt.strike) + " " + esc(t.opt.type) : "") + '</div><div class="ptchips">' + chip(t.side === "long" ? "BUY" : (t.kind === "stock" ? "SHORT" : "SELL"), t.side === "long" ? "#16a34a" : "#dc2626") + chip(kindName(t), "#64748b") + chip(t.kind === "stock" ? t.qty + " qty" : t.lots + " x " + t.lotSize, "#475569") + (t.tag ? chip(esc(t.tag), "#0e7490") : "") + '</div><div class="note" style="margin:4px 0 0">' + esc(t.date) + (t.kind === "option" ? " · exp " + esc(t.opt.expiry || "-") : "") + (expired ? ' <b style="color:var(--bad)">expired: close it</b>' : "") + (t.note ? " · " + esc(t.note) : "") + '</div></div>' +
         '<div class="ptpnl"><div class="ptbig" style="color:' + c + '">' + (p ? money(p.net) : "-") + '</div><div class="note" style="margin:0">' + (p ? pc(p.pct) : "") + '</div><div class="note" style="margin:4px 0 0">Entry ' + f2(t.entry) + " → " + (isFinite(px) ? "<b>" + f2(px) + "</b>" : (t.kind === "option" ? "enter premium" : "…")) + "</div></div>" +
         '<div>' + track(t, px) + '</div><div class="ptact">' + chartBtn(t) + '<input class="ptpx" data-id="' + esc(t.id) + '" placeholder="' + (t.kind === "option" ? "premium now" : "exit price") + '" size="9" inputmode="decimal">' + (t.kind === "option" ? '<button class="ptupd" data-id="' + esc(t.id) + '">Update</button>' : "") + '<button class="ptcls" data-id="' + esc(t.id) + '">Close</button><button class="ptdel" data-id="' + esc(t.id) + '" title="delete">✕</button></div></div>';
+      return card + inlineBox(t, false);
     }).join("");
   }
   function closedRows() {
     const c = LOG.filter(t => t.status === "closed").sort((a, b) => (a.exitDate < b.exitDate ? 1 : -1)); if (!c.length) return '<div class="ptempty">No closed trades yet.</div>';
     return '<div class="ptcgrid">' + c.map(t => { const p = pnl(t, t.exit), k = p.net > 0 ? "#16a34a" : p.net < 0 ? "#dc2626" : "#94a3b8";
-      return '<div class="ptcl" style="border-top-color:' + k + '"><div style="display:flex;justify-content:space-between;gap:6px"><b>' + esc(t.sym) + (t.kind === "option" ? " " + esc(t.opt.strike) + " " + esc(t.opt.type) : "") + '</b><span style="color:' + k + ';font-weight:800">' + money(p.net) + '</span></div><div class="note" style="margin:2px 0">' + sideTxt(t) + " · " + f2(t.entry) + " → " + f2(t.exit) + " (" + pc(p.pct) + ')</div><div class="note" style="margin:0">' + esc(t.exitDate || "") + " · " + esc(t.reason || "manual") + (t.tag ? " · " + esc(t.tag) : "") + '</div><div style="margin-top:6px;display:flex;gap:6px">' + chartBtn(t) + '<button class="ptdel" data-id="' + esc(t.id) + '" title="delete">✕</button></div></div>'; }).join("") + "</div>";
+      const card = '<div class="ptcl" style="border-top-color:' + k + '"><div style="display:flex;justify-content:space-between;gap:6px"><b>' + esc(t.sym) + (t.kind === "option" ? " " + esc(t.opt.strike) + " " + esc(t.opt.type) : "") + '</b><span style="color:' + k + ';font-weight:800">' + money(p.net) + '</span></div><div class="note" style="margin:2px 0">' + sideTxt(t) + " · " + f2(t.entry) + " → " + f2(t.exit) + " (" + pc(p.pct) + ')</div><div class="note" style="margin:0">' + esc(t.exitDate || "") + " · " + esc(t.reason || "manual") + (t.tag ? " · " + esc(t.tag) : "") + '</div><div style="margin-top:6px;display:flex;gap:6px">' + chartBtn(t) + '<button class="ptdel" data-id="' + esc(t.id) + '" title="delete">✕</button></div></div>'; return card + inlineBox(t, true); }).join("") + "</div>";
   }
   function tiles(c) {
     const r = c.map(t => pnl(t, t.exit)), tot = r.reduce((x, y) => x + y.net, 0), w = r.filter(x => x.net > 0).length, ap = r.reduce((x, y) => x + y.pct, 0) / r.length;
@@ -7189,7 +7190,7 @@ const ptApi = (function () {
     return tiles(c) + '<div class="wrap" style="margin-top:10px"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg return</th><th class="num">Net P&amp;L</th></tr></thead><tbody>' + grp("All closed trades", () => true) + grp("Stocks", t => t.kind === "stock") + grp("Options", t => t.kind === "option") + tags.map(g => grp("Tag: " + esc(g), t => t.tag === g)).join("") + "</tbody></table></div>" +
       '<p class="note">Net of costs (stocks ' + SET.cost + '% round trip, options Rs ' + (SET.ocost || 0) + " per lot). With fewer than about 30 closed trades this says little; one or two big trades can decide the result.</p>";
   }
-  function draw() { const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s) s.innerHTML = summary(); if (m) m.textContent = MSG; preview(); }
+  function draw() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s) s.innerHTML = summary(); if (m) m.textContent = MSG; preview(); inlineDraw(); }
   function setKind(k) {
     KIND = k; const a = $p("#ptfs"), b = $p("#ptfo"); if (a) a.style.display = k === "stock" ? "" : "none"; if (b) b.style.display = k === "option" ? "" : "none";
     host.querySelectorAll(".ptk").forEach(x => x.classList.toggle("on", x.getAttribute("data-k") === k)); preview();
@@ -7252,7 +7253,7 @@ const ptApi = (function () {
     '.ptdot{position:absolute;top:-4px;width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid #0e7490;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.4)}.ptlv{display:flex;justify-content:space-between;gap:6px;font-size:.72rem;font-weight:600}' +
     '.ptact{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px dashed var(--pb);padding-top:10px}.ptact button,.ptchart{padding:6px 13px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;cursor:pointer;font:inherit;font-weight:600}' +
     '.ptact .ptcls{background:#0e7490;color:#fff;border-color:#0e7490}.ptact .ptupd{background:#2563eb;color:#fff;border-color:#2563eb}.ptact .ptdel,.ptcl .ptdel{border:0;background:none;color:var(--mute);padding:6px}.ptpx{padding:7px 10px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;font:inherit}' +
-    '.ptcgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}.ptcl{border:1px solid var(--pb);border-top:4px solid #94a3b8;border-radius:14px;padding:11px 13px}.ptempty{padding:16px;border:1px dashed var(--pb);border-radius:14px;text-align:center;color:var(--mute)}' +
+    '.ptinline{border:1px solid var(--pb);border-radius:14px;padding:8px;margin:-4px 0 12px}.ptcbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}.ptctf,.ptchide{padding:5px 12px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;cursor:pointer;font:inherit;font-weight:600}.ptctf.on{background:var(--a,#059669);color:#fff;border-color:transparent}.ptcgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}.ptcl{border:1px solid var(--pb);border-top:4px solid #94a3b8;border-radius:14px;padding:11px 13px}.ptempty{padding:16px;border:1px dashed var(--pb);border-radius:14px;text-align:center;color:var(--mute)}' +
     '.ptgrid4{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}.pttile{border:1px solid var(--pb);border-radius:14px;padding:10px 14px;background:rgba(128,128,128,.07)}.pttile small{display:block;font-size:.7rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em}.pttile b{font-size:1.35rem}' +
     '.pth{margin:18px 0 6px;font-size:1.02rem;font-weight:800}.ptk{padding:9px 22px;border:0;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer}.ptk.on{background:var(--a,#059669);color:#fff}' +
     '@media(max-width:700px){.ptpos{grid-template-columns:1fr}}</style>';
@@ -7275,6 +7276,8 @@ const ptApi = (function () {
       else if (t.classList.contains("ptsg")) { const h = $p("#" + t.getAttribute("data-for")); if (h) h.value = t.getAttribute("data-v"); t.parentNode.querySelectorAll(".ptsg").forEach(x => x.classList.toggle("on", x === t)); preview(); }
       else if (t.classList.contains("ptcls")) closeTrade(t.getAttribute("data-id")); else if (t.classList.contains("ptupd")) updatePrem(t.getAttribute("data-id"));
       else if (t.classList.contains("ptchart")) showChart(t.getAttribute("data-id"));
+      else if (t.classList.contains("ptchide")) { CID = null; draw(); }
+      else if (t.classList.contains("ptctf")) { CTF = t.getAttribute("data-tf"); draw(); }
       else if (t.classList.contains("ptdel")) { if (confirm("Delete this paper trade?")) { LOG = LOG.filter(x => x.id !== t.getAttribute("data-id")); save(); draw(); } }
       else if (t.id === "ptsetsave") { const c = parseFloat($p("#ptcost").value), o = parseFloat($p("#ptocost").value); if (isFinite(c) && c >= 0) SET.cost = c; if (isFinite(o) && o >= 0) SET.ocost = o; save(); MSG = "Costs saved."; draw(); }
       else if (t.id === "ptcsv") { const s = csv(); try { navigator.clipboard.writeText(s).then(() => { MSG = "CSV copied."; draw(); }, () => { MSG = "Copy failed."; draw(); }); } catch (e) { MSG = "Copy is not available here."; draw(); } }
@@ -7283,12 +7286,37 @@ const ptApi = (function () {
     setKind("stock"); draw();
     if (!TM) TM = setInterval(() => { try { if (current === "cc" && !document.hidden && LOG.some(t => t.status === "open")) refresh(false); } catch (e) {} }, 30000);
   }
+  /* the chart opens right under the trade, so the P&L and the chart are visible together */
+  function inlineBox(t, wide) {
+    if (CID !== t.id) return "";
+    const tf = (k, l) => '<button type="button" class="ptctf' + (CTF === k ? " on" : "") + '" data-tf="' + k + '">' + l + "</button>";
+    return '<div class="ptinline"' + (wide ? ' style="grid-column:1/-1"' : "") + '><div class="ptcbar">' + tf("D", "Daily") + tf("60", "1H") + tf("15", "15m") + '<span id="ptcnote" class="note" style="margin:0 0 0 6px"></span><button type="button" class="ptchide" style="margin-left:auto">Hide chart</button></div><div id="ptcdiv" style="height:340px;width:100%"></div></div>';
+  }
+  async function cbars(sym, tf) {
+    const key = sym + "|" + tf, o = CB[key]; if (o && Date.now() - o.t < 45e3) return o.b;
+    try { const r = await mfetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + (tf === "D" ? "DF" : tf)), j = await r.json(), rows = j && j.bars && j.bars[sym];
+      if (rows && rows.length > 5) { const b = rows.map(x => ({time: tf === "D" ? String(x[0]).slice(0, 10) : x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0})); CB[key] = {t: Date.now(), b}; return b; } } catch (e) {}
+    return null;
+  }
+  async function inlineDraw() {
+    if (!CID) return; const t = LOG.find(x => x.id === CID), box = $p("#ptcdiv"), note = $p("#ptcnote"); if (!t || !box) { CID = null; return; }
+    const tok = ++CTOK, tf = CTF, b = await cbars(t.sym, tf); if (tok !== CTOK || $p("#ptcdiv") !== box) return;
+    const LW = window.LightweightCharts; if (!b || !LW) { if (note) note.textContent = "No chart data from your Worker for " + t.sym + "."; return; }
+    const c = colors(), intra = tf !== "D";
+    const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
+    candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    try { const vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+    const L = t.kind === "stock" ? [["Entry", t.entry, "#3b82f6"], ["Stop", t.stop, "#ef4444"], ["Target", t.target, "#22c55e"]].concat(t.status === "closed" ? [["Exit", t.exit, "#f59e0b"]] : []) : [["Strike " + t.opt.strike + " " + t.opt.type, t.opt.strike, "#a855f7"]];
+    L.forEach(a => { if (isFinite(a[1])) { try { candle.createPriceLine({price: a[1], color: a[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[0] + " " + f2(a[1])}); } catch (e) {} } });
+    if (!intra) { try { const has = d => b.some(x => x.time === d), mk = []; if (has(t.date)) mk.push({time: t.date, position: "belowBar", color: "#3b82f6", shape: "arrowUp", text: "Entry"}); if (t.status === "closed" && t.exitDate && has(t.exitDate)) mk.push({time: t.exitDate, position: "aboveBar", color: "#f59e0b", shape: "arrowDown", text: "Exit"}); mk.sort((p, q) => (p.time < q.time ? -1 : 1)); if (mk.length) candle.setMarkers(mk); } catch (e) {} }
+    CH = chart; const n = b.length;
+    try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "15" ? 90 : 70)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
+    if (note) note.textContent = t.kind === "option" ? "Underlying " + t.sym + " with your strike marked. Option premiums are not charted (no feed)." : "Daily candles from your Worker; lines show your entry, stop and target.";
+  }
   function showChart(id) {
-    const t = LOG.find(x => x.id === id); if (!t) return;
-    try {
-      if (t.kind === "stock") pcApi.open(t.sym, Object.assign(levels(t), t.status === "closed" ? {lines: [["Exit", t.exit, "#f59e0b"]]} : {}));
-      else pcApi.open(t.sym, {lines: [["Strike " + t.opt.strike + " " + t.opt.type, t.opt.strike, "#a855f7"]]});
-    } catch (e) { MSG = "Could not open the chart."; draw(); }
+    if (CID === id) { CID = null; } else { CID = id; CTF = "D"; }
+    draw(); if (CID) { try { const e = $p("#ptcdiv"); if (e && e.scrollIntoView) e.scrollIntoView({behavior: "smooth", block: "nearest"}); } catch (e) {} }
   }
   function mount(el) { build(el); draw(); refresh(false); }
   function prefill(sym, tag, note) {
@@ -7475,7 +7503,8 @@ const ccApi = (function () {
   }
   function build() {
     const h = host(); if (!h || built) return; built = true;
-    h.innerHTML = '<h2 class="hb" style="background:linear-gradient(120deg,#0e7490,#2563eb)">Concalls</h2>' + '<div class="card" id="ptbox" style="margin-bottom:12px"></div>' +
+    h.innerHTML = '<h2 class="hb" style="background:linear-gradient(120deg,#047857,#10b981)">Paper trading</h2>' + '<div class="card" id="ptbox" style="margin-bottom:22px"></div>' +
+      '<h2 class="hb" style="background:linear-gradient(120deg,#0e7490,#2563eb);margin-top:8px">Concall guidance tracker</h2><p class="note" style="margin:6px 2px 10px">Calls from your Telegram bot, graded by how strong the guidance reads, with the price followed since each call.</p>' +
       '<div class="card"><b>Add calls</b><p class="note">Paste one or more posts from your bot (the whole message, as it appears in Telegram). The page reads the symbol, quarter, call date, the sales and profit guidance, and the quotes, then follows the price from the call date.</p>' +
       '<textarea id="ccpaste" rows="6" placeholder="Paste the bot post here…" style="width:100%;box-sizing:border-box;font:inherit;padding:8px;border-radius:8px"></textarea>' +
       '<div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button id="ccadd" style="padding:7px 16px;border-radius:8px;border:0;background:#0e7490;color:#fff;cursor:pointer;font-weight:600">Add pasted posts</button><span id="ccmsg" class="note" style="margin:0"></span></div>' +
@@ -7582,7 +7611,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cc" aria-selected="false" style="--a:#0e7490;--b:#2563eb">Concalls</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="cc" aria-selected="false" style="--a:#0e7490;--b:#2563eb">Trade</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<div class="sl sidetop" style="background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:8px 12px;margin-bottom:10px">' + idxBtns + '<button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button><button role="tab" data-t="mx" aria-selected="false" style="--a:#b45309;--b:#eab308">MCX</button></div><details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
