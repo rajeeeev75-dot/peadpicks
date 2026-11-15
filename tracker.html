@@ -5935,7 +5935,7 @@ const pcApi = (function () {
     try { candle.createPriceLine({price: b[b.length - 1].close, color: "#f59e0b", lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: "Price " + f2(b[b.length - 1].close)}); } catch (e) {}
     let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
     try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
-    try { if (LV) [["Entry", LV.entry, "#3b82f6"], ["Stop", LV.stop, "#ef4444"], ["Target", LV.target, "#22c55e"]].forEach(a => { if (isFinite(a[1])) candle.createPriceLine({price: a[1], color: a[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[0] + " " + f2(a[1])}); }); } catch (e) {}
+    try { if (LV) [["Entry", LV.entry, "#3b82f6"], ["Stop", LV.stop, "#ef4444"], ["Target", LV.target, "#22c55e"]].concat(LV.lines || []).forEach(a => { if (isFinite(a[1])) candle.createPriceLine({price: a[1], color: a[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[0] + " " + f2(a[1])}); }); } catch (e) {}
     CH = chart; const n = b.length;
     try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
     if (note) note.textContent = intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes." : "Daily candles from your Cloudflare Worker.";
@@ -7151,32 +7151,58 @@ const ptApi = (function () {
   const kindName = t => (t.kind === "stock" ? "Stock" : "Option");
   const title = t => (t.kind === "stock" ? "<b>" + esc(t.sym) + "</b>" : "<b>" + esc(t.sym) + " " + esc(t.opt.strike) + " " + esc(t.opt.type) + "</b>" + '<div class="note" style="margin:2px 0 0">exp ' + esc(t.opt.expiry || "-") + (t.status === "open" && t.opt.expiry && t.opt.expiry < todayS() ? ' <span style="color:var(--bad)">expired: close it</span>' : "") + "</div>");
   const sideTxt = t => (t.kind === "stock" ? (t.side === "long" ? "Buy" : "Short") : (t.side === "long" ? "Buy" : "Sell")) + " " + (t.kind === "stock" ? t.qty : t.lots + " lot" + (t.lots > 1 ? "s" : "") + " x " + t.lotSize);
+  const chip = (txt, bg) => '<span class="ptchip" style="background:' + bg + '">' + txt + "</span>";
+  const levels = t => ({entry: t.entry, stop: t.stop, target: t.target});
+  function track(t, px) {
+    const pts = [t.entry, t.stop, t.target, px].filter(v => isFinite(v)); if (pts.length < 2) return "";
+    const lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts), sp = hi - lo || 1, at = v => (Math.max(0, Math.min(100, (v - lo) / sp * 100))).toFixed(1) + "%";
+    const tick = (v, c, tt) => (isFinite(v) ? '<i class="pttick" title="' + tt + " " + f2(v) + '" style="left:' + at(v) + ";background:" + c + '"></i>' : "");
+    return '<div class="pttrack">' + tick(t.stop, "#ef4444", "Stop") + tick(t.target, "#22c55e", "Target") + tick(t.entry, "#3b82f6", "Entry") + (isFinite(px) ? '<b class="ptdot" title="Now ' + f2(px) + '" style="left:' + at(px) + '"></b>' : "") + "</div>" +
+      '<div class="ptlv">' + [["Stop", t.stop, "#ef4444"], ["Entry", t.entry, "#3b82f6"], ["Target", t.target, "#16a34a"]].filter(x => isFinite(x[1])).sort((x, y) => x[1] - y[1]).map(x => '<span style="color:' + x[2] + '">' + x[0] + " " + f2(x[1]) + "</span>").join("") + "</div>";
+  }
+  const chartBtn = t => '<button class="ptchart" data-id="' + esc(t.id) + '" title="' + (t.kind === "option" ? "Chart of the underlying with your strike marked (option premiums are not charted)" : "Open the chart with entry, stop and target") + '">📈 Chart' + (t.kind === "option" ? " (underlying)" : "") + "</button>";
   function openRows() {
-    const o = LOG.filter(t => t.status === "open"); if (!o.length) return '<p class="note">No open positions.</p>';
-    return '<div class="wrap"><table class="acctbl"><thead><tr><th>Trade</th><th>Position</th><th class="num">Entry</th><th class="num">Live / last</th><th class="num">P&amp;L</th><th class="num">Stop</th><th class="num">Target</th><th>Update or close</th></tr></thead><tbody>' + o.map(t => {
-      const px = t.kind === "stock" ? last(t.sym) : t.cur, p = isFinite(px) ? pnl(t, px) : null;
-      const lvl = (v, kind) => { if (!isFinite(v)) return "-"; let hit = false; if (t.kind === "option" && isFinite(px)) hit = kind === "s" ? (t.side === "long" ? px <= v : px >= v) : (t.side === "long" ? px >= v : px <= v); return f2(v) + (hit ? ' <span style="color:var(--bad)" title="level reached">!</span>' : ""); };
-      return "<tr><td>" + title(t) + '<div class="note" style="margin:2px 0 0">' + esc(t.date) + (t.tag ? " · " + esc(t.tag) : "") + "</div></td><td>" + sideTxt(t) + '</td><td class="num">' + f2(t.entry) + '</td><td class="num">' + (isFinite(px) ? f2(px) : '<span class="note">' + (t.kind === "option" ? "enter below" : "…") + "</span>") + '</td><td class="num" style="' + (p ? col(p.net) : "") + '"><b>' + (p ? money(p.net) : "-") + '</b><div class="note" style="margin:2px 0 0">' + (p ? pc(p.pct) : "") + '</div></td><td class="num">' + lvl(t.stop, "s") + '</td><td class="num">' + lvl(t.target, "t") + '</td><td style="white-space:nowrap"><input class="ptpx" data-id="' + esc(t.id) + '" placeholder="' + (t.kind === "option" ? "premium now" : "exit price") + '" size="9" inputmode="decimal"> ' +
-        (t.kind === "option" ? '<button class="ptupd" data-id="' + esc(t.id) + '">Update</button> ' : "") + '<button class="ptcls" data-id="' + esc(t.id) + '">Close</button> <button class="ptdel" data-id="' + esc(t.id) + '" title="delete" style="border:0;background:none;cursor:pointer;color:var(--mute)">✕</button></td></tr>';
-    }).join("") + "</tbody></table></div>";
+    const o = LOG.filter(t => t.status === "open"); if (!o.length) return '<div class="ptempty">No open positions. Add a trade above.</div>';
+    return o.map(t => {
+      const px = t.kind === "stock" ? last(t.sym) : t.cur, p = isFinite(px) ? pnl(t, px) : null, c = p ? (p.net > 0 ? "#16a34a" : p.net < 0 ? "#dc2626" : "#94a3b8") : "#94a3b8";
+      const expired = t.kind === "option" && t.opt.expiry && t.opt.expiry < todayS();
+      return '<div class="ptpos" style="border-left-color:' + c + '"><div><div class="ptsym">' + esc(t.sym) + (t.kind === "option" ? " " + esc(t.opt.strike) + " " + esc(t.opt.type) : "") + '</div><div class="ptchips">' + chip(t.side === "long" ? "BUY" : (t.kind === "stock" ? "SHORT" : "SELL"), t.side === "long" ? "#16a34a" : "#dc2626") + chip(kindName(t), "#64748b") + chip(t.kind === "stock" ? t.qty + " qty" : t.lots + " x " + t.lotSize, "#475569") + (t.tag ? chip(esc(t.tag), "#0e7490") : "") + '</div><div class="note" style="margin:4px 0 0">' + esc(t.date) + (t.kind === "option" ? " · exp " + esc(t.opt.expiry || "-") : "") + (expired ? ' <b style="color:var(--bad)">expired: close it</b>' : "") + (t.note ? " · " + esc(t.note) : "") + '</div></div>' +
+        '<div class="ptpnl"><div class="ptbig" style="color:' + c + '">' + (p ? money(p.net) : "-") + '</div><div class="note" style="margin:0">' + (p ? pc(p.pct) : "") + '</div><div class="note" style="margin:4px 0 0">Entry ' + f2(t.entry) + " → " + (isFinite(px) ? "<b>" + f2(px) + "</b>" : (t.kind === "option" ? "enter premium" : "…")) + "</div></div>" +
+        '<div>' + track(t, px) + '</div><div class="ptact">' + chartBtn(t) + '<input class="ptpx" data-id="' + esc(t.id) + '" placeholder="' + (t.kind === "option" ? "premium now" : "exit price") + '" size="9" inputmode="decimal">' + (t.kind === "option" ? '<button class="ptupd" data-id="' + esc(t.id) + '">Update</button>' : "") + '<button class="ptcls" data-id="' + esc(t.id) + '">Close</button><button class="ptdel" data-id="' + esc(t.id) + '" title="delete">✕</button></div></div>';
+    }).join("");
   }
   function closedRows() {
-    const c = LOG.filter(t => t.status === "closed").sort((a, b) => (a.exitDate < b.exitDate ? 1 : -1)); if (!c.length) return '<p class="note">No closed trades yet.</p>';
-    return '<div class="wrap"><table class="acctbl"><thead><tr><th>Trade</th><th>Position</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Net P&amp;L</th><th>Closed</th><th></th></tr></thead><tbody>' + c.map(t => { const p = pnl(t, t.exit);
-      return "<tr><td>" + title(t) + '<div class="note" style="margin:2px 0 0">' + (t.tag ? esc(t.tag) : "") + "</div></td><td>" + sideTxt(t) + '</td><td class="num">' + f2(t.entry) + '</td><td class="num">' + f2(t.exit) + '</td><td class="num" style="' + col(p.net) + '"><b>' + money(p.net) + '</b><div class="note" style="margin:2px 0 0">' + pc(p.pct) + "</div></td><td>" + esc(t.exitDate || "") + '<div class="note" style="margin:2px 0 0">' + esc(t.reason || "manual") + '</div></td><td><button class="ptdel" data-id="' + esc(t.id) + '" title="delete" style="border:0;background:none;cursor:pointer;color:var(--mute)">✕</button></td></tr>'; }).join("") + "</tbody></table></div>";
+    const c = LOG.filter(t => t.status === "closed").sort((a, b) => (a.exitDate < b.exitDate ? 1 : -1)); if (!c.length) return '<div class="ptempty">No closed trades yet.</div>';
+    return '<div class="ptcgrid">' + c.map(t => { const p = pnl(t, t.exit), k = p.net > 0 ? "#16a34a" : p.net < 0 ? "#dc2626" : "#94a3b8";
+      return '<div class="ptcl" style="border-top-color:' + k + '"><div style="display:flex;justify-content:space-between;gap:6px"><b>' + esc(t.sym) + (t.kind === "option" ? " " + esc(t.opt.strike) + " " + esc(t.opt.type) : "") + '</b><span style="color:' + k + ';font-weight:800">' + money(p.net) + '</span></div><div class="note" style="margin:2px 0">' + sideTxt(t) + " · " + f2(t.entry) + " → " + f2(t.exit) + " (" + pc(p.pct) + ')</div><div class="note" style="margin:0">' + esc(t.exitDate || "") + " · " + esc(t.reason || "manual") + (t.tag ? " · " + esc(t.tag) : "") + '</div><div style="margin-top:6px;display:flex;gap:6px">' + chartBtn(t) + '<button class="ptdel" data-id="' + esc(t.id) + '" title="delete">✕</button></div></div>'; }).join("") + "</div>";
+  }
+  function tiles(c) {
+    const r = c.map(t => pnl(t, t.exit)), tot = r.reduce((x, y) => x + y.net, 0), w = r.filter(x => x.net > 0).length, ap = r.reduce((x, y) => x + y.pct, 0) / r.length;
+    const tl = (lab, val, st) => '<div class="pttile"><small>' + lab + '</small><b style="' + (st || "") + '">' + val + "</b></div>";
+    return '<div class="ptgrid4">' + tl("Net P&amp;L", money(tot), col(tot)) + tl("Win rate", Math.round(w / c.length * 100) + "%") + tl("Closed trades", c.length) + tl("Avg return", pc(ap), col(ap)) + "</div>";
   }
   function summary() {
     const c = LOG.filter(t => t.status === "closed"); if (!c.length) return '<p class="note">The results summary appears after your first closed trade.</p>';
     const grp = (nm, f) => { const a = c.filter(f); if (!a.length) return ""; const r = a.map(t => pnl(t, t.exit)), tot = r.reduce((x, y) => x + y.net, 0), w = r.filter(x => x.net > 0).length, ap = r.reduce((x, y) => x + y.pct, 0) / r.length;
       return "<tr><td>" + nm + '</td><td class="num">' + a.length + '</td><td class="num">' + Math.round(w / a.length * 100) + '%</td><td class="num" style="' + col(ap) + '">' + pc(ap) + '</td><td class="num" style="' + col(tot) + '"><b>' + money(tot) + "</b></td></tr>"; };
     const tags = c.map(t => t.tag).filter((x, i, a) => x && a.indexOf(x) === i);
-    return '<div class="wrap"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg return</th><th class="num">Net P&amp;L</th></tr></thead><tbody>' + grp("All closed trades", () => true) + grp("Stocks", t => t.kind === "stock") + grp("Options", t => t.kind === "option") + tags.map(g => grp("Tag: " + esc(g), t => t.tag === g)).join("") + "</tbody></table></div>" +
+    return tiles(c) + '<div class="wrap" style="margin-top:10px"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg return</th><th class="num">Net P&amp;L</th></tr></thead><tbody>' + grp("All closed trades", () => true) + grp("Stocks", t => t.kind === "stock") + grp("Options", t => t.kind === "option") + tags.map(g => grp("Tag: " + esc(g), t => t.tag === g)).join("") + "</tbody></table></div>" +
       '<p class="note">Net of costs (stocks ' + SET.cost + '% round trip, options Rs ' + (SET.ocost || 0) + " per lot). With fewer than about 30 closed trades this says little; one or two big trades can decide the result.</p>";
   }
-  function draw() { const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s) s.innerHTML = summary(); if (m) m.textContent = MSG; }
+  function draw() { const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s) s.innerHTML = summary(); if (m) m.textContent = MSG; preview(); }
   function setKind(k) {
     KIND = k; const a = $p("#ptfs"), b = $p("#ptfo"); if (a) a.style.display = k === "stock" ? "" : "none"; if (b) b.style.display = k === "option" ? "" : "none";
-    host.querySelectorAll(".ptk").forEach(x => { const on = x.getAttribute("data-k") === k; x.style.background = on ? "var(--a,#059669)" : "transparent"; x.style.color = on ? "#fff" : "inherit"; });
+    host.querySelectorAll(".ptk").forEach(x => x.classList.toggle("on", x.getAttribute("data-k") === k)); preview();
+  }
+  /* shows value, risk, reward and risk:reward for the trade being typed */
+  function preview() {
+    const el = $p("#ptprev"); if (!el) return; let ep, qty, stop, tg, long;
+    if (KIND === "stock") { ep = nv("#ptentry"); const sym = sv("#ptsym").toUpperCase().replace(/^(NSE|BSE):/, ""); if (!isFinite(ep) && sym) ep = last(sym); qty = nv("#ptqty"); stop = nv("#ptstop"); tg = nv("#pttgt"); long = sv("#ptside") !== "short"; }
+    else { ep = nv("#ptprem"); qty = nv("#ptlots") * nv("#ptlotsz"); stop = nv("#ptostop"); tg = nv("#ptotgt"); long = sv("#ptoside") !== "sell"; }
+    if (!(ep > 0) || !(qty > 0)) { el.innerHTML = '<span class="note" style="margin:0">Enter the quantity to see value, risk and reward.</span>'; return; }
+    const risk = isFinite(stop) ? Math.abs(ep - stop) * qty : NaN, rew = isFinite(tg) ? Math.abs(tg - ep) * qty : NaN;
+    const it = (l, v, c) => '<span class="ptpv"><small>' + l + "</small><b" + (c ? ' style="color:' + c + '"' : "") + ">" + v + "</b></span>";
+    el.innerHTML = it("Value", "Rs " + Math.round(ep * qty).toLocaleString("en-IN")) + (isFinite(risk) ? it("Risk", "Rs " + Math.round(risk).toLocaleString("en-IN"), "#dc2626") : "") + (isFinite(rew) ? it("Reward", "Rs " + Math.round(rew).toLocaleString("en-IN"), "#16a34a") : "") + (isFinite(risk) && isFinite(rew) && risk > 0 ? it("Reward : risk", "1 : " + (rew / risk).toFixed(1)) : "");
   }
   async function addTrade() {
     const id = "t" + Date.now() + Math.floor(Math.random() * 1000), tag = sv("#pttag"), note = sv("#ptnote");
@@ -7212,28 +7238,57 @@ const ptApi = (function () {
     LOG.forEach(t => L.push([t.kind, t.sym, t.side, t.qty, t.lots || "", t.lotSize || "", t.opt ? t.opt.type : "", t.opt ? t.opt.strike : "", t.opt ? t.opt.expiry : "", t.entry, isFinite(t.stop) ? t.stop : "", isFinite(t.target) ? t.target : "", t.date, t.status, t.exit != null ? t.exit : "", t.exitDate || "", t.reason || "", q(t.tag), q(t.note)].join(",")));
     return L.join("\n");
   }
+  const CSS = '<style>' +
+    '.ptwrap{--pb:rgba(128,128,128,.3)}.ptf{display:flex;flex-direction:column;gap:3px;min-width:0}.ptf>label{font-size:.7rem;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.05em}' +
+    '.ptf input,.ptf select{padding:10px 11px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;font:inherit;width:100%;box-sizing:border-box}.ptf input:focus,.ptf select:focus,.ptpx:focus{outline:2px solid var(--a,#059669);border-color:transparent}' +
+    '.ptg{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));margin:10px 0}.ptseg{display:inline-flex;border-radius:12px;overflow:hidden;border:1px solid var(--pb)}' +
+    '.ptseg button{padding:9px 20px;border:0;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer}.ptseg button.on{background:var(--a,#059669);color:#fff}.ptseg button.on.buy{background:#16a34a}.ptseg button.on.sell{background:#dc2626}' +
+    '.ptform{border:1px solid var(--pb);border-radius:16px;padding:14px;background:linear-gradient(135deg,rgba(5,150,105,.07),rgba(37,99,235,.07))}.ptrow{display:flex;gap:12px;flex-wrap:wrap;align-items:center}' +
+    '.ptprev{display:flex;gap:18px;flex-wrap:wrap;padding:10px 12px;border-radius:12px;background:rgba(128,128,128,.1);margin:8px 0}.ptpv small{display:block;font-size:.68rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em}.ptpv b{font-size:1.05rem}' +
+    '.ptadd{padding:11px 22px;border-radius:12px;border:0;background:linear-gradient(120deg,#059669,#0d9488);color:#fff;font-weight:800;font-size:1rem;cursor:pointer;box-shadow:0 4px 14px rgba(5,150,105,.35)}.ptadd:active{transform:translateY(1px)}' +
+    '.ptpos{border:1px solid var(--pb);border-left:6px solid #94a3b8;border-radius:16px;padding:14px 16px;margin:12px 0;display:grid;gap:12px 18px;grid-template-columns:minmax(150px,1.2fr) minmax(130px,1fr) minmax(170px,1.3fr);align-items:center;box-shadow:0 2px 10px rgba(0,0,0,.06)}' +
+    '.ptsym{font-size:1.15rem;font-weight:800}.ptchips{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}.ptchip{color:#fff;font-size:.7rem;font-weight:700;padding:2px 9px;border-radius:99px}.ptbig{font-size:1.5rem;font-weight:800;line-height:1.1}' +
+    '.pttrack{position:relative;height:8px;border-radius:99px;background:linear-gradient(90deg,rgba(239,68,68,.35),rgba(128,128,128,.25),rgba(34,197,94,.35));margin:10px 4px 6px}.pttick{position:absolute;top:-3px;width:3px;height:14px;border-radius:2px;transform:translateX(-50%)}' +
+    '.ptdot{position:absolute;top:-4px;width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid #0e7490;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.4)}.ptlv{display:flex;justify-content:space-between;gap:6px;font-size:.72rem;font-weight:600}' +
+    '.ptact{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px dashed var(--pb);padding-top:10px}.ptact button,.ptchart{padding:6px 13px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;cursor:pointer;font:inherit;font-weight:600}' +
+    '.ptact .ptcls{background:#0e7490;color:#fff;border-color:#0e7490}.ptact .ptupd{background:#2563eb;color:#fff;border-color:#2563eb}.ptact .ptdel,.ptcl .ptdel{border:0;background:none;color:var(--mute);padding:6px}.ptpx{padding:7px 10px;border-radius:10px;border:1px solid var(--pb);background:transparent;color:inherit;font:inherit}' +
+    '.ptcgrid{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}.ptcl{border:1px solid var(--pb);border-top:4px solid #94a3b8;border-radius:14px;padding:11px 13px}.ptempty{padding:16px;border:1px dashed var(--pb);border-radius:14px;text-align:center;color:var(--mute)}' +
+    '.ptgrid4{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}.pttile{border:1px solid var(--pb);border-radius:14px;padding:10px 14px;background:rgba(128,128,128,.07)}.pttile small{display:block;font-size:.7rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em}.pttile b{font-size:1.35rem}' +
+    '.pth{margin:18px 0 6px;font-size:1.02rem;font-weight:800}.ptk{padding:9px 22px;border:0;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer}.ptk.on{background:var(--a,#059669);color:#fff}' +
+    '@media(max-width:700px){.ptpos{grid-template-columns:1fr}}</style>';
+  const fld = (lab, inner, w) => '<div class="ptf"' + (w ? ' style="grid-column:span ' + w + '"' : "") + "><label>" + lab + "</label>" + inner + "</div>";
+  const inp = (id, ph, extra) => '<input id="' + id + '" placeholder="' + ph + '" ' + (extra || "") + ' inputmode="decimal">';
+  const seg = (id, a, b, cls) => '<input type="hidden" id="' + id + '" value="' + a[0] + '"><div class="ptseg">' + '<button type="button" class="ptsg on ' + cls[0] + '" data-for="' + id + '" data-v="' + a[0] + '">' + a[1] + '</button><button type="button" class="ptsg ' + cls[1] + '" data-for="' + id + '" data-v="' + b[0] + '">' + b[1] + "</button></div>";
   function build(el) {
     host = el; if (built && el.querySelector("#ptmsg")) return; built = true;
-    const inp = (id, ph, sz, extra) => '<input id="' + id + '" placeholder="' + ph + '" size="' + (sz || 9) + '" ' + (extra || "") + ' inputmode="decimal">';
-    el.innerHTML = '<details id="ptdet" open><summary style="cursor:pointer;font-weight:700;font-size:1.05rem">Paper trading (stocks and options)</summary>' +
-      '<p class="note">Practice trades with no real money. Stock prices come from your Worker and stop and target are checked automatically. The feed has no option premiums, so for options you type the entry premium, update the current premium yourself, and close it by hand.</p>' +
-      '<div style="display:flex;gap:6px;margin:6px 0"><button class="ptk" data-k="stock" style="padding:5px 14px;border-radius:99px;border:1px solid #bbb;cursor:pointer">Stock</button><button class="ptk" data-k="option" style="padding:5px 14px;border-radius:99px;border:1px solid #bbb;cursor:pointer">Option</button></div>' +
-      '<div id="ptfs" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="ptsym" placeholder="Symbol" size="10"><select id="ptside"><option value="long">Buy</option><option value="short">Short</option></select>' + inp("ptqty", "Quantity", 8) + inp("ptentry", "Entry (blank = live)", 16) + inp("ptstop", "Stop", 8) + inp("pttgt", "Target", 8) + "</div>" +
-      '<div id="ptfo" style="display:none;gap:8px;flex-wrap:wrap;align-items:center"><input id="ptusym" placeholder="Underlying e.g. NIFTY" size="16" value="NIFTY"><select id="ptot"><option>CE</option><option>PE</option></select>' + inp("ptstrike", "Strike", 8) + '<input id="ptexp" type="date" title="expiry"><select id="ptoside"><option value="buy">Buy</option><option value="sell">Sell</option></select>' + inp("ptlots", "Lots", 5) + inp("ptlotsz", "Lot size", 8) + inp("ptprem", "Entry premium", 12) + inp("ptostop", "Stop premium", 12) + inp("ptotgt", "Target premium", 13) + "</div>" +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px"><input id="pttag" placeholder="Tag (optional, e.g. Concall Good)" size="28"><input id="ptnote" placeholder="Note (optional)" size="28"><button id="ptadd" style="padding:7px 16px;border-radius:8px;border:0;background:#059669;color:#fff;cursor:pointer;font-weight:600">Add paper trade</button><span id="ptmsg" class="note" style="margin:0"></span></div>' +
-      '<h3 style="margin:14px 0 4px">Open positions</h3><div id="ptopen"></div><h3 style="margin:14px 0 4px">Closed trades</h3><div id="ptclosed"></div><h3 style="margin:14px 0 4px">How the paper trades did</h3><div id="ptsum"></div>' +
-      '<details style="margin-top:10px"><summary style="cursor:pointer">Costs and tools</summary><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px"><label>Stock round-trip cost % <input id="ptcost" size="5" value="' + SET.cost + '"></label><label>Option cost per lot (Rs) <input id="ptocost" size="5" value="' + (SET.ocost || 0) + '"></label><button id="ptsetsave">Save costs</button><button id="ptcsv">Copy all as CSV</button></div></details></details>';
+    el.innerHTML = CSS + '<div class="ptwrap"><details id="ptdet" open><summary style="cursor:pointer;font-weight:800;font-size:1.15rem">Paper trading <span class="note" style="margin:0;font-weight:400">stocks and options, no real money</span></summary>' +
+      '<p class="note">Stock prices come from your Worker, and stop and target are checked automatically. The feed has no option premiums, so for options you type the entry premium, update the current premium yourself, and close it by hand.</p>' +
+      '<div class="ptform"><div class="ptrow"><div class="ptseg"><button type="button" class="ptk on" data-k="stock">Stock</button><button type="button" class="ptk" data-k="option">Option</button></div><span id="ptmsg" class="note" style="margin:0"></span></div>' +
+      '<div id="ptfs" class="ptg">' + fld("Symbol", '<input id="ptsym" placeholder="e.g. BSE" autocomplete="off">') + fld("Direction", seg("ptside", ["long", "Buy"], ["short", "Short"], ["buy", "sell"])) + fld("Quantity", inp("ptqty", "Shares")) + fld("Entry price", inp("ptentry", "blank = live")) + fld("Stop", inp("ptstop", "optional")) + fld("Target", inp("pttgt", "optional")) + "</div>" +
+      '<div id="ptfo" class="ptg" style="display:none">' + fld("Underlying", '<input id="ptusym" placeholder="NIFTY" value="NIFTY">') + fld("Type", seg("ptot", ["CE", "Call (CE)"], ["PE", "Put (PE)"], ["buy", "sell"])) + fld("Strike", inp("ptstrike", "e.g. 24500")) + fld("Expiry", '<input id="ptexp" type="date">') + fld("Direction", seg("ptoside", ["buy", "Buy"], ["sell", "Sell"], ["buy", "sell"])) + fld("Lots", inp("ptlots", "1")) + fld("Lot size", inp("ptlotsz", "units per lot")) + fld("Entry premium", inp("ptprem", "Rs")) + fld("Stop premium", inp("ptostop", "optional")) + fld("Target premium", inp("ptotgt", "optional")) + "</div>" +
+      '<div id="ptprev" class="ptprev"></div><div class="ptg" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:0">' + fld("Tag", '<input id="pttag" placeholder="e.g. Concall Good">') + fld("Note", '<input id="ptnote" placeholder="why this trade">') + '<div style="display:flex;align-items:flex-end"><button id="ptadd" class="ptadd" type="button">Add paper trade</button></div></div></div>' +
+      '<div class="pth">Open positions</div><div id="ptopen"></div><div class="pth">Closed trades</div><div id="ptclosed"></div><div class="pth">How the paper trades did</div><div id="ptsum"></div>' +
+      '<details style="margin-top:12px"><summary style="cursor:pointer">Costs and tools</summary><div class="ptrow" style="margin-top:8px"><div class="ptf"><label>Stock round-trip cost %</label><input id="ptcost" size="6" value="' + SET.cost + '"></div><div class="ptf"><label>Option cost per lot (Rs)</label><input id="ptocost" size="6" value="' + (SET.ocost || 0) + '"></div><button id="ptsetsave" type="button" class="ptchart">Save costs</button><button id="ptcsv" type="button" class="ptchart">Copy all as CSV</button></div></details></details></div>';
     el.addEventListener("click", ev => {
-      const t = ev.target; if (!t || !t.classList) return;
+      const t = ev.target && ev.target.closest ? ev.target.closest("button") : null; if (!t || !t.classList) return;
       if (t.id === "ptadd") addTrade(); else if (t.classList.contains("ptk")) setKind(t.getAttribute("data-k"));
+      else if (t.classList.contains("ptsg")) { const h = $p("#" + t.getAttribute("data-for")); if (h) h.value = t.getAttribute("data-v"); t.parentNode.querySelectorAll(".ptsg").forEach(x => x.classList.toggle("on", x === t)); preview(); }
       else if (t.classList.contains("ptcls")) closeTrade(t.getAttribute("data-id")); else if (t.classList.contains("ptupd")) updatePrem(t.getAttribute("data-id"));
+      else if (t.classList.contains("ptchart")) showChart(t.getAttribute("data-id"));
       else if (t.classList.contains("ptdel")) { if (confirm("Delete this paper trade?")) { LOG = LOG.filter(x => x.id !== t.getAttribute("data-id")); save(); draw(); } }
       else if (t.id === "ptsetsave") { const c = parseFloat($p("#ptcost").value), o = parseFloat($p("#ptocost").value); if (isFinite(c) && c >= 0) SET.cost = c; if (isFinite(o) && o >= 0) SET.ocost = o; save(); MSG = "Costs saved."; draw(); }
       else if (t.id === "ptcsv") { const s = csv(); try { navigator.clipboard.writeText(s).then(() => { MSG = "CSV copied."; draw(); }, () => { MSG = "Copy failed."; draw(); }); } catch (e) { MSG = "Copy is not available here."; draw(); } }
     });
-    el.addEventListener("input", ev => { const t = ev.target; if (t && t.id === "ptusym") { const ls = SET.lots[String(t.value).trim().toUpperCase()]; const l = $p("#ptlotsz"); if (ls && l && !l.value) l.value = ls; } });
+    el.addEventListener("input", ev => { const t = ev.target; if (!t) return; if (t.id === "ptusym") { const ls = SET.lots[String(t.value).trim().toUpperCase()]; const l = $p("#ptlotsz"); if (ls && l && !l.value) l.value = ls; } if (t.closest && t.closest(".ptform")) preview(); });
     setKind("stock"); draw();
     if (!TM) TM = setInterval(() => { try { if (current === "cc" && !document.hidden && LOG.some(t => t.status === "open")) refresh(false); } catch (e) {} }, 30000);
+  }
+  function showChart(id) {
+    const t = LOG.find(x => x.id === id); if (!t) return;
+    try {
+      if (t.kind === "stock") pcApi.open(t.sym, Object.assign(levels(t), t.status === "closed" ? {lines: [["Exit", t.exit, "#f59e0b"]]} : {}));
+      else pcApi.open(t.sym, {lines: [["Strike " + t.opt.strike + " " + t.opt.type, t.opt.strike, "#a855f7"]]});
+    } catch (e) { MSG = "Could not open the chart."; draw(); }
   }
   function mount(el) { build(el); draw(); refresh(false); }
   function prefill(sym, tag, note) {
