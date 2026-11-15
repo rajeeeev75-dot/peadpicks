@@ -7211,7 +7211,7 @@ const ptApi = (function () {
       : "Closed by hand at " + (p.net < 0 ? "a loss" : "break-even") + " (" + mv + ")." + (isFinite(t.stop) ? " It was closed before the stop was hit." : " No stop was set.") + rs;
   }
   function journal(c) {
-    return '<div class="ptj">' + c.map(t => {
+    return '<div class="ptj"><div class="ptjh ptjtop"><span>Entry date</span><span>Trade</span><span>Buy price</span><span>Sell price</span><span>Net profit / loss</span></div>' + c.map(t => {
       const p = pnl(t, t.exit), win = p.net > 0, k = win ? "#16a34a" : p.net < 0 ? "#dc2626" : "#94a3b8", long = t.side === "long";
       const buy = long ? t.entry : t.exit, sell = long ? t.exit : t.entry, held = dayDiff(t.date, t.exitDate);
       const name = esc(t.sym) + (t.kind === "option" ? " " + esc(t.opt.strike) + " " + esc(t.opt.type) : "");
@@ -7224,7 +7224,7 @@ const ptApi = (function () {
         '<div class="ptjc ptjn"><small>Net ' + (win ? "profit" : p.net < 0 ? "loss" : "result") + "</small><b>" + money(p.net) + '</b><span class="note" style="margin:0">' + pc(p.pct) + "</span></div></div>" +
         '<div class="ptjw"><b>' + (win ? "✅ Why it worked" : p.net < 0 ? "❌ Why it failed" : "➖ Break-even") + ":</b> " + why(t, p) + "</div>" +
         (t.note ? '<div class="ptjn2"><b>Your note:</b> ' + esc(t.note) + "</div>" : "") +
-        '<input class="ptrev" data-id="' + esc(t.id) + '" value="' + esc(t.review || "") + '" placeholder="Add your own lesson from this trade (saved automatically)"></div>';
+        '<div class="ptrevrow"><label>✍️ ' + (win ? "Why it worked" : p.net < 0 ? "Why it failed" : "Your reason") + ' (your own words)</label><input class="ptrev" data-id="' + esc(t.id) + '" value="' + esc(t.review || "") + '" placeholder="' + (win ? "Write why this trade worked…" : p.net < 0 ? "Write why this trade failed…" : "Write what happened…") + '"></div></div>';
     }).join("") + "</div>";
   }
   function summary() {
@@ -7233,7 +7233,7 @@ const ptApi = (function () {
       return "<tr><td>" + nm + '</td><td class="num">' + a.length + '</td><td class="num">' + Math.round(w / a.length * 100) + '%</td><td class="num" style="' + col(ap) + '">' + pc(ap) + '</td><td class="num" style="' + col(tot) + '"><b>' + money(tot) + "</b></td></tr>"; };
     const tags = c.map(t => t.tag).filter((x, i, a) => x && a.indexOf(x) === i);
     const ord = c.slice().sort((a, b) => ((a.exitDate || "") < (b.exitDate || "") ? 1 : -1));
-    return tiles(c) + journal(ord) + '<details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Results by group</summary><div class="wrap" style="margin-top:10px"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg return</th><th class="num">Net P&amp;L</th></tr></thead><tbody>' + grp("All closed trades", () => true) + grp("Stocks", t => t.kind === "stock") + grp("Options", t => t.kind === "option") + tags.map(g => grp("Tag: " + esc(g), t => t.tag === g)).join("") + "</tbody></table></div></details>" +
+    return journal(ord) + '<details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Results by group</summary><div class="wrap" style="margin-top:10px"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg return</th><th class="num">Net P&amp;L</th></tr></thead><tbody>' + grp("All closed trades", () => true) + grp("Stocks", t => t.kind === "stock") + grp("Options", t => t.kind === "option") + tags.map(g => grp("Tag: " + esc(g), t => t.tag === g)).join("") + "</tbody></table></div></details>" +
       '<p class="note">Net of costs (stocks ' + SET.cost + '% round trip, options Rs ' + (SET.ocost || 0) + " per lot). With fewer than about 30 closed trades this says little; one or two big trades can decide the result.</p>";
   }
   function draw() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s && !(document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("ptrev"))) s.innerHTML = summary(); if (m) m.textContent = MSG; preview(); starStrip(); inlineDraw(); }
@@ -7309,10 +7309,11 @@ const ptApi = (function () {
     '.ptwrap .ptform .ptadd{background:linear-gradient(120deg,var(--dc),color-mix(in srgb,var(--dc) 65%,#0d9488));box-shadow:0 4px 14px color-mix(in srgb,var(--dc) 40%,transparent)}' +
     '.ptwrap .ptform .ptprev{background:color-mix(in srgb,var(--dc) 9%,transparent)}' +
     '.ptj{display:grid;gap:12px;margin-top:12px}.ptjr{border:1px solid var(--pb);border-left:6px solid var(--jc,#94a3b8);border-radius:16px;padding:12px 16px;background:var(--card);box-shadow:0 2px 10px rgba(0,0,0,.06)}' +
-    '.ptjtop{display:grid;gap:10px 18px;grid-template-columns:minmax(130px,1.1fr) minmax(160px,1.3fr) repeat(3,minmax(92px,.8fr));align-items:start}.ptjc small{display:block;font-size:.7rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}.ptjc>b{display:block;font-size:1.05rem}.ptjn>b{color:var(--jc);font-size:1.3rem}' +
+    '.ptjtop{display:grid;gap:10px 18px;grid-template-columns:minmax(130px,1.1fr) minmax(160px,1.3fr) repeat(3,minmax(92px,.8fr));align-items:start}.ptjc small{display:none;font-size:.7rem;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}.ptjc>b{display:block;font-size:1.05rem}.ptjn>b{color:var(--jc);font-size:1.3rem}' +
     '.ptjw{margin-top:10px;padding:9px 12px;border-radius:12px;background:color-mix(in srgb,var(--jc) 11%,transparent);border:1px solid color-mix(in srgb,var(--jc) 30%,transparent);font-size:.92rem;line-height:1.45}.ptjn2{margin-top:7px;font-size:.88rem;color:var(--mute)}' +
     '.ptrev{margin-top:8px;width:100%;box-sizing:border-box;padding:8px 11px;border-radius:10px;border:1px dashed var(--pb);background:transparent;color:inherit;font:inherit;font-size:.9rem}.ptrev:focus{outline:2px solid var(--jc,#059669);border-style:solid;border-color:transparent}' +
-    '@media(max-width:700px){.ptjtop{grid-template-columns:1fr 1fr}}' +
+    '@media(max-width:700px){.ptjtop{grid-template-columns:1fr 1fr}.ptjc small{display:block}.ptjh{display:none}}' +
+    '.ptjh{padding:10px 16px 10px 22px;border-radius:14px;background:linear-gradient(120deg,var(--a,#0e7490),var(--b,#2563eb));color:#fff;font-weight:700;font-size:.85rem;align-items:center}.ptrevrow{margin-top:8px}.ptrevrow label{display:block;font-size:.78rem;font-weight:700;color:var(--mute);margin-bottom:3px}.ptrevrow .ptrev{margin-top:0;border-style:solid;border-color:color-mix(in srgb,var(--jc) 45%,var(--pb))}' +
     '@media(max-width:700px){.ptpos{grid-template-columns:1fr}}</style>';
   const fld = (lab, inner, w) => '<div class="ptf"' + (w ? ' style="grid-column:span ' + w + '"' : "") + "><label>" + lab + "</label>" + inner + "</div>";
   const inp = (id, ph, extra) => '<input id="' + id + '" placeholder="' + ph + '" ' + (extra || "") + ' inputmode="decimal">';
