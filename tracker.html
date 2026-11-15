@@ -7089,6 +7089,161 @@ const swPaint = () => swApi.open();
 // Optional: paste the published CSV link of a Google Sheet tab with the columns  date,symbol,name,quarter,sales_pct,profit_pct,sales_note,profit_note,tags
 // (date as 2026-11-14). Leave empty to use only what you paste into the box on the Concalls tab (saved in this browser).
 const CC_CSV_URL = "";
+/* ===== PAPER TRADING (stocks and options), shown at the top of the Concalls tab. Nothing here is a real order. Saved in this browser only. ===== */
+const ptApi = (function () {
+  const KEY = "ptLog", SKEY = "ptSet";
+  let LOG = [], SET = {cost: 0.25, ocost: 0, lots: {}};
+  try { LOG = JSON.parse(localStorage.getItem(KEY) || "[]") || []; } catch (e) {}
+  try { SET = Object.assign(SET, JSON.parse(localStorage.getItem(SKEY) || "{}") || {}); } catch (e) {}
+  let Q = {}, QT = 0, BARS = {}, BT = {}, BUSY = {}, MSG = "", KIND = "stock", host = null, built = false, TM = null;
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(LOG)); localStorage.setItem(SKEY, JSON.stringify(SET)); } catch (e) {} };
+  const todayS = () => { const d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); };
+  const $p = s => (host ? host.querySelector(s) : null);
+  const nv = id => { const x = $p(id), v = x ? parseFloat(String(x.value).replace(/,/g, "")) : NaN; return isFinite(v) ? v : NaN; };
+  const sv = id => { const x = $p(id); return x ? String(x.value).trim() : ""; };
+  const f2 = v => (isFinite(v) ? (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en-IN") : v.toFixed(2)) : "-");
+  const money = v => (isFinite(v) ? (v > 0 ? "+" : v < 0 ? "-" : "") + "Rs " + Math.abs(Math.round(v)).toLocaleString("en-IN") : "-");
+  const pc = v => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(1) + "%" : "-");
+  const col = v => (!isFinite(v) ? "" : v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
+  const mfetch = (u, ms) => { const ctl = typeof AbortController !== "undefined" ? new AbortController() : null, k = setTimeout(() => { if (ctl) ctl.abort(); }, ms || 8000); return fetch(u, {cache: "no-store", signal: ctl ? ctl.signal : undefined}).finally(() => clearTimeout(k)); };
+  const stocksOpen = () => LOG.filter(t => t.status === "open" && t.kind === "stock");
+
+  async function quotes(syms, force) {
+    syms = syms.filter((s, i, a) => s && a.indexOf(s) === i).slice(0, 20); if (!syms.length) return;
+    if (!force && Date.now() - QT < 25e3) return; QT = Date.now();
+    try { const r = await mfetch(MARKET_API_URL + "?quotes=" + encodeURIComponent(syms.join(","))), j = await r.json().catch(() => null); if (j && Array.isArray(j.quotes)) j.quotes.forEach(q => { if (q && q.s && isFinite(+q.p)) Q[String(q.s).toUpperCase()] = +q.p; }); } catch (e) {}
+  }
+  async function bars(sym) {
+    if (BUSY[sym] || (BT[sym] && Date.now() - BT[sym] < 5 * 60e3)) return; BUSY[sym] = 1; BT[sym] = Date.now();
+    try { const r = await mfetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF"), j = await r.json(), rows = j && j.bars && j.bars[sym];
+      BARS[sym] = rows && rows.length > 2 ? rows.map(x => ({t: String(x[0]).slice(0, 10), o: +x[1], h: +x[2], l: +x[3], c: +x[4]})).filter(b => isFinite(b.c)) : null; } catch (e) { BARS[sym] = null; }
+    delete BUSY[sym];
+  }
+  const last = sym => (Q[sym] != null ? Q[sym] : (BARS[sym] && BARS[sym].length ? BARS[sym][BARS[sym].length - 1].c : NaN));
+  function pnl(t, px) {
+    const q = t.qty, gross = (t.side === "long" ? px - t.entry : t.entry - px) * q;
+    const cost = t.kind === "stock" ? (SET.cost / 100) * t.entry * q : (SET.ocost || 0) * (t.lots || 1);
+    const net = gross - cost, base = t.entry * q; return {net, pct: base ? net / base * 100 : NaN, cost};
+  }
+  /* closes stock trades whose stop or target was touched on a later trading day; fills assumed at the level (at the open if it gapped past it); stop wins if both are touched the same day */
+  function auto() {
+    let ch = false;
+    stocksOpen().forEach(t => {
+      const b = BARS[t.sym]; if (!b) return;
+      for (let i = 0; i < b.length; i++) {
+        const d = b[i]; if (d.t <= t.date) continue; let hit = null;
+        const long = t.side === "long", sl = t.stop, tg = t.target;
+        if (isFinite(sl)) { if (long ? d.o <= sl : d.o >= sl) hit = {px: d.o, r: "stop (gap)"}; else if (long ? d.l <= sl : d.h >= sl) hit = {px: sl, r: "stop"}; }
+        if (!hit && isFinite(tg)) { if (long ? d.o >= tg : d.o <= tg) hit = {px: d.o, r: "target (gap)"}; else if (long ? d.h >= tg : d.l <= tg) hit = {px: tg, r: "target"}; }
+        if (hit) { t.status = "closed"; t.exit = hit.px; t.exitDate = d.t; t.reason = hit.r; ch = true; break; }
+      }
+      if (t.status === "open") { const px = Q[t.sym]; if (isFinite(px)) { const long = t.side === "long";
+        if (isFinite(t.stop) && (long ? px <= t.stop : px >= t.stop)) { t.status = "closed"; t.exit = t.stop; t.exitDate = todayS(); t.reason = "stop"; ch = true; }
+        else if (isFinite(t.target) && (long ? px >= t.target : px <= t.target)) { t.status = "closed"; t.exit = t.target; t.exitDate = todayS(); t.reason = "target"; ch = true; } } }
+    });
+    if (ch) save();
+  }
+  async function refresh(force) {
+    const syms = stocksOpen().map(t => t.sym);
+    await Promise.all([quotes(syms, force)].concat(syms.filter((s, i, a) => a.indexOf(s) === i).slice(0, 12).map(bars)));
+    auto(); draw();
+  }
+  const kindName = t => (t.kind === "stock" ? "Stock" : "Option");
+  const title = t => (t.kind === "stock" ? "<b>" + esc(t.sym) + "</b>" : "<b>" + esc(t.sym) + " " + esc(t.opt.strike) + " " + esc(t.opt.type) + "</b>" + '<div class="note" style="margin:2px 0 0">exp ' + esc(t.opt.expiry || "-") + (t.status === "open" && t.opt.expiry && t.opt.expiry < todayS() ? ' <span style="color:var(--bad)">expired: close it</span>' : "") + "</div>");
+  const sideTxt = t => (t.kind === "stock" ? (t.side === "long" ? "Buy" : "Short") : (t.side === "long" ? "Buy" : "Sell")) + " " + (t.kind === "stock" ? t.qty : t.lots + " lot" + (t.lots > 1 ? "s" : "") + " x " + t.lotSize);
+  function openRows() {
+    const o = LOG.filter(t => t.status === "open"); if (!o.length) return '<p class="note">No open positions.</p>';
+    return '<div class="wrap"><table class="acctbl"><thead><tr><th>Trade</th><th>Position</th><th class="num">Entry</th><th class="num">Live / last</th><th class="num">P&amp;L</th><th class="num">Stop</th><th class="num">Target</th><th>Update or close</th></tr></thead><tbody>' + o.map(t => {
+      const px = t.kind === "stock" ? last(t.sym) : t.cur, p = isFinite(px) ? pnl(t, px) : null;
+      const lvl = (v, kind) => { if (!isFinite(v)) return "-"; let hit = false; if (t.kind === "option" && isFinite(px)) hit = kind === "s" ? (t.side === "long" ? px <= v : px >= v) : (t.side === "long" ? px >= v : px <= v); return f2(v) + (hit ? ' <span style="color:var(--bad)" title="level reached">!</span>' : ""); };
+      return "<tr><td>" + title(t) + '<div class="note" style="margin:2px 0 0">' + esc(t.date) + (t.tag ? " · " + esc(t.tag) : "") + "</div></td><td>" + sideTxt(t) + '</td><td class="num">' + f2(t.entry) + '</td><td class="num">' + (isFinite(px) ? f2(px) : '<span class="note">' + (t.kind === "option" ? "enter below" : "…") + "</span>") + '</td><td class="num" style="' + (p ? col(p.net) : "") + '"><b>' + (p ? money(p.net) : "-") + '</b><div class="note" style="margin:2px 0 0">' + (p ? pc(p.pct) : "") + '</div></td><td class="num">' + lvl(t.stop, "s") + '</td><td class="num">' + lvl(t.target, "t") + '</td><td style="white-space:nowrap"><input class="ptpx" data-id="' + esc(t.id) + '" placeholder="' + (t.kind === "option" ? "premium now" : "exit price") + '" size="9" inputmode="decimal"> ' +
+        (t.kind === "option" ? '<button class="ptupd" data-id="' + esc(t.id) + '">Update</button> ' : "") + '<button class="ptcls" data-id="' + esc(t.id) + '">Close</button> <button class="ptdel" data-id="' + esc(t.id) + '" title="delete" style="border:0;background:none;cursor:pointer;color:var(--mute)">✕</button></td></tr>';
+    }).join("") + "</tbody></table></div>";
+  }
+  function closedRows() {
+    const c = LOG.filter(t => t.status === "closed").sort((a, b) => (a.exitDate < b.exitDate ? 1 : -1)); if (!c.length) return '<p class="note">No closed trades yet.</p>';
+    return '<div class="wrap"><table class="acctbl"><thead><tr><th>Trade</th><th>Position</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Net P&amp;L</th><th>Closed</th><th></th></tr></thead><tbody>' + c.map(t => { const p = pnl(t, t.exit);
+      return "<tr><td>" + title(t) + '<div class="note" style="margin:2px 0 0">' + (t.tag ? esc(t.tag) : "") + "</div></td><td>" + sideTxt(t) + '</td><td class="num">' + f2(t.entry) + '</td><td class="num">' + f2(t.exit) + '</td><td class="num" style="' + col(p.net) + '"><b>' + money(p.net) + '</b><div class="note" style="margin:2px 0 0">' + pc(p.pct) + "</div></td><td>" + esc(t.exitDate || "") + '<div class="note" style="margin:2px 0 0">' + esc(t.reason || "manual") + '</div></td><td><button class="ptdel" data-id="' + esc(t.id) + '" title="delete" style="border:0;background:none;cursor:pointer;color:var(--mute)">✕</button></td></tr>'; }).join("") + "</tbody></table></div>";
+  }
+  function summary() {
+    const c = LOG.filter(t => t.status === "closed"); if (!c.length) return '<p class="note">The results summary appears after your first closed trade.</p>';
+    const grp = (nm, f) => { const a = c.filter(f); if (!a.length) return ""; const r = a.map(t => pnl(t, t.exit)), tot = r.reduce((x, y) => x + y.net, 0), w = r.filter(x => x.net > 0).length, ap = r.reduce((x, y) => x + y.pct, 0) / r.length;
+      return "<tr><td>" + nm + '</td><td class="num">' + a.length + '</td><td class="num">' + Math.round(w / a.length * 100) + '%</td><td class="num" style="' + col(ap) + '">' + pc(ap) + '</td><td class="num" style="' + col(tot) + '"><b>' + money(tot) + "</b></td></tr>"; };
+    const tags = c.map(t => t.tag).filter((x, i, a) => x && a.indexOf(x) === i);
+    return '<div class="wrap"><table class="acctbl"><thead><tr><th>Group</th><th class="num">Trades</th><th class="num">Win %</th><th class="num">Avg return</th><th class="num">Net P&amp;L</th></tr></thead><tbody>' + grp("All closed trades", () => true) + grp("Stocks", t => t.kind === "stock") + grp("Options", t => t.kind === "option") + tags.map(g => grp("Tag: " + esc(g), t => t.tag === g)).join("") + "</tbody></table></div>" +
+      '<p class="note">Net of costs (stocks ' + SET.cost + '% round trip, options Rs ' + (SET.ocost || 0) + " per lot). With fewer than about 30 closed trades this says little; one or two big trades can decide the result.</p>";
+  }
+  function draw() { const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s) s.innerHTML = summary(); if (m) m.textContent = MSG; }
+  function setKind(k) {
+    KIND = k; const a = $p("#ptfs"), b = $p("#ptfo"); if (a) a.style.display = k === "stock" ? "" : "none"; if (b) b.style.display = k === "option" ? "" : "none";
+    host.querySelectorAll(".ptk").forEach(x => { const on = x.getAttribute("data-k") === k; x.style.background = on ? "var(--a,#059669)" : "transparent"; x.style.color = on ? "#fff" : "inherit"; });
+  }
+  async function addTrade() {
+    const id = "t" + Date.now() + Math.floor(Math.random() * 1000), tag = sv("#pttag"), note = sv("#ptnote");
+    if (KIND === "stock") {
+      const sym = sv("#ptsym").toUpperCase().replace(/^(NSE|BSE):/, ""), side = sv("#ptside") === "short" ? "short" : "long", qty = Math.floor(nv("#ptqty")), stop = nv("#ptstop"), tg = nv("#pttgt"); let ep = nv("#ptentry");
+      if (!/^[A-Z0-9&\-]{2,20}$/.test(sym) || !(qty > 0)) { MSG = "Enter a symbol and a quantity."; draw(); return; }
+      if (!isFinite(ep)) { MSG = "Getting the live price…"; draw(); await quotes([sym], true); await bars(sym); ep = last(sym); }
+      if (!isFinite(ep) || ep <= 0) { MSG = "No live price found for " + sym + ". Type the entry price."; draw(); return; }
+      if (isFinite(stop) && (side === "long" ? stop >= ep : stop <= ep)) { MSG = "The stop is on the wrong side of the entry price."; draw(); return; }
+      if (isFinite(tg) && (side === "long" ? tg <= ep : tg >= ep)) { MSG = "The target is on the wrong side of the entry price."; draw(); return; }
+      LOG.push({id, kind: "stock", sym, side, qty, entry: ep, stop, target: tg, date: todayS(), tag, note, status: "open"}); MSG = "Paper " + (side === "long" ? "buy" : "short") + " of " + qty + " " + sym + " at " + f2(ep) + " saved.";
+    } else {
+      const sym = sv("#ptusym").toUpperCase(), type = sv("#ptot") === "PE" ? "PE" : "CE", strike = nv("#ptstrike"), exp = sv("#ptexp"), side = sv("#ptoside") === "sell" ? "short" : "long", lots = Math.floor(nv("#ptlots")), ls = Math.floor(nv("#ptlotsz")), ep = nv("#ptprem"), stop = nv("#ptostop"), tg = nv("#ptotgt");
+      if (!sym || !isFinite(strike) || !(lots > 0) || !(ls > 0) || !(ep > 0)) { MSG = "Enter the underlying, strike, lots, lot size and the entry premium."; draw(); return; }
+      SET.lots[sym] = ls;
+      LOG.push({id, kind: "option", sym, opt: {type, strike, expiry: exp}, side, lots, lotSize: ls, qty: lots * ls, entry: ep, stop, target: tg, cur: NaN, date: todayS(), tag, note, status: "open"}); MSG = "Paper option trade saved: " + sym + " " + strike + " " + type + ".";
+    }
+    save(); ["#ptentry", "#ptstop", "#pttgt", "#ptnote", "#ptostop", "#ptotgt", "#ptprem"].forEach(i => { const x = $p(i); if (x) x.value = ""; }); draw(); refresh(true);
+  }
+  function closeTrade(id) {
+    const t = LOG.find(x => x.id === id); if (!t || t.status !== "open") return;
+    const inp = host.querySelector('.ptpx[data-id="' + id + '"]'), v = inp ? parseFloat(inp.value) : NaN, px = isFinite(v) ? v : (t.kind === "stock" ? last(t.sym) : t.cur);
+    if (!isFinite(px)) { MSG = "Type the exit " + (t.kind === "option" ? "premium" : "price") + " in the box first."; draw(); return; }
+    t.status = "closed"; t.exit = px; t.exitDate = todayS(); t.reason = "manual"; save(); MSG = "Closed at " + f2(px) + "."; draw();
+  }
+  function updatePrem(id) {
+    const t = LOG.find(x => x.id === id), inp = host.querySelector('.ptpx[data-id="' + id + '"]'), v = inp ? parseFloat(inp.value) : NaN;
+    if (!t || !isFinite(v)) { MSG = "Type the current premium in the box, then press Update."; draw(); return; }
+    t.cur = v; save(); draw();
+  }
+  function csv() {
+    const q = s => '"' + String(s == null ? "" : s).replace(/"/g, '""') + '"', L = ["kind,symbol,side,qty,lots,lot_size,type,strike,expiry,entry,stop,target,entry_date,status,exit,exit_date,reason,tag,note"];
+    LOG.forEach(t => L.push([t.kind, t.sym, t.side, t.qty, t.lots || "", t.lotSize || "", t.opt ? t.opt.type : "", t.opt ? t.opt.strike : "", t.opt ? t.opt.expiry : "", t.entry, isFinite(t.stop) ? t.stop : "", isFinite(t.target) ? t.target : "", t.date, t.status, t.exit != null ? t.exit : "", t.exitDate || "", t.reason || "", q(t.tag), q(t.note)].join(",")));
+    return L.join("\n");
+  }
+  function build(el) {
+    host = el; if (built && el.querySelector("#ptmsg")) return; built = true;
+    const inp = (id, ph, sz, extra) => '<input id="' + id + '" placeholder="' + ph + '" size="' + (sz || 9) + '" ' + (extra || "") + ' inputmode="decimal">';
+    el.innerHTML = '<details id="ptdet" open><summary style="cursor:pointer;font-weight:700;font-size:1.05rem">Paper trading (stocks and options)</summary>' +
+      '<p class="note">Practice trades with no real money. Stock prices come from your Worker and stop and target are checked automatically. The feed has no option premiums, so for options you type the entry premium, update the current premium yourself, and close it by hand.</p>' +
+      '<div style="display:flex;gap:6px;margin:6px 0"><button class="ptk" data-k="stock" style="padding:5px 14px;border-radius:99px;border:1px solid #bbb;cursor:pointer">Stock</button><button class="ptk" data-k="option" style="padding:5px 14px;border-radius:99px;border:1px solid #bbb;cursor:pointer">Option</button></div>' +
+      '<div id="ptfs" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><input id="ptsym" placeholder="Symbol" size="10"><select id="ptside"><option value="long">Buy</option><option value="short">Short</option></select>' + inp("ptqty", "Quantity", 8) + inp("ptentry", "Entry (blank = live)", 16) + inp("ptstop", "Stop", 8) + inp("pttgt", "Target", 8) + "</div>" +
+      '<div id="ptfo" style="display:none;gap:8px;flex-wrap:wrap;align-items:center"><input id="ptusym" placeholder="Underlying e.g. NIFTY" size="16" value="NIFTY"><select id="ptot"><option>CE</option><option>PE</option></select>' + inp("ptstrike", "Strike", 8) + '<input id="ptexp" type="date" title="expiry"><select id="ptoside"><option value="buy">Buy</option><option value="sell">Sell</option></select>' + inp("ptlots", "Lots", 5) + inp("ptlotsz", "Lot size", 8) + inp("ptprem", "Entry premium", 12) + inp("ptostop", "Stop premium", 12) + inp("ptotgt", "Target premium", 13) + "</div>" +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px"><input id="pttag" placeholder="Tag (optional, e.g. Concall Good)" size="28"><input id="ptnote" placeholder="Note (optional)" size="28"><button id="ptadd" style="padding:7px 16px;border-radius:8px;border:0;background:#059669;color:#fff;cursor:pointer;font-weight:600">Add paper trade</button><span id="ptmsg" class="note" style="margin:0"></span></div>' +
+      '<h3 style="margin:14px 0 4px">Open positions</h3><div id="ptopen"></div><h3 style="margin:14px 0 4px">Closed trades</h3><div id="ptclosed"></div><h3 style="margin:14px 0 4px">How the paper trades did</h3><div id="ptsum"></div>' +
+      '<details style="margin-top:10px"><summary style="cursor:pointer">Costs and tools</summary><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px"><label>Stock round-trip cost % <input id="ptcost" size="5" value="' + SET.cost + '"></label><label>Option cost per lot (Rs) <input id="ptocost" size="5" value="' + (SET.ocost || 0) + '"></label><button id="ptsetsave">Save costs</button><button id="ptcsv">Copy all as CSV</button></div></details></details>';
+    el.addEventListener("click", ev => {
+      const t = ev.target; if (!t || !t.classList) return;
+      if (t.id === "ptadd") addTrade(); else if (t.classList.contains("ptk")) setKind(t.getAttribute("data-k"));
+      else if (t.classList.contains("ptcls")) closeTrade(t.getAttribute("data-id")); else if (t.classList.contains("ptupd")) updatePrem(t.getAttribute("data-id"));
+      else if (t.classList.contains("ptdel")) { if (confirm("Delete this paper trade?")) { LOG = LOG.filter(x => x.id !== t.getAttribute("data-id")); save(); draw(); } }
+      else if (t.id === "ptsetsave") { const c = parseFloat($p("#ptcost").value), o = parseFloat($p("#ptocost").value); if (isFinite(c) && c >= 0) SET.cost = c; if (isFinite(o) && o >= 0) SET.ocost = o; save(); MSG = "Costs saved."; draw(); }
+      else if (t.id === "ptcsv") { const s = csv(); try { navigator.clipboard.writeText(s).then(() => { MSG = "CSV copied."; draw(); }, () => { MSG = "Copy failed."; draw(); }); } catch (e) { MSG = "Copy is not available here."; draw(); } }
+    });
+    el.addEventListener("input", ev => { const t = ev.target; if (t && t.id === "ptusym") { const ls = SET.lots[String(t.value).trim().toUpperCase()]; const l = $p("#ptlotsz"); if (ls && l && !l.value) l.value = ls; } });
+    setKind("stock"); draw();
+    if (!TM) TM = setInterval(() => { try { if (current === "cc" && !document.hidden && LOG.some(t => t.status === "open")) refresh(false); } catch (e) {} }, 30000);
+  }
+  function mount(el) { build(el); draw(); refresh(false); }
+  function prefill(sym, tag, note) {
+    if (!host) return; setKind("stock"); const d = $p("#ptdet"); if (d) d.open = true;
+    const s = $p("#ptsym"), t = $p("#pttag"), n = $p("#ptnote"); if (s) s.value = sym || ""; if (t) t.value = tag || ""; if (n) n.value = note || "";
+    MSG = "Fill in quantity (and stop and target), then press Add paper trade."; draw(); try { host.scrollIntoView({behavior: "smooth", block: "start"}); } catch (e) {}
+  }
+  return {mount, prefill};
+})();
+
 const ccApi = (function () {
   const KEY = "ccLog", MON = {jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12};
   let LOG = []; try { LOG = JSON.parse(localStorage.getItem(KEY) || "[]") || []; } catch (e) {}
@@ -7234,7 +7389,7 @@ const ccApi = (function () {
       const t = track(e), gr = grade(e), q = [e.sales && e.sales.quote ? "Sales: " + e.sales.quote : "", e.profit && e.profit.quote ? "Profit: " + e.profit.quote : ""].filter(Boolean);
       return "<tr><td><b>" + esc(e.sym) + '</b><div class="note" style="margin:2px 0 0">' + esc(e.name || "") + "</div></td><td>" + fmtD(e.date) + '<div class="note" style="margin:2px 0 0">' + esc(e.q || "") + "</div></td><td>" + gcell(e.sales) + "</td><td>" + gcell(e.profit) + '</td><td><span style="' + gcol(gr.label) + '" title="' + esc(gr.why.join("; ")) + '">' + gr.label + '</span><div class="note" style="margin:2px 0 0;max-width:22ch">' + esc(gr.why.slice(0, 2).join("; ")) + "</div></td><td class=\"num\">" +
         (t ? t.at.toFixed(1) : BARS[e.sym] === null ? '<span class="note" title="no price from the Worker">n/a</span>' : '<span class="note">…</span>') + '</td><td class="num">' + (t ? t.now.toFixed(1) : "") + '</td><td class="num" style="' + (t ? cls(t.ret) : "") + '"><b>' + (t ? pct(t.ret) : "-") + '</b><div class="note" style="margin:2px 0 0">' + (t ? (t.days < 0 ? "waiting for the next session" : t.days + " days") : "") + "</div></td><td>" +
-        (q.length ? '<details><summary style="cursor:pointer">Quotes</summary><div class="note" style="max-width:46ch">' + q.map(esc).join("<br>") + "</div></details>" : "") + '</td><td>' + (e.feed ? "" : '<button class="ccdel" data-id="' + esc(e.id) + '" title="remove" style="border:0;background:none;cursor:pointer;color:var(--mute)">✕</button>') + "</td></tr>";
+        (q.length ? '<details><summary style="cursor:pointer">Quotes</summary><div class="note" style="max-width:46ch">' + q.map(esc).join("<br>") + "</div></details>" : "") + '</td><td><button class="ccpt" data-sym="' + esc(e.sym) + '" data-tag="' + esc("Concall " + gr.label) + '" data-note="' + esc((e.q || "") + " call " + e.date) + '" title="paper trade this stock" style="padding:3px 8px;border-radius:8px;cursor:pointer;white-space:nowrap">Paper trade</button> ' + (e.feed ? "" : '<button class="ccdel" data-id="' + esc(e.id) + '" title="remove" style="border:0;background:none;cursor:pointer;color:var(--mute)">✕</button>') + "</td></tr>";
     }).join("");
     const flt = [["all", "All"], ["good", "Excellent + Good"], ["raised", "Raised"], ["s25", "Sales 25%+"], ["p25", "Profit 25%+"], ["both", "Both 25%+"]].map(f => '<button class="ccf" data-f="' + f[0] + '" style="padding:5px 12px;border-radius:99px;border:1px solid var(--line,#ccc);background:' + (FILT === f[0] ? "var(--a,#0e7490)" : "transparent") + ";color:" + (FILT === f[0] ? "#fff" : "inherit") + ';cursor:pointer">' + f[1] + "</button>").join(" ");
     el.innerHTML = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:10px 0">' + flt + '</div>' +
@@ -7265,7 +7420,7 @@ const ccApi = (function () {
   }
   function build() {
     const h = host(); if (!h || built) return; built = true;
-    h.innerHTML = '<h2 class="hb" style="background:linear-gradient(120deg,#0e7490,#2563eb)">Concalls</h2>' +
+    h.innerHTML = '<h2 class="hb" style="background:linear-gradient(120deg,#0e7490,#2563eb)">Concalls</h2>' + '<div class="card" id="ptbox" style="margin-bottom:12px"></div>' +
       '<div class="card"><b>Add calls</b><p class="note">Paste one or more posts from your bot (the whole message, as it appears in Telegram). The page reads the symbol, quarter, call date, the sales and profit guidance, and the quotes, then follows the price from the call date.</p>' +
       '<textarea id="ccpaste" rows="6" placeholder="Paste the bot post here…" style="width:100%;box-sizing:border-box;font:inherit;padding:8px;border-radius:8px"></textarea>' +
       '<div style="margin:8px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button id="ccadd" style="padding:7px 16px;border-radius:8px;border:0;background:#0e7490;color:#fff;cursor:pointer;font-weight:600">Add pasted posts</button><span id="ccmsg" class="note" style="margin:0"></span></div>' +
@@ -7277,10 +7432,11 @@ const ccApi = (function () {
       if (t.id === "ccadd") addPasted(); else if (t.id === "ccadd2") addHand();
       else if (t.id === "cccsv") { const s = csv(); try { navigator.clipboard.writeText(s).then(() => { MSG = "CSV copied."; msg(); }, () => { MSG = "Copy failed; select the text manually."; msg(); }); } catch (e) { MSG = "Copy is not available here."; msg(); } }
       else if (t.classList && t.classList.contains("ccf")) { FILT = t.getAttribute("data-f"); list(); }
+      else if (t.classList && t.classList.contains("ccpt")) { try { ptApi.prefill(t.getAttribute("data-sym"), t.getAttribute("data-tag"), t.getAttribute("data-note")); } catch (e) {} }
       else if (t.classList && t.classList.contains("ccdel")) { const id = t.getAttribute("data-id"); LOG = LOG.filter(x => x.id !== id); save(); list(); }
     });
   }
-  function open() { build(); loadFeed().then(() => list()); list(); }
+  function open() { build(); try { ptApi.mount($c("#ptbox")); } catch (e) {} loadFeed().then(() => list()); list(); }
   return {open, parsePosts};
 })();
 const ccPaint = () => ccApi.open();
