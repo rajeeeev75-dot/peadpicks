@@ -4234,14 +4234,14 @@ const ppApi = (function () {
   }
   function manForm(sym) {
     const box = $e("#ppman"); if (!box) return;
-    sym = String(sym || "").toUpperCase();
+    sym = String(sym || "").toUpperCase() || manGuessSym();
     const pd = (pending().find(x => x.sym === sym) || {});
     const inp = (id, w, ph) => '<input id="pm_' + id + '" type="text" inputmode="decimal" placeholder="' + (ph || "") + '" style="width:' + (w || 92) + 'px">';
     const rowF = (lab, k) => "<tr><td style=\"white-space:nowrap\"><b>" + lab + "</b></td>" + ["c", "p", "y"].map(c => "<td>" + inp(k + c) + "</td>").join("") + "</tr>";
     const saved = MAN.length ? '<p class="note" style="margin:10px 0 0">Entered by hand: ' + MAN.map(m => "<b>" + E(symOfTk(m.ticker)) + '</b> <button type="button" class="cbtn" data-pmdel="' + E(m.ticker) + '">remove</button>').join(" &nbsp; ") + "</p>" : "";
     box.style.display = "";
     box.innerHTML = '<b>Add results by hand</b> <span class="note">For results that are out but not in the data file yet. Scored with the same rules as the rest of the tab.</span>' +
-      '<p class="note" style="margin:8px 0 4px">Paste one line per quarter, in this order: <b>Revenue, EBITDA %, PBT, Net profit, EPS</b> (Rs crore). Short version: paste <b>2 lines</b>, the latest quarter and then the same quarter last year; the previous quarter is taken from the data file. Or paste 3 lines (latest, previous, same quarter last year) if the data file does not have the previous quarter yet. Type the symbol in the Symbol box, so the lines hold numbers only. (To paste several stocks together instead, start the first line of each stock with its symbol.) No thousands commas, please. Result date, price, market cap, 52-week high and 12-month EPS are filled in automatically.</p>' +
+      '<p class="note" style="margin:8px 0 4px">Paste one line per quarter, in this order: <b>Revenue, EBITDA %, PBT, Net profit, EPS</b> (Rs crore). Short version: paste <b>2 lines</b>, the latest quarter and then the same quarter last year; the previous quarter is taken from the data file. Or paste 3 lines (latest, previous, same quarter last year) if the data file does not have the previous quarter yet. Type the symbol in the Symbol box, so the lines hold numbers only. (To paste several stocks together instead, start the first line of each stock with its symbol.) No thousands commas, please. Result date, price, market cap, 52-week high and 12-month EPS are filled in automatically. <b>Pasting into the box saves and scores straight away</b>; the button is for when you type the numbers.</p>' +
       '<div class="charttools" style="border:0;padding:6px 0 4px;gap:10px 14px"><label><b>Symbol</b> <input id="pm_sym" type="text" style="width:150px" value="' + E(sym) + '" placeholder="AARTISURF"></label></div>' +
       '<textarea id="pm_paste" rows="4" spellcheck="false" style="width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:.92rem" placeholder="291.24, 10.30, 17.16, 12.50, 14.76&#10;272.87, 7.40, 12.19, 9.00, 10.63&#10;179.17, 5.20, 2.20, 1.56, 1.84"></textarea>' +
       '<details style="margin-top:6px"><summary class="note" style="cursor:pointer">Change automatic values (optional)</summary><div class="charttools" style="border:0;padding:10px 0 0;gap:10px 14px"><label>Result date <input id="pm_rd" type="date" value="' + E(pd.d || "") + '"></label>' +
@@ -4273,24 +4273,35 @@ const ppApi = (function () {
     return {stocks: stocks.filter(s => s.rows.length <= 3), errs};
   }
   /* daily candles through the Worker: used for the live price fallback and the 52-week high */
+  const manFetch = (u, ms) => { const ctl = typeof AbortController !== "undefined" ? new AbortController() : null, k = setTimeout(() => { if (ctl) ctl.abort(); }, ms || 8000); return fetch(u, {cache: "no-store", signal: ctl ? ctl.signal : undefined}).finally(() => clearTimeout(k)); };
   async function manBars(sym) {
     try {
       if (typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return null;
-      const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF", {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym];
+      const r = await manFetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=DF"), j = await r.json(), rows = j && j.bars && j.bars[sym];
       return rows && rows.length > 5 ? rows.map(x => ({t: String(x[0]).slice(0, 10), h: +x[2], c: +x[4]})).filter(b => isFinite(b.c)) : null;
     } catch (e) { return null; }
   }
-  async function manPaste() {
-    const say = t => { const n = $e("#pmmsg"); if (n) n.textContent = t; };
+  /* which stock is meant when the Symbol box is empty: the search text, else the only "just announced" stock */
+  function manGuessSym() {
+    const q = SQ.trim().toUpperCase().replace(/^(NSE|BSE):/, ""), pn = pending();
+    if (q) { const m = pn.filter(x => x.sym === q); if (m.length) return m[0].sym; const m2 = pn.filter(x => x.sym.indexOf(q) >= 0); if (m2.length === 1) return m2[0].sym; if (BASE.some(x => symOfTk(x.ticker) === q)) return q; }
+    return pn.length === 1 ? pn[0].sym : "";
+  }
+  let MANNOTE = "";
+  const manMsg = t => { const n = $e("#pmmsg"); if (n) { n.textContent = t; n.style.cssText = "color:#b91c1c;font-weight:700;margin-left:8px"; } };
+  async function manPaste() { try { await manPasteRun(); } catch (e) { manMsg("Something went wrong: " + ((e && e.message) || e)); } }
+  async function manPasteRun() {
+    const say = manMsg;
     const sv = id => { const el = $e("#pm_" + id); return el ? String(el.value || "").trim() : ""; }, nv = id => num(sv(id));
-    const defSym = sv("sym").toUpperCase().replace(/^(NSE|BSE):/, "");
+    const defSym = sv("sym").toUpperCase().replace(/^(NSE|BSE):/, "") || manGuessSym();
+    { const sb = $e("#pm_sym"); if (sb && !sb.value && defSym) sb.value = defSym; }
     const P = manParse((($e("#pm_paste") || {}).value) || "", defSym);
-    if (!P.stocks.length) return say(P.errs[0] || "Paste the numbers first.");
+    if (!P.stocks.length) return say(P.errs[0] ? P.errs[0].replace("or in the Symbol box.", "or type it in the Symbol box.") : "Paste the numbers first.");
     const single = P.stocks.length === 1, skipped = P.errs.slice();
-    say("Getting prices, history and dates...");
+    say("Working... getting prices, history and dates.");
     const qp = {}, bars = {};
     await Promise.all([
-      (async () => { try { if (typeof MARKET_API_URL !== "undefined" && MARKET_API_URL) { const r = await fetch(MARKET_API_URL + "?quotes=" + encodeURIComponent(P.stocks.map(s => s.sym).slice(0, 20).join(",")), {cache: "no-store"}), j = await r.json().catch(() => null); if (j && Array.isArray(j.quotes)) j.quotes.forEach(q => { if (q && q.s && isFinite(+q.p)) qp[String(q.s).toUpperCase()] = +q.p; }); } } catch (e) {} })(),
+      (async () => { try { if (typeof MARKET_API_URL !== "undefined" && MARKET_API_URL) { const r = await manFetch(MARKET_API_URL + "?quotes=" + encodeURIComponent(P.stocks.map(s => s.sym).slice(0, 20).join(","))), j = await r.json().catch(() => null); if (j && Array.isArray(j.quotes)) j.quotes.forEach(q => { if (q && q.s && isFinite(+q.p)) qp[String(q.s).toUpperCase()] = +q.p; }); } } catch (e) {} })(),
       ...P.stocks.slice(0, 12).map(async st => { bars[st.sym] = await manBars(st.sym); })
     ]);
     const added = [], notes = [], g = x => (isFinite(x) ? x : "");
@@ -4302,7 +4313,7 @@ const ppApi = (function () {
       let rd = (pe && pe.d) || (single && sv("rd")) || "";
       if (!rd) { const ds = AM[st.sym] ? [...AM[st.sym]].filter(d => !q0 || d > q0).sort() : []; if (ds.length) rd = ds[ds.length - 1]; }
       if (!rd) { rd = today; notes.push(st.sym + ": result date not found, so today was used. Open Change automatic values to set it."); }
-      const qe0 = (single && sv("qe")) || qEndBefore(rd), c = st.rows[0], eb = r => (isFinite(r[0]) && isFinite(r[1]) ? +(r[0] * r[1] / 100).toFixed(2) : "");
+      let qe0 = (single && sv("qe")) || qEndBefore(rd), c = st.rows[0], eb = r => (isFinite(r[0]) && isFinite(r[1]) ? +(r[0] * r[1] / 100).toFixed(2) : "");
       const bb = bars[st.sym];
       const price = single && isFinite(nv("price")) ? nv("price") : (isFinite(qp[st.sym]) ? qp[st.sym] : (bb && bb.length ? bb[bb.length - 1].c : NaN));
       if (!isFinite(price)) { skipped.push(st.sym + ": no price found for this symbol (check the spelling), or type one under Change automatic values."); return; }
@@ -4314,6 +4325,9 @@ const ppApi = (function () {
         p = [fe("rev_cur"), fe("rev_cur") > 0 ? fe("ebitda_cur") / fe("rev_cur") * 100 : NaN, NaN, fe("np_cur"), fe("eps_cur")];
         notes.push(st.sym + ": previous quarter (" + qEndBefore(qe0) + ") taken from the data file: revenue " + pf(p[0], 2) + ", net profit " + pf(p[3], 2) + ".");
       } else { skipped.push(st.sym + ": the data file has the previous quarter but not the same quarter last year, so paste 2 lines (latest quarter, then the same quarter last year)."); return; }
+      /* EBITDA margin may come as a percent (10.30) or a fraction (0.07 = 7%): anything between -1 and 1 is read as a fraction */
+      { let conv = false; const nm = r => { if (isFinite(r[1]) && r[1] !== 0 && Math.abs(r[1]) < 1) { conv = true; const q = r.slice(); q[1] = +(r[1] * 100).toFixed(4); return q; } return r; };
+        c = nm(c); p = nm(p); y = nm(y); if (conv) notes.push(st.sym + ": EBITDA margins below 1 were read as fractions (0.07 = 7%)."); }
       /* 52-week high from the daily candles (or the file's own value) */
       let hi = single && isFinite(nv("high52")) ? nv("high52") : NaN;
       if (!isFinite(hi) && bb && bb.length) { const cut = new Date(Date.parse(today + "T00:00:00Z") - 365 * 864e5).toISOString().slice(0, 10); bb.forEach(b => { if (b.t >= cut && isFinite(b.h)) hi = isFinite(hi) ? Math.max(hi, b.h) : b.h; }); if (isFinite(hi)) hi = Math.max(hi, price); }
@@ -4336,7 +4350,8 @@ const ppApi = (function () {
     if (dropped.length) skipped.push(dropped.join(", ") + ": the data file already has this quarter or a newer one, so its own numbers are used.");
     if (kept.length) { SQ = kept.length === 1 ? kept[0] : ""; const se = $e("#ppSearch"); if (se) se.value = SQ; openTk = kept.length === 1 ? "NSE:" + kept[0] : null; }
     manForm(""); const b = $e("#ppman");
-    if (kept.length && !skipped.length && !notes.length) { if (b) b.style.display = "none"; } else { const m = $e("#pmmsg"); if (m) m.textContent = (kept.length ? "Saved " + kept.join(", ") + ". " : "") + skipped.concat(notes).join(" "); }
+    MANNOTE = notes.join(" ");
+    if (kept.length && !skipped.length) { if (b) b.style.display = "none"; } else { manMsg((kept.length ? "Saved " + kept.join(", ") + ". " : "") + skipped.concat(notes).join(" ")); }
     view(); paintStatus();
   }
   function manSaveForm() {
@@ -4380,6 +4395,10 @@ const ppApi = (function () {
       if (t.id === "ppSearch") { SQ = t.value; view(); return; }
       if (t.id === "ppMin") F.min = num(t.value) || 0; else if (t.id === "ppCap") F.cap = num(t.value) || 0; else if (t.id === "ppDays") F.days = /^[a-z]/.test(t.value) ? t.value : +t.value; else if (t.id === "ppU") F.u = t.value; else if (t.id === "ppSig") F.sig = t.value; else if (t.id === "ppQ") F.q = t.value; else if (t.id === "ppMode") F.mode = t.value; else return;
       try { localStorage.setItem("ppF", JSON.stringify(F)); } catch (e) {} view(); });
+    host.addEventListener("paste", ev => {   // pasting into the numbers box saves and scores straight away
+      const t = ev.target; if (!t || t.id !== "pm_paste") return;
+      setTimeout(() => { try { const sb = $e("#pm_sym"), sy = ((sb && sb.value) || "").trim().toUpperCase().replace(/^(NSE|BSE):/, "") || manGuessSym(), P = manParse(t.value, sy); if (P.stocks.length && !P.errs.length) manPaste(); } catch (e) {} }, 60);
+    });
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest || t.closest("a")) return;
       if (t.closest("#ppReload")) { load(true); return; }
@@ -4471,6 +4490,7 @@ const ppApi = (function () {
     let h = "";
     const pend = pending().filter(x => !sq || sHit(x.sym, x.n));
     if (sq) h += '<p class="note" style="margin:0 0 8px">Search: ' + rows.length + ' scored match' + (rows.length === 1 ? "" : "es") + (pend.length ? " and " + pend.length + " just announced but not scored yet (" + pend.map(x => E(x.sym)).join(", ") + ": the data file has no numbers for the new quarter yet)" : "") + ' for &quot;' + E(SQ.trim()) + '&quot;. The score, quality, days and market-cap filters are ignored while you search; clear the box to go back to them.</p>';
+    if (sq && MANNOTE) h += '<p class="note" style="margin:0 0 8px"><b>Entered by hand:</b> ' + E(MANNOTE) + "</p>";
     if (pend.length) {
       h += '<div class="card ppnew"><b>Results just announced (' + pend.length + ')</b> <span class="note">Not scored yet. The data file is rebuilt by your GitHub action; these appear scored once it runs.</span> <button type="button" class="cbtn" data-pmopen="' + E(pend.length === 1 || sq ? pend[0].sym : "") + '">Enter the numbers by hand</button><div class="ppchips">' +
         pend.slice(0, 40).map(x => '<a class="ppchip' + (x.fno ? " f" : "") + '" href="' + tv(x.sym) + '" target="_blank" rel="noopener" title="' + E(x.n) + " | " + (x.age === 0 ? "today" : x.age === 1 ? "yesterday" : x.age + " days ago") + '">' + E(x.sym) + " <i>" + (x.age === 0 ? "today" : x.age === 1 ? "yest." : x.age + "d") + "</i></a>").join("") + (pend.length > 40 ? '<span class="note">+' + (pend.length - 40) + " more</span>" : "") + "</div></div>";
