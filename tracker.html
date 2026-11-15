@@ -7102,33 +7102,54 @@ const ccApi = (function () {
   const pct = v => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(1) + "%" : "-");
   const cls = v => (!isFinite(v) ? "" : v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
 
-  function growth(block, re) {
-    const m = re.exec(block); if (!m) return null;
-    const rest = m[4] || "", after = block.slice(m.index + m[0].length), q = /^\s*\n\s*(?:💬|")\s*([^\n]+)/.exec(after) || /^\n\s*💬\s*([^\n]+)/.exec(after);
-    const v = num(m[3]); if (!isFinite(v)) return null;
-    return {v: m[1] === "-" ? -Math.abs(v) : v, approx: !!m[2], fy: ((/FY\s?\d{2,4}/i.exec(rest) || [""])[0] || "").replace(/\s+/g, ""),
-      raised: /raised|upgrade|higher/i.test(rest), cut: /\bcut\b|lowered|downgrade|reduced/i.test(rest), isnew: /\bnew\b/i.test(rest), derived: /\[derived\]/i.test(rest),
-      quote: q ? q[1].replace(/^[“"]|[”"]$/g, "").trim() : ""};
+  /* Reads a guidance figure that sits on the label line or on the next lines:  "Sales growth: 400% · FY27 — raised"  or  "Sales growth · FY27" then ">20%" on the next line.
+     Ranges ("20-25%") keep the lower end; ">20%" or "20%+" are treated as a minimum of 20. */
+  function growth(lines, labelRe) {
+    for (let i = 0; i < lines.length; i++) {
+      if (!labelRe.test(lines[i])) continue;
+      const win = lines.slice(i, i + 3).join(" \n "), tail = win.slice(win.search(/growth/i) >= 0 ? win.search(/growth/i) + 6 : 0);
+      const m = /([<>≥≤≈~]?)\s*(-?\d[\d,.]*)\s*(?:(?:-|–|—|to)\s*(\d[\d,.]*))?\s*%\s*(\+?)/i.exec(tail); if (!m) continue;
+      const v = num(m[2]); if (!isFinite(v)) continue;
+      const ctx = win, qi = lines.slice(i, i + 6).findIndex(x => /^💬/.test(x));
+      const txt = (m[3] ? m[2] + "-" + m[3] + "%" : (m[1] === ">" || m[1] === "≥" || m[4] ? v + "%+" : ""));
+      return {v, approx: m[1] === "≈" || m[1] === "~", txt: txt === (v + "%+") || m[3] ? txt : "", fy: ((/FY\s?\d{2,4}/i.exec(ctx) || [""])[0] || "").replace(/\s+/g, ""),
+        raised: /raised|upgrade|higher/i.test(ctx), cut: /\bcut\b|lowered|downgrade|reduced/i.test(ctx), isnew: /\bnew\b/i.test(ctx), derived: /\[derived\]/i.test(ctx),
+        quote: qi >= 0 ? lines[i + qi].replace(/^💬\s*/, "").replace(/^[“"]|[”"]$/g, "").trim() : ""};
+    }
+    return null;
   }
   function parseOne(block) {
-    const dm = /Call:\s*(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s+(\d{4})/i.exec(block); if (!dm || !MON[dm[2].toLowerCase()]) return null;
+    const dm = /Call:?\s*(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\s+(\d{4})/i.exec(block); if (!dm || !MON[dm[2].toLowerCase()]) return null;
     const date = dm[3] + "-" + p2(MON[dm[2].toLowerCase()]) + "-" + p2(+dm[1]);
-    let sym = "", name = "";
     const lines = block.split(/\n/).map(x => x.trim()).filter(x => x && !/^screener$/i.test(x));
-    for (const ln of lines) { const m = /^(.*?)\s*\(([A-Z0-9&\-]{2,20})\)\s*$/.exec(ln); if (m && !/growth|call:/i.test(ln)) { sym = m[2]; name = m[1].trim(); break; } }
+    let sym = "", name = "";
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i]; if (/growth|call/i.test(ln)) continue;
+      const m = /^(.*?)\s*\(([A-Z0-9&\-]{2,20})\)\s*$/.exec(ln);
+      if (m) { sym = m[2]; name = m[1].trim() || (i > 0 && !/growth|call|guidance/i.test(lines[i - 1]) ? lines[i - 1] : ""); break; }
+    }
     if (!sym) { const m = /NSE:\s*([A-Z0-9&\-]{2,20})/i.exec(block); if (m) sym = m[1].toUpperCase(); }
     if (!sym) return null;
     const qm = /Q[1-4]\s*FY\s?\d{2,4}/i.exec(block);
-    const sales = growth(block, /^[^\S\n]*(?:📈\s*)?(?:Sales|Revenue)[^\n:]*:\s*()([≈~]?)\s*(-?[\d,.]+)\s*%([^\n]*)/im), profit = growth(block, /^[^\S\n]*(?:📈\s*)?(?:Profit|PAT|Net profit)[^\n:]*:\s*()([≈~]?)\s*(-?[\d,.]+)\s*%([^\n]*)/im);
-    // the sign group (1) is unused by the pattern above, so negatives are read from the number itself
-    [sales, profit].forEach(g => { if (g && !isFinite(g.v)) g.v = NaN; });
+    const sales = growth(lines, /(Sales|Revenue)[^\n]*growth/i), profit = growth(lines, /(Profit|PAT|Net profit)[^\n]*growth/i);
     if (!sales && !profit) return null;
     return {id: sym + "|" + date + "|" + (qm ? qm[0].replace(/\s+/g, "").toUpperCase() : ""), sym, name, q: qm ? qm[0].replace(/\s+/g, " ").toUpperCase() : "", date, sales, profit, added: Date.now()};
   }
+  const score = e => (e.sales ? 1 : 0) + (e.profit ? 1 : 0) + (e.name ? 0.1 : 0) + ((e.sales && e.sales.quote) || (e.profit && e.profit.quote) ? 0.2 : 0) + ((e.sales && e.sales.raised) || (e.profit && e.profit.raised) ? 0.1 : 0);
   function parsePosts(text) {
-    const out = [], re = /^[^\n]*Call:\s*\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}[^\n]*$/gim; let last = 0, m;
-    while ((m = re.exec(text))) { const e = parseOne(text.slice(last, m.index + m[0].length)); last = m.index + m[0].length; if (e) out.push(e); }
-    return out;
+    const best = {}, re = /^[^\n]*Call:?\s*\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}[^\n]*$/gim; let last = 0, m, any = false;
+    const take = e => { if (e && (!best[e.id] || score(e) > score(best[e.id]))) best[e.id] = e; };
+    while ((m = re.exec(text))) { any = true; take(parseOne(text.slice(last, m.index + m[0].length))); last = m.index + m[0].length; }
+    if (!any) take(parseOne(text));
+    return Object.keys(best).map(k => best[k]);
+  }
+  /* when nothing could be read, say exactly what was and was not found */
+  function diagnose(text) {
+    const f = (ok, y, n) => (ok ? "found " + y : "NOT found: " + n);
+    return [f(/\(([A-Z0-9&\-]{2,20})\)|NSE:\s*[A-Z0-9&\-]{2,20}/.test(text), "symbol", "symbol (in brackets, or as NSE: SYMBOL)"),
+      f(/Call:?\s*\d{1,2}\s+[A-Za-z]{3}[A-Za-z]*\s+\d{4}/i.test(text), "call date", "call date such as 'Call: 14 Nov 2026'"),
+      f(/(Sales|Revenue)[^\n]*growth/i.test(text), "sales growth line", "a 'Sales growth' line"), f(/(Profit|PAT)[^\n]*growth/i.test(text), "profit growth line", "a 'Profit growth' line"),
+      f(/\d\s*%/.test(text), "a percentage", "any percentage")].join("; ");
   }
   const all = () => { const seen = {}, out = []; LOG.concat(FEED).forEach(e => { if (e && e.id && !seen[e.id]) { seen[e.id] = 1; out.push(e); } }); return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)); };
 
@@ -7191,7 +7212,7 @@ const ccApi = (function () {
   function gcell(g) {
     if (!g) return '<span class="note">-</span>';
     const t = [g.raised ? '<span style="color:var(--good)" title="raised">⬆ raised</span>' : "", g.cut ? '<span style="color:var(--bad)">⬇ cut</span>' : "", g.isnew ? "✦ new" : "", g.derived ? '<span title="the bot worked this number out from the text; check the quote" style="color:var(--warn)">derived</span>' : ""].filter(Boolean).join(" · ");
-    return "<b>" + (g.approx ? "≈" : "") + g.v + "%</b>" + (g.fy ? ' <span class="note">' + esc(g.fy) + "</span>" : "") + (t ? '<div class="note" style="margin:2px 0 0">' + t + "</div>" : "");
+    return "<b>" + (g.txt ? g.txt : (g.approx ? "≈" : "") + g.v + "%") + "</b>" + (g.fy ? ' <span class="note">' + esc(g.fy) + "</span>" : "") + (t ? '<div class="note" style="margin:2px 0 0">' + t + "</div>" : "");
   }
   function summary(items) {
     const defs = [["All calls", () => true], ["Sales guide 25%+", e => big(e.sales, 25)], ["Profit guide 25%+", e => big(e.profit, 25)], ["Raised guidance", e => (e.sales && e.sales.raised) || (e.profit && e.profit.raised)], ["Guide under 25%", e => !big(e.sales, 25) && !big(e.profit, 25)], ["Grade Excellent", e => grade(e).label === "Excellent"], ["Grade Good", e => grade(e).label === "Good"], ["Grade Average or Weak", e => { const l = grade(e).label; return l === "Average" || l === "Weak"; }]];
@@ -7223,7 +7244,7 @@ const ccApi = (function () {
   }
   function addPasted() {
     const ta = $c("#ccpaste"), t = ta ? ta.value : ""; if (!t.trim()) { MSG = "Paste at least one post first."; msg(); return; }
-    const ps = parsePosts(t); if (!ps.length) { MSG = "No post found. Each post needs its company line with the symbol in brackets, a Sales or Profit growth line, and the 📅 Call: date line."; msg(); return; }
+    const ps = parsePosts(t); if (!ps.length) { MSG = "No post could be read. " + diagnose(t) + "."; msg(); return; }
     let add = 0, upd = 0; ps.forEach(p => { const i = LOG.findIndex(x => x.id === p.id); if (i >= 0) { LOG[i] = p; upd++; } else { LOG.push(p); add++; } });
     save(); ta.value = ""; MSG = add + " added" + (upd ? ", " + upd + " updated" : "") + ": " + ps.map(p => p.sym).join(", ") + "."; msg(); list();
   }
