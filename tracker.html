@@ -7801,6 +7801,9 @@ async function load(auto) {
 $("#refresh").addEventListener("click", () => load(false));
 setInterval(() => load(true), REFRESH_MS);
 setInterval(loadMarket, MARKET_REFRESH_MS);
+/* faster refresh while you are looking at the Intraday tab in market hours: market feed every 30 s, OI spurts every 60 s */
+setInterval(() => { try { if (liveHours() && !document.hidden && current === "ix") loadMarket(); } catch (e) {} }, 30 * 1000);
+setInterval(() => { try { if (liveHours() && !document.hidden && current === "ix") loadOi(); } catch (e) {} }, 60 * 1000);
 document.addEventListener("visibilitychange", () => { try { if (!document.hidden) loadMarket(); } catch (e) {} });
 window.addEventListener("online", () => { try { loadMarket(); } catch (e) {} });
 document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-mkretry]") : null; if (b) { b.textContent = "Refreshing..."; try { loadMarket(); } catch (e) {} } });
