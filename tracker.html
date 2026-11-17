@@ -74,6 +74,7 @@ h2{font-size:1.1rem;margin:24px 0 10px;padding-left:10px;border-left:6px solid v
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .chip{border-radius:999px;padding:5px 12px;font-size:.88rem;font-weight:600;border:1px solid}
+.ixtop .chip{font-weight:700;font-size:1rem;padding:6px 14px}
 .g{color:var(--good);background:color-mix(in srgb,var(--good) 14%,var(--card));border-color:color-mix(in srgb,var(--good) 45%,transparent)}
 .w{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,var(--card));border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
 .r{color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,var(--card));border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
@@ -1084,6 +1085,7 @@ function ixPaint() {
       both.map(b => '<tr><td style="white-space:nowrap">' + bmS(b.x.s) + '<b>' + esc(b.x.s) + "</b>" + znTvA(b.x.s, "D") + " " + ixBtn(b.x.s) + "</td><td>" + '<span class="chip ' + (b.side === "Long" ? "g" : "r") + '">' + b.side + '</span></td><td class="num"><b>' + b.x.sc + "</b> / 10</td><td class=\"num\">" + mc(b.x.pc) + '</td><td class="num">' + f2(b.r.pct) + '</td><td class="num">' + f0(b.r.chg) + "</td><td style=\"white-space:nowrap\">" + read(b.x.pc, b.r.chg) + '</td><td class="num">' + (b.x.lv ? f2(b.x.lv.t) : "-") + '</td><td class="num">' + (b.x.lv ? f2(b.x.lv.st) : "-") + "</td></tr>").join("") +
       '</tbody></table></div><p class="note" style="margin-bottom:0">Stocks the screen ranks as intraday candidates that also show a jump in open interest. OI read: price up with OI up is long build-up, price down with OI up is short build-up, price up with OI down is short covering, price down with OI down is long unwinding. These are data labels, not advice.</p></div>' : '<p class="note" style="margin:0">No stock matches these filters. Lower the score or the % change in OI.</p></div>');
   }
+  if (IDEAS_CHIPS) h = '<div class="ixtop">' + IDEAS_CHIPS + "</div>" + h;   // market bias, Nifty and advance/decline at the very top of the Intraday page
   h += ideas + oiHTML();
   try { h += resultWatchHTML(M, oiBy); } catch (e) { h += '<div class="card"><p class="note">Problem drawing the results watchlist: ' + esc(e && e.message) + '</p></div>'; }
   const keepIx = IX_SEL ? document.getElementById("ixchart") : null; if (keepIx) keepIx.remove();
@@ -2930,7 +2932,7 @@ function resInfoMap(M) {
   Object.keys(out).forEach(k => { const o = out[k], dt = new Date(o.d + "T00:00:00Z"); o.label = o.age === 0 ? "Results today" : o.age === 1 ? "Results yesterday" : "Results " + dt.toLocaleDateString("en-GB", {weekday: "short", day: "numeric", month: "short", timeZone: "UTC"}); });
   return out;
 }
-let IDEAS_LAST = null;
+let IDEAS_LAST = null, IDEAS_CHIPS = "";
 function ideasHTML(M, mc, opt) {
   const oiSet = (opt && opt.oiSet) || new Set();
   const RES = resInfoMap(M);
@@ -2983,9 +2985,11 @@ function ideasHTML(M, mc, opt) {
   IDEAS_LAST = {L, S, pc: nPct};
   try { seenUpdate(M, L, S); } catch (e) {}
   let h = "<h2>Trade ideas (screen)</h2>";
-  h += '<div class="chips"><span class="chip ' + (bias > 0 ? "g" : bias < 0 ? "r" : "n") + '">' + (bias > 0 ? "Market bias: long" : bias < 0 ? "Market bias: short" : "Market bias: neutral") + "</span>" +
+  const chipRow = st => '<div class="chips"' + (st ? ' style="' + st + '"' : "") + '><span class="chip ' + (bias > 0 ? "g" : bias < 0 ? "r" : "n") + '">' + (bias > 0 ? "Market bias: long" : bias < 0 ? "Market bias: short" : "Market bias: neutral") + "</span>" +
     (isFinite(nPct) ? '<span class="chip n">Nifty ' + pct(nPct, 2) + "</span>" : "") + (isFinite(ratio) ? '<span class="chip n">Advance/decline ' + ratio.toFixed(2) + "</span>" : "") +
     (flat ? '<span class="chip w">Nifty almost flat, so x-times-Nifty is skipped</span>' : "") + "</div>";
+  h += chipRow("");
+  IDEAS_CHIPS = chipRow("margin:0 0 10px");
   if (!haveOHL) h += '<p class="note pead-warn">NSE did not send open, high and low, so O=H / O=L and the trigger levels are skipped.</p>';
   if (M.seenOn && M.tracker && M.tracker.msg) h += '<p class="note">Tracker last ran ' + new Date(M.tracker.t).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata"}) + ": " + esc(M.tracker.msg) + "</p>";
   if (!M.seenOn) h += '<p class="note pead-warn">Entry times (the clock under each stock) are for this browser only, so a browser opened later cannot know when a stock really appeared. Set up the Worker tracker for times shared by every browser.</p>';
