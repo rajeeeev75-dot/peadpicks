@@ -7638,6 +7638,171 @@ const ccApi = (function () {
 })();
 const ccPaint = () => ccApi.open();
 
+/* ===== BREAKOUT TAB: Nifty 500 momentum scan (close above yesterday's high, volume surge, wide opening candle, leading sector) ===== */
+const mbApi = (function () {
+  const $e = s => document.querySelector(s), E = esc;
+  let F = {vm: 2, c15: 3, c20: 2, minVol: 500000, minPx: 50, lead: 5, ic: "on", q: "", sort: "vr", dir: -1, shown: 100};
+  try { const sv = JSON.parse(localStorage.getItem("mbF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 100}); } catch (e) {}
+  const save = () => { try { localStorage.setItem("mbF", JSON.stringify(F)); } catch (e) {} };
+  const LIST = () => n5Api.list();
+  let D = {}, I = {}, ST = {busy: false, done: 0, total: 0, err: "", t: 0, fail: 0}, IS = {busy: false, done: 0, total: 0, err: ""}, built = false, PT = null, LAST = null;
+  const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
+  const f0 = v => (isFinite(v) ? Math.round(v).toLocaleString("en-IN") : "-");
+  const sg = (v, d = 2) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) : "-");
+  const cls = v => (v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
+  const istParts = v => { const ms = typeof v === "number" ? (v < 1e11 ? v * 1000 : v) : Date.parse(v); if (!isFinite(ms)) return null; const d = new Date(ms + 19800000); return {date: d.toISOString().slice(0, 10), min: d.getUTCHours() * 60 + d.getUTCMinutes()}; };
+  const dDate = v => { if (typeof v === "number") { const p = istParts(v); return p ? p.date : ""; } return String(v).slice(0, 10); };
+  const schedule = () => { if (PT) return; PT = setTimeout(() => { PT = null; try { if (current === "mb") view(); } catch (e) {} }, 500); };
+  const hasWorker = () => typeof MARKET_API_URL !== "undefined" && !!MARKET_API_URL;
+
+  /* ---- step 1: daily candles for every Nifty 500 stock ---- */
+  async function loadDaily(force) {
+    if (ST.busy) return;
+    if (!hasWorker()) { ST.err = "No Worker address is set"; view(); return; }
+    if (!force && ST.t && Date.now() - ST.t < 5 * 60e3) return;
+    ST.busy = true; ST.err = ""; ST.fail = 0;
+    const syms = LIST().map(x => x.s), chunks = []; for (let i = 0; i < syms.length; i += 12) chunks.push(syms.slice(i, i + 12));
+    ST.total = syms.length; ST.done = 0; let ix = 0;
+    const worker = async () => {
+      while (ix < chunks.length) {
+        const ch = chunks[ix++];
+        try {
+          const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json();
+          ch.forEach(sy => { const rows = j && j.bars && j.bars[sy]; if (rows && rows.length >= 22) D[sy] = {t: Date.now(), r: rows.slice(-70).map(x => ({d: dDate(x[0]), h: +x[2], l: +x[3], c: +x[4], v: +x[5] || 0}))}; else ST.fail++; });
+        } catch (e) { ST.fail += ch.length; }
+        ST.done += ch.length; schedule();
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    ST.t = Date.now(); ST.busy = false; if (!Object.keys(D).length) ST.err = "no daily candles came back from the Worker";
+    view(); stage2();
+  }
+
+  /* ---- numbers per stock from the daily candles (today's candle is the last one, volume average includes it) ---- */
+  function calc() {
+    const M = {};
+    Object.keys(D).forEach(sy => {
+      const r = D[sy].r, n = r.length, a = r[n - 1], p = r[n - 2]; let sv = 0; for (let k = n - 20; k < n; k++) sv += r[k].v;
+      let s50 = 0, c50 = 0; for (let k = Math.max(0, n - 50); k < n; k++) { s50 += r[k].c; c50++; }
+      const sma = sv / 20;
+      M[sy] = {c: a.c, ph: p.h, v: a.v, sma, vr: sma > 0 ? a.v / sma : NaN, chg: (a.c / p.c - 1) * 100, brk: (a.c / p.h - 1) * 100, r20: n > 20 ? (a.c / r[n - 21].c - 1) * 100 : NaN, up50: n >= 50 ? a.c > s50 / c50 : null, date: a.d};
+    });
+    return M;
+  }
+  /* ---- leading-sector approximation: industries ranked on the 20-day gain and on the share of stocks above their 50-day average ---- */
+  function sectors(M) {
+    const g = {}; LIST().forEach(x => { const m = M[x.s]; if (!m || !isFinite(m.r20)) return; (g[x.i] = g[x.i] || []).push(m); });
+    const out = Object.keys(g).filter(k => g[k].length >= 4).map(k => { const a = g[k], w = a.filter(m => m.up50 !== null); return {i: k, n: a.length, ret: a.reduce((s, m) => s + m.r20, 0) / a.length, br: w.length ? 100 * w.filter(m => m.up50).length / w.length : 0}; });
+    const rank = key => { out.slice().sort((a, b) => b[key] - a[key]).forEach((o, ix) => { o["r_" + key] = ix; }); };
+    rank("ret"); rank("br"); out.forEach(o => { o.sc = o.r_ret + o.r_br; });
+    out.sort((a, b) => a.sc - b.sc || b.ret - a.ret); out.forEach((o, ix) => { o.rank = ix + 1; });
+    return out;
+  }
+  function evalAll() {
+    const M = calc(), SEC = sectors(M), rk = {}; SEC.forEach(o => { rk[o.i] = o.rank; });
+    const rows = [];
+    LIST().forEach(x => {
+      const m = M[x.s]; if (!m) return; const o = Object.assign({s: x.s, n: x.n, i: x.i, srank: rk[x.i] || 999}, m), q = I[x.s];
+      o.p1 = o.c > o.ph; o.p2 = o.vr > F.vm; o.p3 = o.v > F.minVol && o.c > F.minPx; o.p4 = !F.lead || o.srank <= F.lead;
+      o.r15 = q ? q.r15 : NaN; o.r20 = q ? q.r20 : NaN; o.idate = q ? q.date : ""; o.p5 = q ? (o.r20 > F.c20 || o.r15 > F.c15) : null;
+      rows.push(o);
+    });
+    return {rows, SEC};
+  }
+
+  /* ---- step 2: the first 15 and 20 minute candles of the session, built from 5-minute candles (only for stocks that passed the daily tests) ---- */
+  function opening(rows) {
+    const bars = rows.map(x => { const p = istParts(x[0]); return p ? {d: p.date, m: p.min, h: +x[2], l: +x[3]} : null; }).filter(Boolean);
+    if (!bars.length) return null;
+    const day = bars.reduce((m, b) => (b.d > m ? b.d : m), ""), dd = bars.filter(b => b.d === day && b.m >= 555);
+    if (!dd.length) return {date: day, r15: NaN, r20: NaN};
+    const base = Math.min.apply(null, dd.map(b => b.m));
+    const rng = k => { const got = []; for (let i = 0; i < k; i++) { const b = dd.find(z => z.m === base + 5 * i); if (!b) return NaN; got.push(b); } const H = Math.max.apply(null, got.map(b => b.h)), L = Math.min.apply(null, got.map(b => b.l)); return L > 0 ? (H / L - 1) * 100 : NaN; };
+    return {date: day, r15: rng(3), r20: rng(4)};
+  }
+  async function stage2() {
+    if (IS.busy || !hasWorker()) return;
+    const need = evalAll().rows.filter(o => o.p1 && o.p2 && o.p3 && o.p4 && (!I[o.s] || Date.now() - I[o.s].t > 3 * 60e3)).map(o => o.s);
+    if (!need.length) { view(); return; }
+    IS.busy = true; IS.err = ""; IS.total = need.length; IS.done = 0;
+    const chunks = []; for (let i = 0; i < need.length; i += 10) chunks.push(need.slice(i, i + 10)); let ix = 0;
+    const worker = async () => {
+      while (ix < chunks.length) {
+        const ch = chunks[ix++];
+        try {
+          const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=5", {cache: "no-store"}), j = await r.json(), t = Date.now();
+          ch.forEach(sy => { const rows = j && j.bars && j.bars[sy], o = rows && rows.length ? opening(rows) : null; I[sy] = {t, r15: o ? o.r15 : NaN, r20: o ? o.r20 : NaN, date: o ? o.date : ""}; });
+        } catch (e) { IS.err = String((e && e.message) || e); ch.forEach(sy => { I[sy] = {t: Date.now(), r15: NaN, r20: NaN, date: ""}; }); }
+        IS.done += ch.length; schedule();
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    IS.busy = false; view();
+  }
+
+  /* ---- screen ---- */
+  const th = (k, t, num) => '<th data-mbk="' + k + '"' + (num ? ' class="num"' : "") + ' style="cursor:pointer;white-space:nowrap">' + t + (F.sort === k ? (F.dir > 0 ? " &#9650;" : " &#9660;") : "") + "</th>";
+  function results() {
+    const R = evalAll(), rows = R.rows, c1 = rows.filter(o => o.p1), c2 = c1.filter(o => o.p2), c3 = c2.filter(o => o.p3), c4 = c3.filter(o => o.p4), c5 = c4.filter(o => o.p5 === true);
+    let list = F.ic === "on" ? c4.filter(o => o.p5 !== false) : c4.slice();
+    const q = F.q.trim().toLowerCase(); if (q) list = list.filter(o => (o.s + " " + o.n + " " + o.i).toLowerCase().indexOf(q) >= 0);
+    const key = {s: o => o.s, i: o => o.srank, vr: o => o.vr, chg: o => o.chg, brk: o => o.brk, r15: o => (isFinite(o.r15) ? o.r15 : -1e9), r20: o => (isFinite(o.r20) ? o.r20 : -1e9), v: o => o.v, c: o => o.c}[F.sort] || (o => o.vr);
+    list.sort((a, b) => { const A = key(a), B = key(b); return (A > B ? 1 : A < B ? -1 : 0) * F.dir || (a.s < b.s ? -1 : 1); });
+    return {R, list, f: [rows.length, c1.length, c2.length, c3.length, c4.length, c5.length]};
+  }
+  function view() {
+    const host = $e("#mbres"); if (!host) return;
+    const X = results(), R = X.R, f = X.f; LAST = X;
+    const stat = $e("#mbstat");
+    const dates = {}; R.rows.forEach(o => { dates[o.date] = (dates[o.date] || 0) + 1; }); const dl = Object.keys(dates).sort().pop() || "";
+    const mism = R.rows.filter(o => o.idate && o.date && o.idate !== o.date).length, nan = R.rows.filter(o => o.p1 && o.p2 && o.p3 && o.p4 && o.idate && !isFinite(o.r20)).length;
+    if (stat) stat.innerHTML = Object.keys(D).length + " of " + LIST().length + " stocks have daily candles" + (dl ? " &middot; latest daily candle " + E(dl) : "") + (ST.busy ? " &middot; loading daily candles " + Math.min(ST.done, ST.total) + "/" + ST.total : "") + (IS.busy ? " &middot; checking opening candles " + Math.min(IS.done, IS.total) + "/" + IS.total : "") + (ST.t ? " &middot; as of " + new Date(ST.t).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false}) : "") + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + "</span>" : "") + (IS.err ? ' &middot; <span style="color:var(--bad)">intraday: ' + E(IS.err) + "</span>" : "");
+    const fun = [["Nifty 500 with data", f[0]], ["Close above yesterday's high", f[1]], ["Volume above " + F.vm + "x its 20-day average", f[2]], ["Volume over " + f0(F.minVol) + " and price over " + F.minPx, f[3]], [F.lead ? "In a leading sector" : "Sector filter off", f[4]], ["Wide opening candle", f[5]]];
+    let h = '<div class="note" style="margin:0 0 8px">' + fun.map((x, i) => (i ? " &rarr; " : "") + E(x[0]) + " <b>" + x[1] + "</b>").join("") + "</div>";
+    const lead = R.SEC.slice(0, F.lead || 0); if (lead.length) h += '<div class="note" style="margin:0 0 8px"><b>Leading sectors now</b> (20-day gain, % of stocks above 50-day average): ' + lead.map(o => E(o.i) + " <small>" + sg(o.ret, 1) + "%, " + Math.round(o.br) + "%</small>").join(" &middot; ") + "</div>";
+    if (mism) h += '<div class="note" style="margin:0 0 8px;color:var(--bad)">' + mism + " stocks have an intraday session date different from the daily candle date, so their opening-candle test may be for another day.</div>";
+    if (F.ic === "on" && nan) h += '<div class="note" style="margin:0 0 8px">' + nan + " stocks passed the daily tests but have no complete opening 20-minute candle yet (before about 9:35 AM, or the Worker has no intraday data), so they are not listed.</div>";
+    h += '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th>' + th("s", "Stock") + th("i", "Sector rank", 1) + th("c", "Price", 1) + th("chg", "Change %", 1) + th("vr", "Volume x avg", 1) + th("v", "Volume", 1) + th("brk", "Above prev high %", 1) + th("r15", "15m opening range %", 1) + th("r20", "20m opening range %", 1) + "</tr></thead><tbody>";
+    h += X.list.length ? X.list.slice(0, F.shown).map((o, i) => '<tr><td>' + (i + 1) + '</td><td style="min-width:200px"><b>' + E(o.s) + "</b>" + znTvA(o.s, "D") + '<div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(o.n) + " &middot; " + E(o.i) + "</div></td>" +
+      '<td class="num">' + (o.srank < 999 ? "#" + o.srank : "-") + '</td><td class="num">' + f2(o.c) + '</td><td class="num" style="' + cls(o.chg) + '"><b>' + sg(o.chg) + '%</b></td><td class="num"><b>' + o.vr.toFixed(1) + 'x</b></td><td class="num">' + f0(o.v) + '</td><td class="num">' + sg(o.brk) + '%</td>' +
+      '<td class="num"' + (o.r15 > F.c15 ? ' style="color:var(--good);font-weight:700"' : "") + ">" + (o.p5 === null ? "..." : isFinite(o.r15) ? o.r15.toFixed(2) + "%" : "-") + '</td><td class="num"' + (o.r20 > F.c20 ? ' style="color:var(--good);font-weight:700"' : "") + ">" + (o.p5 === null ? "..." : isFinite(o.r20) ? o.r20.toFixed(2) + "%" : "-") + "</td></tr>").join("")
+      : '<tr><td colspan="10" class="note">' + (Object.keys(D).length ? "No stock passes all the filters right now." : ST.busy ? "Loading candles..." : "Nothing loaded yet. Press Reload.") + "</td></tr>";
+    host.innerHTML = h + "</tbody></table></div>" + (X.list.length > F.shown ? '<p><button type="button" class="cbtn" id="mbmore">Show more (' + (X.list.length - F.shown) + " left)</button></p>" : "") +
+      '<p class="note">Same rules as your Chartink scan on Nifty 500: daily close above the previous day\'s high; volume above ' + F.vm + 'x its 20-day average (your 3x rule is already covered by 2x, so it is not repeated); the first 15-minute candle of the day wider than ' + F.c15 + '% (high over low) or the first 20-minute candle wider than ' + F.c20 + '%; volume over ' + f0(F.minVol) + ' and price over ' + F.minPx + '. "[=1]" in Chartink means the first candle of the day. Chartink\'s "Trend Strength Screen - Leading Sector" is its own saved scan and cannot be read here, so leading sectors are approximated by ranking industries on their 20-day gain and on how many of their stocks are above the 50-day average. Today\'s daily candle (and its volume) is still forming during market hours. Screening aid, not advice.</p>';
+  }
+  function csv() {
+    if (!LAST) return ""; const q = s => '"' + String(s).replace(/"/g, '""') + '"';
+    return ["Symbol,Sector rank,Industry,Price,Change %,Volume x avg,Volume,Above prev high %,15m range %,20m range %"].concat(LAST.list.map(o => [q(o.s), o.srank < 999 ? o.srank : "", q(o.i), o.c.toFixed(2), o.chg.toFixed(2), o.vr.toFixed(2), Math.round(o.v), o.brk.toFixed(2), isFinite(o.r15) ? o.r15.toFixed(2) : "", isFinite(o.r20) ? o.r20.toFixed(2) : ""].join(","))).join("\n");
+  }
+  function build() {
+    const host = $e("#mbbody"); if (!host || built) return; built = true;
+    const num = (id, lab, v, st) => '<label>' + lab + ' <input id="' + id + '" type="number" step="' + (st || "any") + '" style="width:84px" value="' + E(v) + '"></label>';
+    host.innerHTML = '<div class="znhead"><div><h2>BREAKOUT</h2><span>Nifty 500 momentum scan: breakout, volume surge, wide opening candle, leading sector</span></div><div class="znpills"><span>Daily + 5m candles</span><span>TradingView link</span><span>CSV copy</span></div></div>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Search <input id="mbq" type="search" placeholder="symbol, name or industry" style="width:170px" value="' + E(F.q) + '"></label>' +
+      num("mbvm", "Volume x avg over", F.vm, "0.1") + num("mbc15", "15m range % over", F.c15, "0.1") + num("mbc20", "20m range % over", F.c20, "0.1") + num("mbmv", "Min volume", F.minVol, "10000") + num("mbmp", "Min price", F.minPx, "1") +
+      '<label>Leading sectors <select id="mbld"><option value="0">Off</option><option value="3">Top 3</option><option value="5">Top 5</option><option value="8">Top 8</option><option value="12">Top 12</option></select></label>' +
+      '<label>Opening candle <select id="mbic"><option value="on">Required</option><option value="off">Show all daily passes</option></select></label>' +
+      '<button type="button" class="cbtn" id="mbrl">&#8635; Reload</button><button type="button" class="cbtn" id="mbcsv">Copy CSV</button></div><div class="note" id="mbstat" style="margin:8px 0 0"></div></div><div id="mbres"></div>';
+    $e("#mbld").value = String(F.lead); $e("#mbic").value = F.ic;
+    host.addEventListener("input", ev => {
+      const t = ev.target; if (!t || !t.id) return; const n = parseFloat(t.value);
+      if (t.id === "mbq") F.q = t.value; else if (t.id === "mbvm" && isFinite(n)) F.vm = n; else if (t.id === "mbc15" && isFinite(n)) F.c15 = n; else if (t.id === "mbc20" && isFinite(n)) F.c20 = n; else if (t.id === "mbmv" && isFinite(n)) F.minVol = n; else if (t.id === "mbmp" && isFinite(n)) F.minPx = n; else if (t.id === "mbld") F.lead = +t.value || 0; else if (t.id === "mbic") F.ic = t.value; else return;
+      F.shown = 100; save(); view(); if (t.id !== "mbq") stage2();
+    });
+    host.addEventListener("click", ev => {
+      const t = ev.target; if (!t || !t.closest) return;
+      if (t.closest("#mbrl")) { I = {}; loadDaily(true); return; }
+      if (t.closest("#mbmore")) { F.shown += 100; view(); return; }
+      if (t.closest("#mbcsv")) { const s = csv(), b = t.closest("#mbcsv"); try { navigator.clipboard.writeText(s).then(() => { b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy CSV"; }, 1500); }, () => { b.textContent = "Copy failed"; }); } catch (e) { b.textContent = "Copy not available"; } return; }
+      const k = t.closest("[data-mbk]"); if (k) { const s = k.dataset.mbk; F.dir = F.sort === s ? -F.dir : (s === "s" || s === "i" ? 1 : -1); F.sort = s; save(); view(); }
+    });
+  }
+  function open() { build(); view(); loadDaily(false); if (Object.keys(D).length) stage2(); }
+  setInterval(() => { try { if (current === "mb" && !document.hidden && !ST.busy && !IS.busy && liveHours()) { if (!ST.t || Date.now() - ST.t > 5 * 60e3) loadDaily(true); else stage2(); } } catch (e) {} }, 60 * 1000);
+  return {open, evalAll, opening, sectors, calc, _set: (d, i, f) => { if (d) D = d; if (i) I = i; if (f) F = Object.assign(F, f); }};
+})();
+const mbPaint = () => mbApi.open();
+
 /* ===== APP ===== */
 let current = "ov", lastRows = [];
 function show(id) {
@@ -7657,6 +7822,7 @@ function show(id) {
   if (id === "n5") { try { n5Paint(); } catch (e) {} }
   if (id === "mx") { try { mxPaint(); } catch (e) {} }
   if (id === "cu") { try { cuPaint(); } catch (e) {} }
+  if (id === "mb") { try { mbPaint(); } catch (e) {} }
   if (id === "sw") { try { swPaint(); } catch (e) {} }
   if (id === "op") { try { opPaint(); } catch (e) {} }
   ensureChart(sec);
@@ -7724,7 +7890,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="cc" aria-selected="false" style="--a:#0e7490;--b:#2563eb">Trade</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="rm" aria-selected="false" style="--a:#7c3aed;--b:#db2777">123</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="mb" aria-selected="false" style="--a:#0f766e;--b:#22c55e">Breakout</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="cc" aria-selected="false" style="--a:#0e7490;--b:#2563eb">Trade</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<div class="sl sidetop" style="background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:8px 12px;margin-bottom:10px">' + idxBtns + '<button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button><button role="tab" data-t="mx" aria-selected="false" style="--a:#b45309;--b:#eab308">MCX</button></div><details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -7781,6 +7947,10 @@ function render(stocks) {
     const op = document.createElement("section"); op.className = "stock"; op.id = "op"; op.style.cssText = "--a:#7c3aed;--b:#db2777";
     op.dataset.ctk = SYMKEY; op.innerHTML = '<div class="znhead"><div><h2>OPTIONS</h2><span>Nifty chart with the sheet symbols, symbol guide and strategies</span></div><div class="znpills"><span>Smiley symbols</span><span>Strategies</span></div></div><div id="opstrip"></div><div id="opoi"></div><div class="chartslot"></div><div id="opbody"></div>'; views.appendChild(op);
   }
+  if (!document.getElementById("mb")) {
+    const mb = document.createElement("section"); mb.className = "stock"; mb.id = "mb"; mb.style.cssText = "--a:#0f766e;--b:#22c55e";
+    mb.innerHTML = '<div id="mbbody"></div>'; views.appendChild(mb);
+  }
   if (!document.getElementById("rm")) {
     const rm = document.createElement("section"); rm.className = "stock"; rm.id = "rm"; rm.style.cssText = "--a:#7c3aed;--b:#db2777";
     rm.innerHTML = '<div id="rmbody"></div>'; views.appendChild(rm);
@@ -7814,7 +7984,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "cc" || current === "st" || current === "n5" || current === "cu" || current === "op" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "cc" || current === "st" || current === "n5" || current === "cu" || current === "mb" || current === "op" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
