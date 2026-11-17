@@ -1064,7 +1064,8 @@ function ixPaint() {
   let h = '<div id="ixchart"></div>';
   const M = (typeof MARKET !== "undefined") ? MARKET : null;
   if (!M) { o.innerHTML = '<div class="card"><p class="note" style="margin:0">Waiting for the market feed (needs the Worker)...</p></div>'; return; }
-  const oiRows = (OI && OI.rows) || [], oiBy = {}; oiRows.forEach(r => { oiBy[String(r.s).toUpperCase()] = r; });
+  const oiRows = ((OI && OI.rows) || []).slice().sort((a, b) => (b.pct == null ? -1e9 : +b.pct) - (a.pct == null ? -1e9 : +a.pct)).slice(0, 10), oiBy = {}; oiRows.forEach(r => { oiBy[String(r.s).toUpperCase()] = r; });
+  const oiAll = {}; ((OI && OI.rows) || []).forEach(r => { oiAll[String(r.s).toUpperCase()] = r; });   // full list, for the results watchlist
   const mc = v => (isFinite(v) ? '<span class="num" style="color:var(--' + (v >= 0 ? "good" : "bad") + ')">' + pct(v, 2) + "</span>" : '<span class="num">-</span>');
   let ideas = ""; try { ideas = ideasHTML(M, mc, {oiSet: new Set(Object.keys(oiBy))}); } catch (e) { ideas = '<div class="card"><p class="note">Problem drawing trade ideas: ' + esc(e && e.message) + "</p></div>"; }
   /* stocks present in both lists */
@@ -1079,7 +1080,7 @@ function ixPaint() {
       '</tbody></table></div><p class="note" style="margin-bottom:0">Stocks the screen ranks as intraday candidates that also show a jump in open interest. OI read: price up with OI up is long build-up, price down with OI up is short build-up, price up with OI down is short covering, price down with OI down is long unwinding. These are data labels, not advice.</p></div>';
   }
   h += ideas + oiHTML();
-  try { h += resultWatchHTML(M, oiBy); } catch (e) { h += '<div class="card"><p class="note">Problem drawing the results watchlist: ' + esc(e && e.message) + '</p></div>'; }
+  try { h += resultWatchHTML(M, oiAll); } catch (e) { h += '<div class="card"><p class="note">Problem drawing the results watchlist: ' + esc(e && e.message) + '</p></div>'; }
   const keepIx = IX_SEL ? document.getElementById("ixchart") : null; if (keepIx) keepIx.remove();
   o.innerHTML = h;
   try { tpFill(); } catch (e) {}
