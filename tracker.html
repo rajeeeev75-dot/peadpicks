@@ -5372,7 +5372,7 @@ const cbApi = (function () {
   let F = {side: "Both", min: 3};
   try { const sv = JSON.parse(localStorage.getItem("cbF") || "null"); if (sv) F = Object.assign(F, sv); } catch (e) {}
   const save = () => { try { localStorage.setItem("cbF", JSON.stringify(F)); } catch (e) {} };
-  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["news", "News impact (last 2 days)", "News"], ["mkt", "Market direction agrees", "Mkt"]];
+  const SRC = [["idea", "Trade idea", "Idea"], ["oi", "OI build-up", "OI"], ["zone", "Zone near price", "Zone"], ["rm", "123 signal", "123"], ["bo", "Breakout (volume surge, opening candle)", "Breakout"], ["tc", "Season (Time Cycle)", "Season"], ["pead", "PEAD score and reaction", "PEAD"], ["news", "News impact (last 2 days)", "News"], ["mkt", "Market direction agrees", "Mkt"]];
   const px2 = v => (isFinite(v) ? fmt(v, v < 100 ? 2 : 1) : "-");
   const sgn = (v, d = 1) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) + "%" : "-");
   let PT = null, last = 0, LASTR = {};
@@ -5397,6 +5397,7 @@ const cbApi = (function () {
     } catch (e) {}
     let rmTf = "";
     try { const g = rmApi.signals(); rmTf = g.tf; Object.keys(g.m).forEach(sym => { const x = g.m[sym]; give(sym, x.dir, "rm", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 " + (x.st === "fresh" ? x.kind.toLowerCase() + " " + x.age + " bars ago" : "armed") + " (" + g.tf + ")", isFinite(x.score) ? String(Math.round(x.score)) : "", Object.assign({tf: g.tf}, x)); }); } catch (e) {}
+    try { const g = mbApi.signals(); Object.keys(g.m).forEach(sym => { const x = g.m[sym]; give(sym, 1, "bo", "Breakout: closed above yesterday's high with " + x.vr.toFixed(1) + "x volume" + (g.ic ? ", wide opening candle" : "") + (x.srank < 999 ? ", sector rank #" + x.srank : ""), x.vr.toFixed(1) + "x", {x}); }); } catch (e) {}
     const tcm = {}, tcs = {};
     try { const sn = tcApi.season(14); Object.keys(sn.m).forEach(sym => { const x = sn.m[sym]; tcm[sym] = x; tcs[x.sec] = sn.sm[x.sec]; if (x.prob >= 60 && x.avg > 0) give(sym, 1, "tc", "Rose in " + Math.round(x.prob) + "% of past years over the next 2 weeks", Math.round(x.prob) + "%", {x}); else if (x.prob <= 40 && x.avg < 0) give(sym, -1, "tc", "Fell in " + Math.round(100 - x.prob) + "% of past years over the next 2 weeks", Math.round(100 - x.prob) + "%", {x}); }); } catch (e) {}
     const pdm = {};
@@ -5415,7 +5416,7 @@ const cbApi = (function () {
     return {rows, mb, rmTf};
   }
   function load(force) {
-    try { znLoad(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {}
+    try { znLoad(false); } catch (e) {} try { rmApi.load(false); } catch (e) {} try { tcApi.load(false); } catch (e) {} try { ppApi.load(false); } catch (e) {} try { loadOi(); } catch (e) {} try { mbApi.load(); } catch (e) {}
     last = Date.now();
   }
 
@@ -5429,6 +5430,7 @@ const cbApi = (function () {
       out.push({name, entry, stop, target, note: note + (note ? "; " : "") + kind, risk: Math.abs(entry - stop) / entry * 100, rr: Math.abs(target - entry) / Math.abs(entry - stop), from: (entry / price - 1) * 100});
     };
     if (d.idea && d.idea.x && d.idea.x.lv) { const v = d.idea.x.lv; add("Trade idea trigger", v.t, v.st, v.tg, "levels from the Intraday screen"); }
+    if (d.bo && d.bo.x && d.bo.x.plan) { const q = d.bo.x.plan; add("Breakout plan", q.entry, q.stop, q.target, "stop " + q.sb + ", target " + q.rr + "R from the Breakout screen"); }
     if (d.zone && d.zone.z) { const z = d.zone.z; add("Zone proximal line", z.prox, z.dist, z.target, (z.type === "D" ? "demand " : "supply ") + z.pat + " zone, " + d.zone.tf); }
     if (d.rm && d.rm.plan) { const p = d.rm.plan; const ar = d.rm.st === "armed", nm = ar ? "123 trigger at the neckline" : "123 plan"; add(nm + ", exit at T1 (1R)", p.entry, p.stop, p.t1, (ar ? "armed: enters on a close beyond the neckline, stop beyond point 3, " : "signal bar close, ") + d.rm.tf); add(nm + ", exit at T2", p.entry, p.stop, p.t2, "measured move or 2R, " + d.rm.tf); }
     if (daily && daily.length > 40) {
@@ -5534,6 +5536,7 @@ const cbApi = (function () {
     if (d.oi) { L.push(row("OI spurt", (r.side === 1 ? "Long" : "Short") + " build-up: open interest " + sgn(+d.oi.r.pct, 0) + " (change " + Math.round(+d.oi.r.chg).toLocaleString("en-IN") + "), price " + sgn(+d.oi.q.pct, 1))); }
     if (d.zone) { const z = d.zone.z; L.push(row("Zone", (z.type === "D" ? "Demand" : "Supply") + " zone (" + z.pat + ") on " + d.zone.tf + ": proximal " + px2(z.prox) + ", distal " + px2(z.dist) + ", target " + px2(z.target) + ", strength " + Math.round(z.prob) + "%, " + Math.abs(d.zone.away).toFixed(1) + "% from price. Active on: " + d.zone.tfs.join(", "))); }
     if (d.rm) { const x = d.rm; L.push(row("123 reversal", (x.dir === 1 ? "Bullish" : "Bearish") + " 1-2-3 on " + x.tf + ", " + (x.st === "fresh" ? x.kind.toLowerCase() + " signal " + x.age + " bars ago" : "armed, waiting for the neckline") + (isFinite(x.score) ? ", quality " + Math.round(x.score) + "/100" : "") + (x.plan ? (x.st === "armed" ? ". Trigger plan (on a close beyond the neckline): entry " : ". Plan: entry ") + px2(x.plan.entry) + ", stop " + px2(x.plan.stop) + ", T1 " + px2(x.plan.t1) + ", T2 " + px2(x.plan.t2) : ""))); }
+    if (d.bo) { const x = d.bo.x; L.push(row("Breakout", "Closed " + sgn(x.brk, 1) + " above yesterday's high, volume " + x.vr.toFixed(1) + "x its 20-day average" + (isFinite(x.r20) ? ", opening 15m range " + (isFinite(x.r15) ? x.r15.toFixed(1) : "-") + "%, 20m range " + x.r20.toFixed(1) + "%" : "") + (x.srank < 999 ? ", sector rank #" + x.srank : "") + (x.plan ? ". Plan: entry " + px2(x.plan.entry) + ", stop " + px2(x.plan.stop) + ", target " + px2(x.plan.target) : ""))); }
     if (tc) { const sec = r.tcSec; L.push(row("Season", "Over the next 2 weeks it rose in " + Math.round(tc.prob) + "% of " + tc.n + " past years, average " + sgn(tc.avg * 100, 1) + (tc.sec ? ". " + E(tc.sec) + " sector: " + (sec ? Math.round(sec.prob) + "% of " + sec.n + " years" : "n/a") : ""))); }
     if (d.news) { const o = d.news.o; L.push(row("News", o.used.slice(0, 4).map(u => (u.sc > 0 ? "&#9650; " : "&#9660; ") + E(u.x.title) + ' <small class="note" style="margin:0">(' + E([u.x.tag, ageText(u.x.date)].filter(Boolean).join(", ")) + ")</small>").join("<br>") + '<br><small class="note" style="margin:0">Net impact ' + (o.net > 0 ? "+" : "") + o.net + " (headlines of the last 2 days scored by keywords; at least 2 needed to count as a screen)</small>")); }
     if (pd) L.push(row("PEAD", "Score <b>" + Math.round(pd.total) + "/100</b> (" + E(pd.rec.toLowerCase()) + "), reported " + (pd.d === 0 ? "today" : pd.d + " days ago") + (isFinite(pd.react) ? ", first-session reaction " + sgn(pd.react, 1) : "") + (isFinite(pd.revY) ? ". Sales " + sgn(pd.revY, 0) + " YoY, profit " + sgn(pd.npY, 0) + " YoY" : "") + (pd.fwdPe > 0 ? ", forward P/E " + pd.fwdPe.toFixed(1) : "")));
@@ -5626,7 +5629,7 @@ const cbApi = (function () {
     const rows = R.rows.filter(r => r.score >= F.min && (F.side === "Both" || (F.side === "Long" ? r.side === 1 : r.side === -1)));
     const st = (name, n) => name + (n ? " <b>" + n + "</b>" : " <i>waiting</i>");
     const cnt = k => R.rows.filter(r => r.has[k]).length;
-    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("SuperTrend", cnt("st")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · " + st("News", cnt("news")) + " · Market: " + E(R.mb.t);
+    const stat = $e("#cbstat"); if (stat) stat.innerHTML = "Sources: " + st("Trade ideas", cnt("idea")) + " · " + st("OI", cnt("oi")) + " · " + st("Zone", cnt("zone")) + " · " + st("123 (" + (R.rmTf || "-") + ")", cnt("rm")) + " · " + st("Breakout", cnt("bo")) + " · " + st("SuperTrend", cnt("st")) + " · " + st("Season", cnt("tc")) + " · " + st("PEAD", cnt("pead")) + " · " + st("News", cnt("news")) + " · Market: " + E(R.mb.t);
     let h = '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th><th>Stock</th><th>Side</th><th class="num">Score</th><th class="num">Price</th>' + SRC.map(x => '<th title="' + E(x[1]) + '" style="text-align:center">' + E(x[2]) + "</th>").join("") + '</tr></thead><tbody>';
     h += rows.length ? rows.slice(0, 80).map((r, i) => {
       const q = r.q, chg = q ? +q.pct : NaN, sel = SEL && SEL.sym === r.sym;
@@ -8080,7 +8083,8 @@ const mbApi = (function () {
   }
   function open() { build(); view(); loadDaily(false); if (Object.keys(D).length) stage2(); }
   setInterval(() => { try { if (current === "mb" && !document.hidden && !ST.busy && !IS.busy && liveHours()) { if (!ST.t || Date.now() - ST.t > 5 * 60e3) loadDaily(true); else stage2(); } } catch (e) {} }, 60 * 1000);
-  return {open, evalAll, opening, sectors, calc, plan, _set: (d, i, f) => { if (d) D = d; if (i) I = i; if (f) F = Object.assign(F, f); }};
+  function signals() { const m = {}; try { results().list.forEach(o => { if (F.ic === "on" && o.p5 !== true) return; m[o.s] = {vr: o.vr, chg: o.chg, brk: o.brk, srank: o.srank, r15: o.r15, r20: o.r20, ic: F.ic === "on", plan: plan(o)}; }); } catch (e) {} return {m, n: Object.keys(m).length, ic: F.ic === "on"}; }
+  return {open, load: () => { try { loadDaily(false); } catch (e) {} }, signals, evalAll, opening, sectors, calc, plan, _set: (d, i, f) => { if (d) D = d; if (i) I = i; if (f) F = Object.assign(F, f); }};
 })();
 const mbPaint = () => mbApi.open();
 
