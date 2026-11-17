@@ -7330,7 +7330,18 @@ const ptApi = (function () {
     const ord = c.slice().sort((a, b) => ((a.exitDate || "") < (b.exitDate || "") ? 1 : -1));
     return '<details class="ptjdet"' + (JOPEN ? " open" : "") + '><summary style="cursor:pointer;font-weight:800;font-size:1.1rem">📒 Trade journal <span class="note" style="margin:0;font-weight:400">' + c.length + (c.length === 1 ? " closed trade" : " closed trades") + "</span></summary>" + journal(ord) + "</details>";
   }
-  function draw() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"); if (o) o.innerHTML = openRows(); if (c) c.innerHTML = closedRows(); if (s && !(document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("ptrev"))) s.innerHTML = summary(); if (m) m.textContent = MSG; preview(); starStrip(); inlineDraw(); }
+  function draw() {
+    if (CH) { try { CH.remove(); } catch (e) {} CH = null; }
+    const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"), bad = [];
+    const run = (label, fn) => { try { fn(); } catch (e) { bad.push(label + ": " + String((e && e.message) || e)); try { console.error("paper trading", label, e); } catch (e2) {} } };   /* one broken part must not stop the rest (starred strip, add button) */
+    run("starred stocks", starStrip);
+    run("open positions", () => { if (o) o.innerHTML = openRows(); });
+    run("closed trades", () => { if (c) c.innerHTML = closedRows(); });
+    run("summary", () => { if (s && !(document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("ptrev"))) s.innerHTML = summary(); });
+    run("preview", preview);
+    run("chart", inlineDraw);
+    if (m) m.textContent = MSG + (bad.length ? "  [display problem in " + bad.join("; ") + "]" : "");
+  }
   function setKind(k) {
     KIND = k; const a = $p("#ptfs"), b = $p("#ptfo"); if (a) a.style.display = k === "stock" ? "" : "none"; if (b) b.style.display = k === "option" ? "" : "none";
     host.querySelectorAll(".ptk").forEach(x => x.classList.toggle("on", x.getAttribute("data-k") === k)); const ol = $p("#ptolive"); if (ol) ol.style.display = k === "option" ? "" : "none"; preview(); if (k === "option") formLive(true);
