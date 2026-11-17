@@ -1513,7 +1513,7 @@ function nzSignals() {
 }
 const nzKey = t => String(t).replace(/<[^>]*>/g, "").replace(/\d+/g, "#");
 const nzHidGet = () => { try { return JSON.parse(localStorage.getItem("nzHide") || "{}") || {}; } catch (e) { return {}; } };
-document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-nzh]") : null; if (!b) return; const H = nzHidGet(), k = b.dataset.nzh; if (H[k]) delete H[k]; else H[k] = 1; try { localStorage.setItem("nzHide", JSON.stringify(H)); } catch (e) {} ksPaint(); });
+document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-nzh]") : null; if (!b) return; const H = nzHidGet(), k = b.dataset.nzh; if (H[k]) delete H[k]; else H[k] = 1; try { localStorage.setItem("nzHide", JSON.stringify(H)); } catch (e) {} ksPaint(true); });
 function nzPanel() {
   const today = ksIST(), sigs = nzSignals(), bars = ksBars(), S = KS.step || 100, HG = KS.hptsW || 400, n50 = opN50(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars && bars.length ? bars[bars.length - 1].close : NaN);
   const byDate = {}; sigs.forEach(g => { byDate[g.date] = g.list; });
@@ -1640,8 +1640,8 @@ function nzPanel() {
     '<p class="note" style="margin:8px 0 0">Symbols come from the Symbols tab of your sheet (Date, Up or Down, then the symbols: Star, Ball, Violet, Yellow, Bro, Red, Blue, the Bull Point 0 to 8, O=L, O=H and the Green or Red Arrow as ARR). A signal is known at the close, so it is traded from the next trading day. Market holidays are not known here, so check the expiry date.</p>' +
     '<p class="note" style="margin:8px 0 0"><b>Not covered yet</b> because the sheet has no such symbol: White and Blue Arrow, Z and EYE, flags, and the market direction. Those strategies (Butterfly, SSS, Power Mode, One entry in a year and NZDP Types 2 and 3) still need those symbols added to the sheet.' + (other.length ? " Ice cream and highest bull or bear symbols have no rule here." : "") + "</p>" + sh + "</div>";
 }
-document.addEventListener("click", ev => { const bm = ev.target && ev.target.closest ? ev.target.closest("[data-nzm]") : null; if (bm) { const q = bm.dataset.nzm.split(":"); KS.rows.m1 = Object.assign(KS.rows.m1 || {}, {date: q[0], hl: q[1]}); delete KS.ov.m1; ksSave(); ksPaint(); return; }
-  const b = ev.target && ev.target.closest ? ev.target.closest("[data-nzu]") : null; if (!b) return; const q = b.dataset.nzu.split(":"); KS.rows.w1 = Object.assign(KS.rows.w1 || {}, {date: q[0], hl: q[1]}); delete KS.ov.w1; ksSave(); ksPaint(); });
+document.addEventListener("click", ev => { const bm = ev.target && ev.target.closest ? ev.target.closest("[data-nzm]") : null; if (bm) { const q = bm.dataset.nzm.split(":"); KS.rows.m1 = Object.assign(KS.rows.m1 || {}, {date: q[0], hl: q[1]}); delete KS.ov.m1; ksSave(); ksPaint(true); return; }
+  const b = ev.target && ev.target.closest ? ev.target.closest("[data-nzu]") : null; if (!b) return; const q = b.dataset.nzu.split(":"); KS.rows.w1 = Object.assign(KS.rows.w1 || {}, {date: q[0], hl: q[1]}); delete KS.ov.w1; ksSave(); ksPaint(true); });
 function ksAutoStatus() {
   if (!KS.auto) return "Auto prices off: type the current price yourself.";
   const k = Object.keys(KSQ); if (!k.length) return "Fetching live prices from NSE...";
@@ -1674,24 +1674,24 @@ function ksHTML() {
   });
   return h + '</div><p class="note" style="margin:12px 0 0">P&amp;L treats each trade as a <b>sold option</b>, like your sheet: (entry &minus; exit) &times; quantity, so a premium that falls is a gain (green) and one that rises is a loss (red). "Exit at 80%" is the premium when 80% of what you collected is earned (20% of the entry). Dates, entry, quantity and prices are saved in this browser. These are your sheet\'s rules written out, not advice; check the strike and the premium in your broker before selling.</p></div>';
 }
-function ksPaint() { const b = document.getElementById("ksbox"); if (b) { b.innerHTML = ksHTML(); try { ksCharts(); } catch (e) {} try { ksLiveGo(false); } catch (e) {} } }
+function ksPaint(force) { const b = document.getElementById("ksbox"); if (b) { if (!force) { const a = document.activeElement; if (a && a.closest && a.closest("#ksbox") && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return; }   /* never wipe a box while you are typing in it */ b.innerHTML = ksHTML(); try { ksCharts(); } catch (e) {} try { ksLiveGo(false); } catch (e) {} } }
 setInterval(() => { try { if (typeof current !== "undefined" && current === "op" && !document.hidden && liveHours()) ksLiveGo(false); } catch (e) {} }, 30 * 1000);
-document.addEventListener("change", ev => { const t = ev.target; if (!t || !t.matches || !t.matches("[data-ksauto]")) return; KS.auto = !!t.checked; ksSave(); ksPaint(); if (KS.auto) ksLiveGo(true); });
+document.addEventListener("change", ev => { const t = ev.target; if (!t || !t.matches || !t.matches("[data-ksauto]")) return; KS.auto = !!t.checked; ksSave(); ksPaint(true); if (KS.auto) ksLiveGo(true); });
 document.addEventListener("click", ev => {
   const b = ev.target && ev.target.closest ? ev.target.closest("[data-ksh]") : null; if (!b || !b.closest("#ksbox")) return;
-  const p = b.dataset.ksh.split(":"); (KS.rows[p[0]] = KS.rows[p[0]] || {}).hl = p[1]; delete KS.ov[p[0]]; ksSave(); ksPaint();
+  const p = b.dataset.ksh.split(":"); (KS.rows[p[0]] = KS.rows[p[0]] || {}).hl = p[1]; delete KS.ov[p[0]]; ksSave(); ksPaint(true);
 });
 document.addEventListener("change", ev => {
   const t = ev.target; if (!t || !t.closest || !t.closest("#ksbox")) return;
-  if (t.dataset.ksb) { KS[t.dataset.ksb] = t.checked; ksSave(); ksPaint(); return; }
-  if (t.dataset.kss) { const v = +t.value; if (isFinite(v) && v > 0) { KS[t.dataset.kss] = v; ksSave(); } ksPaint(); return; }
-  if (t.dataset.ksk) { const v = t.value === "" ? "" : +t.value; (KS.rows[t.dataset.ksk] = KS.rows[t.dataset.ksk] || {}).hk = v === "" || !(v > 0) ? undefined : v; ksSave(); ksPaint(); try { ksLiveGo(true); } catch (e) {} return; }
-  if (t.dataset.kshe) { (KS.rows[t.dataset.kshe] = KS.rows[t.dataset.kshe] || {}).hexp = t.value || undefined; ksSave(); ksPaint(); try { ksLiveGo(true); } catch (e) {} return; }
-  if (t.dataset.kse) { (KS.rows[t.dataset.kse] = KS.rows[t.dataset.kse] || {}).exp = t.value; ksSave(); ksPaint(); return; }
-  if (t.dataset.ksd) { (KS.rows[t.dataset.ksd] = KS.rows[t.dataset.ksd] || {}).date = t.value; delete KS.ov[t.dataset.ksd]; ksSave(); ksPaint(); return; }
-  if (t.dataset.ksh) { (KS.rows[t.dataset.ksh] = KS.rows[t.dataset.ksh] || {}).hl = t.value; delete KS.ov[t.dataset.ksh]; ksSave(); ksPaint(); return; }
-  if (t.dataset.ksl) { if (t.value === "") delete KS.ov[t.dataset.ksl]; else KS.ov[t.dataset.ksl] = +t.value; ksSave(); ksPaint(); return; }
-  if (t.dataset.ksp) { const p = t.dataset.ksp.split(":"); (KS.pos[p[0]] = KS.pos[p[0]] || {})[p[1]] = t.value === "" ? "" : +t.value; ksSave(); ksPaint(); }
+  if (t.dataset.ksb) { KS[t.dataset.ksb] = t.checked; ksSave(); ksPaint(true); return; }
+  if (t.dataset.kss) { const v = +t.value; if (isFinite(v) && v > 0) { KS[t.dataset.kss] = v; ksSave(); } ksPaint(true); return; }
+  if (t.dataset.ksk) { const v = t.value === "" ? "" : +t.value; (KS.rows[t.dataset.ksk] = KS.rows[t.dataset.ksk] || {}).hk = v === "" || !(v > 0) ? undefined : v; ksSave(); ksPaint(true); try { ksLiveGo(true); } catch (e) {} return; }
+  if (t.dataset.kshe) { (KS.rows[t.dataset.kshe] = KS.rows[t.dataset.kshe] || {}).hexp = t.value || undefined; ksSave(); ksPaint(true); try { ksLiveGo(true); } catch (e) {} return; }
+  if (t.dataset.kse) { (KS.rows[t.dataset.kse] = KS.rows[t.dataset.kse] || {}).exp = t.value; ksSave(); ksPaint(true); return; }
+  if (t.dataset.ksd) { (KS.rows[t.dataset.ksd] = KS.rows[t.dataset.ksd] || {}).date = t.value; delete KS.ov[t.dataset.ksd]; ksSave(); ksPaint(true); return; }
+  if (t.dataset.ksh) { (KS.rows[t.dataset.ksh] = KS.rows[t.dataset.ksh] || {}).hl = t.value; delete KS.ov[t.dataset.ksh]; ksSave(); ksPaint(true); return; }
+  if (t.dataset.ksl) { if (t.value === "") delete KS.ov[t.dataset.ksl]; else KS.ov[t.dataset.ksl] = +t.value; ksSave(); ksPaint(true); return; }
+  if (t.dataset.ksp) { const p = t.dataset.ksp.split(":"); (KS.pos[p[0]] = KS.pos[p[0]] || {})[p[1]] = t.value === "" ? "" : +t.value; ksSave(); ksPaint(true); }
 });
 setInterval(() => { if (typeof current !== "undefined" && current === "op" && !document.hidden) { opStrip(); const a = document.activeElement; if (!(a && a.closest && a.closest("#ksbox"))) ksPaint(); } }, 15000);
 function opPaint() { const b = document.getElementById("opbody"); if (!b) return; b.innerHTML = '<div id="ksbox">' + ksHTML() + "</div>" + guideHTML(); opStrip(); try { if (!OPT && !optBusy) loadOptions(); opOiPaint(); } catch (e) {} try { ksCharts(); } catch (e) {} }
