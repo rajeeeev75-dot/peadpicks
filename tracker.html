@@ -101,6 +101,7 @@ li{margin:6px 0;max-width:70ch}
 .pmode{display:block;padding:4px 16px;font-size:.86rem;color:var(--mute)}.pmode select{font:inherit;margin-left:6px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
 .pead>.note:last-child{padding-bottom:14px}
 #zn .cbtn[aria-pressed="true"]{background:#0d9488;border-color:#0d9488;color:#fff}.znhead{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between;background:linear-gradient(120deg,#047857,#0d9488);color:#fff;border-radius:14px;padding:16px 20px;margin:4px 0 14px;box-shadow:var(--shadow)}.znhead h2{margin:0;font-size:1.6rem;color:#fff;border:0;padding:0}.znhead h2::before{display:none}.znhead>div>span{display:block;opacity:.9;font-size:.95rem;margin-top:2px}.znpills{display:flex;flex-wrap:wrap;gap:6px}.znpills span{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:3px 11px;font-size:.8rem;font-weight:600}
+.bmnote{width:100%;box-sizing:border-box;font:inherit;font-size:.9rem;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);resize:vertical;min-height:2.2rem}.bmnrow td{border-top:0}
 #pp label{display:inline-flex;gap:6px;align-items:center;font-size:.9rem;color:var(--mute)}#pp .ppu{color:var(--good)}#pp .ppd{color:var(--bad)}#pp td.num,#pp th.num{text-align:right}#pp .pptbl td{white-space:nowrap}#pp .pptbl td .note{margin:0}#pp .tag{border-radius:999px;padding:2px 10px;font-size:.78rem;font-weight:700;color:#fff}#pp .tvl{font-size:.8rem;font-weight:600;color:var(--a);text-decoration:none;white-space:nowrap}#pp .det td{white-space:normal;background:color-mix(in srgb,var(--a) 6%,var(--card))}#pp .ppdl{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px 14px;margin:0}#pp .ppdl dt{font-size:.76rem;color:var(--mute)}#pp .ppdl dd{margin:0;font-weight:600}#pp tr.row:hover td{background:color-mix(in srgb,var(--a) 8%,var(--card))}.ppnew{border-left:5px solid var(--warn)}.ppchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.ppchip{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:.82rem;font-weight:600;color:var(--ink);text-decoration:none;background:var(--bg)}.ppchip.f{border-color:var(--a);background:color-mix(in srgb,var(--a) 10%,var(--card))}.ppchip i{font-style:normal;color:var(--mute);font-weight:500;font-size:.76rem}
 #zn td .chip,#zn td b{white-space:nowrap}#zn td .chip{display:inline-block}#zn .tvl{font-size:.74rem;font-weight:600;color:var(--a);text-decoration:none;margin-left:4px;white-space:nowrap}#zn .tvl:hover{text-decoration:underline}#zn .cbtn{font-size:.94rem;padding:5px 12px}
 .znm td{vertical-align:top}.znm .zc{margin:0 0 4px;padding:3px 6px;border-radius:8px;border:1px solid var(--line);font-size:.8rem;white-space:nowrap;cursor:pointer}.znm .zc.g{border-left:4px solid var(--good)}.znm .zc.r{border-left:4px solid var(--bad)}.znm .zc small{color:var(--mute)}.znm tr[data-zrow]{cursor:pointer}
@@ -5889,7 +5890,9 @@ const mxPaint = () => mxApi.open();
 /* ===== BOOKMARKS: tap the star next to any stock or commodity to keep it in a list on the Overview. Saved in this browser only. ===== */
 function bmS(sy) { let on = false; try { on = bmApi.has(String(sy).toUpperCase()); } catch (e) {} return '<span class="bmstar' + (on ? " on" : "") + '" data-bms="' + esc(String(sy).toUpperCase()) + '" title="' + (on ? "Remove bookmark" : "Bookmark") + '">' + (on ? "\u2605" : "\u2606") + "</span>"; }
 const bmApi = (function () {
-  const KEY = "bm_v1", E = esc; let LIST = [], OPEN = null, TF = "D", CH = null, DATA = {}, BUSY = false;
+  const KEY = "bm_v1", NKEY = "bmN_v1", E = esc; let LIST = [], OPEN = null, TF = "D", CH = null, DATA = {}, BUSY = false, NOTES = {}, TRY = {};
+  try { const v = JSON.parse(localStorage.getItem(NKEY) || "{}"); if (v && typeof v === "object" && !Array.isArray(v)) NOTES = v; } catch (e) {}
+  const saveN = () => { try { localStorage.setItem(NKEY, JSON.stringify(NOTES)); } catch (e) {} };
   try { const v = JSON.parse(localStorage.getItem(KEY) || "[]"); if (Array.isArray(v)) LIST = v.filter(x => typeof x === "string"); } catch (e) {}
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(LIST)); } catch (e) {} };
   const nameOf = s => { try { if (ZN_IDXN[s]) return ZN_IDXN[s]; const q = n5Api.list().find(x => x.s === s); if (q) return q.n; } catch (e) {} return ""; };
@@ -5905,7 +5908,7 @@ const bmApi = (function () {
   }
   async function load() {
     if (BUSY || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
-    const need = LIST.filter(s => !DATA[s] || Date.now() - DATA[s].t > 180e3); if (!need.length) return; BUSY = true;
+    const need = LIST.filter(s => (!DATA[s] || Date.now() - DATA[s].t > 180e3) && Date.now() - (TRY[s] || 0) > 60e3); if (!need.length) return; need.forEach(s => { TRY[s] = Date.now(); }); BUSY = true;
     try { for (let i = 0; i < need.length; i += 12) { const ch = need.slice(i, i + 12);
       const r = await fetch(MARKET_API_URL + "?bars=" + ch.map(encodeURIComponent).join(",") + "&tf=D", {cache: "no-store"}), j = await r.json();
       ch.forEach(s => { const b = j && j.bars && j.bars[s]; if (b && b.length > 1) { const n = b.length, c = +b[n - 1][4], pv = +b[n - 2][4]; DATA[s] = {t: Date.now(), c, pct: (c / pv - 1) * 100, d: String(b[n - 1][0]).slice(0, 10)}; } }); } } catch (e) {}
@@ -5915,11 +5918,12 @@ const bmApi = (function () {
     let h = '<h2 class="hb hbn">&#11088; Bookmarks</h2>';
     if (!LIST.length) return '<div id="bmbox">' + h + '<div class="card"><p class="note" style="margin:0">Tap the &#9734; next to any stock or commodity (in Zone, 123, Combo, Cup &amp; Handle, Nifty 500, MCX and more) to bookmark it here. Bookmarks are saved in this browser only.</p></div></div>';
     h += '<div class="wrap"><table><tr><th>Stock</th><th>Price</th><th>Today</th><th></th></tr>' + LIST.map(s => { const d = DATA[s], nm = nameOf(s), on = OPEN === s;
-      return '<tr data-bmc="' + E(s) + '" style="cursor:pointer' + (on ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td><b>' + E(s) + '</b>' + (nm ? ' <span class="note" style="margin:0">' + E(nm) + "</span>" : "") + '</td><td class="num">' + (d ? f2(d.c) : "...") + '</td><td class="num" style="color:var(--' + (d && d.pct >= 0 ? "good" : "bad") + ')">' + (d ? sg(d.pct) : "") + '</td><td style="white-space:nowrap"><a class="tvl" href="' + znTv(s, "D") + '" target="_blank" rel="noopener">TV &#8599;</a> </td></tr>'; }).join("") + "</table></div>";
+      return '<tr data-bmc="' + E(s) + '" style="cursor:pointer' + (on ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td><b>' + E(s) + '</b>' + (nm ? ' <span class="note" style="margin:0">' + E(nm) + "</span>" : "") + '</td><td class="num">' + (d ? f2(d.c) : "...") + '</td><td class="num" style="color:var(--' + (d && d.pct >= 0 ? "good" : "bad") + ')">' + (d ? sg(d.pct) : "") + '</td><td style="white-space:nowrap"><a class="tvl" href="' + znTv(s, "D") + '" target="_blank" rel="noopener">TV &#8599;</a> </td></tr>' +
+        '<tr class="bmnrow"><td colspan="4" style="padding:0 10px 8px"><textarea class="bmnote" data-bmn="' + E(s) + '" rows="' + Math.max(1, Math.min(8, String(NOTES[s] || "").split("\n").length)) + '" placeholder="Your observations on ' + E(s) + ' (saved in this browser)">' + E(NOTES[s] || "") + "</textarea></td></tr>"; }).join("") + "</table></div>";
     if (OPEN && LIST.indexOf(OPEN) >= 0) h += '<div class="card" id="bmpanel"><div class="charttools" style="border:0;padding:0;margin-bottom:6px"><b>' + E(OPEN) + '</b> <span class="note" style="margin:0">' + E(nameOf(OPEN)) + '</span></div><div class="charttools">' + TFS.map(t => '<button type="button" class="cbtn" data-bmtf="' + t[0] + '" aria-pressed="' + (t[0] === TF) + '">' + t[1] + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, TF === "D" ? "D" : TF) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-bmx="1">Close</button></div><div id="bmcbox" style="height:380px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="bmnote" class="note" style="margin:6px 0 0"></div></div>';
     return '<div id="bmbox">' + h + "</div>";
   }
-  function paint() { const b = document.getElementById("bmbox"); if (!b) return; if (CH) { try { CH.remove(); } catch (e) {} CH = null; } b.outerHTML = html(); try { stars(); } catch (e) {} draw(); }
+  function paint() { const b = document.getElementById("bmbox"); if (!b) return; const ae = document.activeElement, fk = ae && ae.classList && ae.classList.contains("bmnote") ? [ae.dataset.bmn, ae.selectionStart, ae.selectionEnd] : null; if (CH) { try { CH.remove(); } catch (e) {} CH = null; } b.outerHTML = html(); try { stars(); } catch (e) {} draw(); if (fk) { const n = Array.from(document.querySelectorAll(".bmnote")).find(x => x.dataset.bmn === fk[0]); if (n) { n.focus(); try { n.setSelectionRange(fk[1], fk[2]); } catch (e) {} } } }
   async function draw() {
     const box = document.getElementById("bmcbox"); if (!OPEN || !box || box.dataset.d) return; box.dataset.d = "1";
     const sym = OPEN, tf = TF, b = await bars(sym, tf), note = document.getElementById("bmnote");
@@ -5947,8 +5951,10 @@ const bmApi = (function () {
     }));
     document.querySelectorAll(".bmstar").forEach(sp => { const on = LIST.indexOf(sp.dataset.bms) >= 0; sp.classList.toggle("on", on); const t = on ? "★" : "☆"; if (sp.textContent !== t) sp.textContent = t; });
   }
+  document.addEventListener("input", ev => { const t = ev.target; if (!t || !t.classList || !t.classList.contains("bmnote")) return; const sy = t.dataset.bmn; if (t.value.trim()) NOTES[sy] = t.value; else delete NOTES[sy]; saveN(); t.rows = Math.max(1, Math.min(8, t.value.split("\n").length)); });
   document.addEventListener("click", ev => {
     const t = ev.target && ev.target.closest ? ev.target : null; if (!t) return;
+    if (t.closest(".bmnrow")) return;
     const st = t.closest(".bmstar"); if (st) { ev.preventDefault(); ev.stopPropagation(); toggle(st.dataset.bms); return; }
     const rm = t.closest("[data-bmrm]"); if (rm) { ev.preventDefault(); ev.stopPropagation(); toggle(rm.dataset.bmrm); return; }
     const tf = t.closest("[data-bmtf]"); if (tf) { TF = tf.dataset.bmtf; paint(); return; }
@@ -5958,7 +5964,7 @@ const bmApi = (function () {
   }, true);
   let raf = 0; try { new MutationObserver(() => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; try { stars(); const bx = document.getElementById("bmcbox"); if (bx && !bx.dataset.d) draw(); if (document.getElementById("bmbox") && LIST.length) load(); } catch (e) {} }); }).observe(document.body, {childList: true, subtree: true}); } catch (e) {}
   setInterval(() => { try { if (!document.hidden && LIST.length && typeof current !== "undefined" && current === "ov") { load(); } } catch (e) {} }, 60e3);
-  return {html, has: s => LIST.indexOf(s) >= 0, list: () => LIST.slice()};
+  return {html, has: s => LIST.indexOf(s) >= 0, list: () => LIST.slice(), note: s => NOTES[s] || ""};
 })();
 /* ===== CHART POPUP: opens a stock chart on top of the page, for lists that are redrawn often (e.g. sector stocks) ===== */
 const pcApi = (function () {
