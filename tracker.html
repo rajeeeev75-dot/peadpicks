@@ -1383,7 +1383,7 @@ async function ksLiveGo(force) {
     try {
       const r = await fetch(MARKET_API_URL + "?optq=NIFTY&expiry=" + exp + "&legs=" + legs.join(","), {cache: "no-store"}), j = await r.json().catch(() => null);
       if (!r.ok || !j || j.error) throw new Error((j && j.error) || ("HTTP " + r.status));
-      KSQ[exp] = {t: Date.now(), key, q: j.quotes || {}, asOf: j.asOf || "", err: ""};
+      KSQ[exp] = {t: Date.now(), key, q: j.quotes || {}, asOf: j.asOf || "", err: "", used: j.shiftedFrom ? j.nseExpiry + " (NSE moved the " + j.shiftedFrom + " expiry, likely a holiday)" : ""};
     } catch (e) { KSQ[exp] = Object.assign(old && old.key === key ? old : {q: {}, asOf: ""}, {t: Date.now(), key, err: String((e && e.message) || e)}); }
     KSQ_BUSY[exp] = 0;
   }));
@@ -1644,7 +1644,7 @@ function ksAutoStatus() {
   if (!KS.auto) return "Auto prices off: type the current price yourself.";
   const k = Object.keys(KSQ); if (!k.length) return "Fetching live prices from NSE...";
   const bad = k.map(e => KSQ[e]).find(q => q.err), ok = k.map(e => KSQ[e]).find(q => q.asOf);
-  return bad && !ok ? "Live prices unavailable (" + esc(bad.err) + "). Type the price yourself, or try again in a minute." : "Live prices from NSE" + (ok && ok.asOf ? ", as of " + esc(ok.asOf) : "") + (bad ? " (one expiry failed: " + esc(bad.err) + ")" : "") + ".";
+  return bad && !ok ? "Live prices unavailable (" + esc(bad.err) + "). Type the price yourself, or try again in a minute." : "Live prices from NSE" + (ok && ok.asOf ? ", as of " + esc(ok.asOf) : "") + (k.map(e => KSQ[e].used).filter(Boolean).length ? ". Using expiry " + esc(k.map(e => KSQ[e].used).filter(Boolean).join("; ")) : "") + (bad ? " (one expiry failed: " + esc(bad.err) + ")" : "") + ".";
 }
 function ksHTML() {
   const n50 = opN50(), bars = ksBars(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars && bars.length ? bars[bars.length - 1].close : NaN), rows = ksRows();
