@@ -2232,9 +2232,9 @@ const SYM_DATA = {"-6455":33554432,"1":33583184,"2":145242114,"5":136982530,"6":
 /* Sheet symbols (from the NZDP indicator data) drawn on the Nifty chart */
 const SYM_T0 = Date.UTC(2020, 0, 1);
 let SYM_ON = true; try { SYM_ON = localStorage.getItem("symOn") !== "0"; } catch (e) {}
-const SYM_DEF = {BS: 1, R: 1, V: 1, Y: 1, B: 1, HB: 1, HR: 1, BP: 1, AR: 1, WA: 1, BA: 1, YA: 1, IC: 1, S: 0, F: 0, OL: 1, OH: 1};
+const SYM_DEF = {BS: 1, R: 1, V: 1, Y: 1, B: 1, HB: 1, HR: 1, BP: 1, AR: 1, WA: 1, BA: 1, YA: 1, IC: 1, S: 0, F: 0, OL: 1, OH: 1, Z: 1, EYE: 1, GF: 1, RF: 1, PY: 1, PW: 1, IB: 1, ST: 1, PS: 1, HM: 1};
 let SYM_SEL = Object.assign({}, SYM_DEF); try { Object.assign(SYM_SEL, JSON.parse(localStorage.getItem("symSel") || "{}")); } catch (e) {}
-const SYM_LIST = [["BS", "\u{1F916} Blue smiley"], ["R", "\u{1F621} Red"], ["V", "\u{1F47F} Violet"], ["Y", "\u{1F600} Yellow"], ["B", "\u{1F60D} Bro"], ["HB", "\u{1F402} H Bull"], ["HR", "\u{1F43B} H Bear"], ["BP", "1️⃣ BP"], ["AR", "▲▼ Green/Red"], ["WA", "△▽ White"], ["BA", "⬆⬇ Blue"], ["YA", "↑↓ Yellow"], ["IC", "\u{1F368} Ice cream"], ["S", "⭐ Star"], ["F", "⚽ Ball"], ["OL", "O=L"], ["OH", "O=H"]];
+const SYM_LIST = [["BS", "\u{1F916} Blue smiley"], ["R", "\u{1F621} Red"], ["V", "\u{1F47F} Violet"], ["Y", "\u{1F600} Yellow"], ["B", "\u{1F60D} Bro"], ["HB", "\u{1F402} H Bull"], ["HR", "\u{1F43B} H Bear"], ["BP", "1️⃣ BP"], ["AR", "▲▼ Green/Red"], ["WA", "△▽ White"], ["BA", "⬆⬇ Blue"], ["YA", "↑↓ Yellow"], ["IC", "\u{1F368} Ice cream"], ["S", "⭐ Star"], ["F", "⚽ Ball"], ["OL", "O=L"], ["OH", "O=H"], ["Z", "Z"], ["EYE", "\u{1F441} Eye"], ["GF", "GF Green flag"], ["RF", "RF Red flag"], ["PY", "Yellow P"], ["PW", "White P"], ["IB", "IB"], ["ST", "ST"], ["PS", "PS / PR"], ["HM", "\u{1F9CD} Hanging man"]];
 /* The chart with the sheet symbols lives in the Options tab under its own key; the Nifty tab chart has no symbols */
 const SYMKEY = "SYM:NIFTY", symTk = tk => String(tk || "") === SYMKEY;
 const niftyRow = () => lastRows.find(x => isNiftyTk(x.s.ticker));
@@ -2244,6 +2244,18 @@ const isNiftyTk = tk => /^(INDEXNSE:NIFTY_50|NSE:NIFTY|NSE:NIFTY50|NIFTY|NIFTY_5
 /* Smileys you type in the Symbols tab of your sheet (one row per date: one Up/Down, then up to 3 symbols). They override the built-in history for that date. */
 let SHEET_SYM = {}, symSheetState = "";
 const SYM_EMO = {BS: "\u{1F916}", R: "\u{1F621}", V: "\u{1F47F}", Y: "\u{1F600}", B: "\u{1F60D}", HB: "\u{1F402}", HR: "\u{1F43B}", IC: "\u{1F368}", S: "\u2B50", F: "\u26BD", OL: "O=L", OH: "O=H"}, ARW = {AR: ["▲", "▼"], WA: ["△", "▽"], BA: ["⬆", "⬇", "#2563eb"], YA: ["↑", "↓", "#ca8a04"]};
+/* extra symbols typed in the Symbols tab: Z, Eye, GF1-4, RF1-4, Yellow P, White P, IB, ST, PS, PR, Hanging man */
+const symExtra = t => {
+  const x = String(t || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim(); let m;
+  if (x === "z") return {k: "Z"}; if (x === "eye") return {k: "EYE"};
+  if ((m = x.match(/^(?:gf|green flag) ?([1-4])$/))) return {k: "GF", n: +m[1]}; if ((m = x.match(/^(?:rf|red flag) ?([1-4])$/))) return {k: "RF", n: +m[1]};
+  if (/^(yellow p|y p|p yellow|yp)$/.test(x)) return {k: "PY"}; if (/^(white p|w p|p white|wp|p)$/.test(x)) return {k: "PW"};
+  if (x === "ib" || x === "ibs" || x === "ibr") return {k: "IB"}; if (x === "st" || x === "st s" || x === "st r") return {k: "ST"};
+  if (x === "ps" || x === "pr") return {k: "PS", t: x.toUpperCase()}; if (/^(hanging man|hm)$/.test(x)) return {k: "HM"};
+  return null;
+};
+const symExtraText = e => (e.k === "Z" ? "Z" : e.k === "EYE" ? "\u{1F441}" : e.k === "GF" ? "GF" + (e.n || "") : e.k === "RF" ? "RF" + (e.n || "") : e.k === "PY" || e.k === "PW" ? "P" : e.k === "IB" ? "IB" : e.k === "ST" ? "ST" : e.k === "PS" ? (e.t || (e.d === 1 ? "PS" : "PR")) : e.k === "HM" ? "\u{1F9CD}" : "");
+const symExtraColor = e => (e.k === "GF" ? "#16a34a" : e.k === "RF" ? "#dc2626" : e.k === "PY" ? "#ca8a04" : e.k === "PS" ? (e.d === 1 ? "#16a34a" : "#dc2626") : e.k === "ST" ? (e.d === 1 ? "#16a34a" : "#dc2626") : null);
 const symKeyOf = t => { const x = String(t || "").toLowerCase().replace(/[^a-z ]/g, " ").replace(/\s+/g, " ").trim(); return /^(arr|green arrow|red arrow|green red arrow)$/.test(x) ? "AR" : /^(b arr|blue arrow)$/.test(x) ? "BA" : /^(w arr|white arrow)$/.test(x) ? "WA" : /^(y arr|yellow arrow)$/.test(x) ? "YA" : x === "o l" ? "OL" : x === "o h" ? "OH" : x.indexOf("blue") === 0 ? "BS" : x.indexOf("red") === 0 ? "R" : x.indexOf("violet") === 0 ? "V" : x.indexOf("yellow") === 0 ? "Y" : x.indexOf("bro") === 0 ? "B" : x.indexOf("h bull") === 0 ? "HB" : x.indexOf("h bear") === 0 ? "HR" : x.indexOf("star") === 0 ? "S" : x.indexOf("ball") === 0 ? "F" : x.indexOf("ice") === 0 ? "IC" : ""; };
 function symIso(t) {
   t = String(t || "").trim(); let m;
@@ -2257,7 +2269,7 @@ function parseSymSheet(text) {
   parseCSV(text).slice(1).forEach(r => {
     const d = symIso(r[0]); if (!d) return;
     const dir = /^\s*up/i.test(r[1]) ? 1 : /^\s*down/i.test(r[1]) ? 2 : 0, list = [];   // one Up/Down for the date, then up to 3 symbols
-    if (dir) for (let i = 2; i < r.length; i++) { const bm = String(r[i] || "").trim().match(/^(?:bp\s*)?([0-8])$/i); if (bm) { if (!list.some(e => e.k === "BP")) list.push({k: "BP", n: +bm[1], d: dir}); continue; } const k = symKeyOf(r[i]); if (k && !list.some(e => e.k === k)) list.push({k, d: dir}); }
+    if (dir) for (let i = 2; i < r.length; i++) { const bm = String(r[i] || "").trim().match(/^(?:bp\s*)?([0-8])$/i); if (bm) { if (!list.some(e => e.k === "BP")) list.push({k: "BP", n: +bm[1], d: dir}); continue; } const ex = symExtra(r[i]); if (ex) { if (!list.some(e => e.k === ex.k && e.n === ex.n)) list.push(Object.assign({d: dir}, ex)); continue; } const k = symKeyOf(r[i]); if (k && !list.some(e => e.k === k)) list.push({k, d: dir}); }
     if (list.length) out[d] = list;
   });
   return out;
@@ -2275,7 +2287,7 @@ function symMarkers(bars) {
   const c = colors(), out = [], KC = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"], X = SYM_SEL;
   bars.forEach(b => {
     if (typeof b.time === "string" && SHEET_SYM[b.time]) {   // a date typed in your Symbols tab replaces the built-in history for that day
-      SHEET_SYM[b.time].forEach(e => { if (X[e.k]) out.push({time: b.time, position: e.k === "BP" ? (e.n <= 3 ? "belowBar" : "aboveBar") : e.k === "OL" ? "belowBar" : e.k === "OH" ? "aboveBar" : e.d === 1 ? "belowBar" : "aboveBar", shape: "circle", size: 0, color: e.k === "OL" ? "#16a34a" : e.k === "OH" ? "#dc2626" : ARW[e.k] ? (e.k === "AR" ? (e.d === 1 ? "#16a34a" : "#dc2626") : (ARW[e.k][2] || c.ink)) : c.ink, text: e.k === "BP" ? KC[e.n] : ARW[e.k] ? ARW[e.k][e.d === 1 ? 0 : 1] : SYM_EMO[e.k]}); });
+      SHEET_SYM[b.time].forEach(e => { if (X[e.k] && symExtraText(e)) { out.push({time: b.time, position: e.d === 1 ? "belowBar" : "aboveBar", shape: "circle", size: 0, color: symExtraColor(e) || c.ink, text: symExtraText(e)}); return; } if (X[e.k]) out.push({time: b.time, position: e.k === "BP" ? (e.n <= 3 ? "belowBar" : "aboveBar") : e.k === "OL" ? "belowBar" : e.k === "OH" ? "aboveBar" : e.d === 1 ? "belowBar" : "aboveBar", shape: "circle", size: 0, color: e.k === "OL" ? "#16a34a" : e.k === "OH" ? "#dc2626" : ARW[e.k] ? (e.k === "AR" ? (e.d === 1 ? "#16a34a" : "#dc2626") : (ARW[e.k][2] || c.ink)) : c.ink, text: e.k === "BP" ? KC[e.n] : ARW[e.k] ? ARW[e.k][e.d === 1 ? 0 : 1] : SYM_EMO[e.k]}); });
       return;
     }
     let day; if (typeof b.time === "string") { const q = b.time.split("-").map(Number); day = Math.round((Date.UTC(q[0], q[1] - 1, q[2]) - SYM_T0) / 864e5); } else return;
