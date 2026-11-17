@@ -1371,11 +1371,13 @@ const ksSave = () => { try { localStorage.setItem("ksO2", JSON.stringify(KS)); }
 const KSQ = {}, KSQ_BUSY = {};
 const ksLegKey = (strike, side) => String(Math.round(strike)) + side;
 function ksLive(exp, strike, side) { const q = KSQ[exp]; if (!q || !q.q || !isFinite(strike) || !side) return NaN; const o = q.q[ksLegKey(strike, side)]; return o && isFinite(+o.ltp) && +o.ltp > 0 ? +o.ltp : NaN; }
-function ksHedgeStrike(r) { const stp = KS.step || 100; return KS.hon && isFinite(r.strike) && r.side ? (r.side === "PE" ? ksFloor(r.strike - (r.id === "m1" ? KS.hptsM : KS.hptsW), stp) : ksCeil(r.strike + (r.id === "m1" ? KS.hptsM : KS.hptsW), stp)) : NaN; }
+function ksHedgeAuto(r) { const stp = KS.step || 100; return KS.hon && isFinite(r.strike) && r.side ? (r.side === "PE" ? ksFloor(r.strike - (r.id === "m1" ? KS.hptsM : KS.hptsW), stp) : ksCeil(r.strike + (r.id === "m1" ? KS.hptsM : KS.hptsW), stp)) : NaN; }
+function ksHedgeStrike(r) { const o = (KS.rows[r.id] || {}).hk; return KS.hon && isFinite(r.strike) && r.side ? (o != null && o !== "" && isFinite(+o) && +o > 0 ? +o : ksHedgeAuto(r)) : NaN; }
+function ksHedgeExp(r, soldExp) { return (KS.rows[r.id] || {}).hexp || soldExp; }
 async function ksLiveGo(force) {
   if (!KS.auto || !MARKET_API_URL) return;
   const groups = {};
-  ksRows().forEach(r => { if (!isFinite(r.strike) || !r.side) return; const P = KS.pos[r.id] || {}; if (P.exit != null && P.exit !== "") return; const exp = (KS.rows[r.id] || {}).exp || ksExpiry(r.rule); (groups[exp] = groups[exp] || new Set()).add(ksLegKey(r.strike, r.side)); const kh = ksHedgeStrike(r); if (isFinite(kh)) groups[exp].add(ksLegKey(kh, r.side)); });
+  ksRows().forEach(r => { if (!isFinite(r.strike) || !r.side) return; const P = KS.pos[r.id] || {}; if (P.exit != null && P.exit !== "") return; const exp = (KS.rows[r.id] || {}).exp || ksExpiry(r.rule); (groups[exp] = groups[exp] || new Set()).add(ksLegKey(r.strike, r.side)); const kh = ksHedgeStrike(r); if (isFinite(kh)) { const he = ksHedgeExp(r, exp); (groups[he] = groups[he] || new Set()).add(ksLegKey(kh, r.side)); } });
   await Promise.all(Object.keys(groups).map(async exp => {
     const legs = [...groups[exp]].sort(), key = exp + "|" + legs.join(","), old = KSQ[exp];
     if (KSQ_BUSY[exp] || (!force && old && old.key === key && Date.now() - old.t < 25000)) return;
@@ -1474,7 +1476,7 @@ function ksPayoff(r, en, qty, spot, hd) {
 }
 function ksExpHTML(r) {
   const cfg = KS.rows[r.id] || {}, exp = cfg.exp || ksExpiry(r.rule), kind = r.rule === "ITM" ? "monthly" : "weekly";
-  return '<div class="ksexp"><label>Expiry (' + kind + ')<input type="date" data-kse="' + r.id + '" value="' + esc(exp) + '"></label><span class="ksexpt">' + esc(ksDayName(exp)) + '</span><a class="cbtn ' + (r.side === "CE" ? "kce" : "kpe") + '" href="' + ksTV(exp, r.side, r.strike) + '" target="_blank" rel="noopener noreferrer" title="Opens NIFTY ' + Math.round(r.strike) + " " + r.side + ' in TradingView. If it says symbol not found, the contract name differs for that expiry.">Open ' + Math.round(r.strike) + " " + r.side + " in TradingView &#8599;</a></div>";
+  return '<div class="ksexp"><label>Expiry (' + kind + ')<input type="date" data-kse="' + r.id + '" value="' + esc(exp) + '"></label><span class="ksexpt">' + esc(ksDayName(exp)) + '</span><a class="cbtn ' + (r.side === "CE" ? "kce" : "kpe") + '" href="' + ksTV(exp, r.side, r.strike) + '" target="_blank" rel="noopener noreferrer" title="Opens NIFTY ' + Math.round(r.strike) + " " + r.side + ' in TradingView. If it says symbol not found, the contract name differs for that expiry.">Open ' + Math.round(r.strike) + " " + r.side + " in TradingView &#8599;</a>" + (KS.hon ? '<label title="Leave empty to use the automatic hedge strike (' + (isFinite(ksHedgeAuto(r)) ? Math.round(ksHedgeAuto(r)) : "") + '). Type the strike you actually bought.">Hedge strike ' + r.side + '<input type="number" step="any" data-ksk="' + r.id + '" placeholder="' + (isFinite(ksHedgeAuto(r)) ? Math.round(ksHedgeAuto(r)) : "auto") + '" value="' + ((KS.rows[r.id] || {}).hk != null ? (KS.rows[r.id] || {}).hk : "") + '" style="width:110px"></label><label title="Leave empty to use the same expiry as the sold option.">Hedge expiry<input type="date" data-kshe="' + r.id + '" value="' + esc((KS.rows[r.id] || {}).hexp || "") + '"></label>' : "") + "</div>";
 }
 function ksChartsHTML(r, en, qty, spot, hd) {
   return '<div class="kssec"><div class="kssh"><span>6</span>Charts</div><div class="kscharts"><div><div class="kslab">Nifty with your strike</div><div id="ksnc-' + r.id + '" style="height:340px"></div></div><div><div class="kslab">Profit or loss at expiry (sold ' + r.side + (hd && isFinite(hd.hp) ? " + hedge" : "") + ")</div>" + (isFinite(en) ? ksPayoff(r, en, qty, spot, hd) : '<p class="note" style="margin:30px 0">Enter the entry premium above to draw the payoff.</p>') + "</div></div></div>";
@@ -1657,8 +1659,8 @@ function ksHTML() {
     const P = KS.pos[r.id] || {}, qty = P.qty != null && P.qty !== "" ? +P.qty : KS.lot, en = P.entry != null && P.entry !== "" ? +P.entry : NaN, cu = P.cur != null && P.cur !== "" ? +P.cur : NaN, ex = P.exit != null && P.exit !== "" ? +P.exit : NaN;
     const k = r.side === "CE" ? "ce" : r.side === "PE" ? "pe" : "nn", dist = isFinite(r.strike) && isFinite(spot) ? r.strike - spot : NaN, itm = isFinite(dist) ? (r.side === "CE" ? dist < 0 : dist > 0) : null, gap = isFinite(r.strike) && isFinite(r.lvl) ? Math.abs(r.lvl - r.strike) : NaN;
     const okGap = r.rule === "ITM" ? gap >= KS.itm : true;
-    const hc = P.hc != null && P.hc !== "" ? +P.hc : NaN, hx = P.hx != null && P.hx !== "" ? +P.hx : NaN, stp = KS.step || 100, Kh = KS.hon && isFinite(r.strike) && r.side ? (r.side === "PE" ? ksFloor(r.strike - (r.id === "m1" ? KS.hptsM : KS.hptsW), stp) : ksCeil(r.strike + (r.id === "m1" ? KS.hptsM : KS.hptsW), stp)) : NaN, hpv = P.hp != null && P.hp !== "" ? +P.hp : NaN, hd = isFinite(Kh) ? {Kh, hp: hpv} : null;
-    const expR = (KS.rows[r.id] || {}).exp || ksExpiry(r.rule), closed = isFinite(ex), lvC = KS.auto && !closed ? ksLive(expR, r.strike, r.side) : NaN, lvH = KS.auto && !closed && hd ? ksLive(expR, Kh, r.side) : NaN, cuE = isFinite(lvC) ? lvC : cu, hcE = isFinite(lvH) ? lvH : hc;
+    const hc = P.hc != null && P.hc !== "" ? +P.hc : NaN, hx = P.hx != null && P.hx !== "" ? +P.hx : NaN, stp = KS.step || 100, Kh = ksHedgeStrike(r), hpv = P.hp != null && P.hp !== "" ? +P.hp : NaN, hd = isFinite(Kh) ? {Kh, hp: hpv} : null;
+    const expR = (KS.rows[r.id] || {}).exp || ksExpiry(r.rule), closed = isFinite(ex), lvC = KS.auto && !closed ? ksLive(expR, r.strike, r.side) : NaN, lvH = KS.auto && !closed && hd ? ksLive(ksHedgeExp(r, expR), Kh, r.side) : NaN, cuE = isFinite(lvC) ? lvC : cu, hcE = isFinite(lvH) ? lvH : hc;
     const hleg = h2 => (hd && isFinite(hpv) && isFinite(h2) ? (h2 - hpv) * qty : 0), openPL = isFinite(en) && isFinite(cuE) ? (en - cuE) * qty + hleg(hcE) : NaN, netPL = isFinite(en) && isFinite(ex) ? (en - ex) * qty + hleg(hx) : NaN;
     const pl = v => (isFinite(v) ? '<b class="' + (v >= 0 ? "ksg" : "ksr") + '">' + (v >= 0 ? "+" : "") + fmt(v, 0) + "</b>" : "<b>—</b>");
     const warn = !r.side ? "" : r.bar ? "" : bars ? '<span class="ksbad">no Nifty candle on this date</span>' : '<span style="color:var(--mute)">no Nifty history yet</span>';
@@ -1683,6 +1685,8 @@ document.addEventListener("change", ev => {
   const t = ev.target; if (!t || !t.closest || !t.closest("#ksbox")) return;
   if (t.dataset.ksb) { KS[t.dataset.ksb] = t.checked; ksSave(); ksPaint(); return; }
   if (t.dataset.kss) { const v = +t.value; if (isFinite(v) && v > 0) { KS[t.dataset.kss] = v; ksSave(); } ksPaint(); return; }
+  if (t.dataset.ksk) { const v = t.value === "" ? "" : +t.value; (KS.rows[t.dataset.ksk] = KS.rows[t.dataset.ksk] || {}).hk = v === "" || !(v > 0) ? undefined : v; ksSave(); ksPaint(); try { ksLiveGo(true); } catch (e) {} return; }
+  if (t.dataset.kshe) { (KS.rows[t.dataset.kshe] = KS.rows[t.dataset.kshe] || {}).hexp = t.value || undefined; ksSave(); ksPaint(); try { ksLiveGo(true); } catch (e) {} return; }
   if (t.dataset.kse) { (KS.rows[t.dataset.kse] = KS.rows[t.dataset.kse] || {}).exp = t.value; ksSave(); ksPaint(); return; }
   if (t.dataset.ksd) { (KS.rows[t.dataset.ksd] = KS.rows[t.dataset.ksd] || {}).date = t.value; delete KS.ov[t.dataset.ksd]; ksSave(); ksPaint(); return; }
   if (t.dataset.ksh) { (KS.rows[t.dataset.ksh] = KS.rows[t.dataset.ksh] || {}).hl = t.value; delete KS.ov[t.dataset.ksh]; ksSave(); ksPaint(); return; }
