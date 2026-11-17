@@ -7356,8 +7356,8 @@ const ptApi = (function () {
       if (isFinite(tg) && (side === "long" ? tg <= ep : tg >= ep)) { MSG = "The target is on the wrong side of the entry price."; draw(); return; }
       LOG.push({id, kind: "stock", sym, side, qty, entry: ep, stop, target: tg, date: todayS(), tag, note, status: "open"}); MSG = "Paper " + (side === "long" ? "buy" : "short") + " of " + qty + " " + sym + " at " + f2(ep) + " saved.";
     } else {
-      const sym = sv("#ptusym").toUpperCase(), type = sv("#ptot") === "PE" ? "PE" : "CE", strike = nv("#ptstrike"), exp = sv("#ptexp"), side = sv("#ptoside") === "sell" ? "short" : "long", lots = Math.floor(nv("#ptlots")), ls = Math.floor(nv("#ptlotsz")), ep = nv("#ptprem"), stop = nv("#ptostop"), tg = nv("#ptotgt");
-      if (!sym || !isFinite(strike) || !(lots > 0) || !(ls > 0) || !(ep > 0)) { MSG = "Enter the underlying, strike, lots, lot size and the entry premium."; draw(); return; }
+      const sym = sv("#ptusym").toUpperCase(), type = sv("#ptot") === "PE" ? "PE" : "CE", strike = nv("#ptstrike"), exp = sv("#ptexp"), side = sv("#ptoside") === "sell" ? "short" : "long", lots = Math.floor(nv("#ptlots")), ls = Math.floor(nv("#ptlotsz")), lvq = oqGet(sym, exp, strike, type), ep = isFinite(nv("#ptprem")) ? nv("#ptprem") : (lvq ? lvq.ltp : NaN), stop = nv("#ptostop"), tg = nv("#ptotgt");   // entry premium left empty = use the live premium
+      if (!sym || !isFinite(strike) || !(lots > 0) || !(ls > 0) || !(ep > 0)) { MSG = "To add the trade, fill in: " + [!sym ? "underlying" : "", !isFinite(strike) ? "strike" : "", !(lots > 0) ? "lots" : "", !(ls > 0) ? "lot size" : "", !(ep > 0) ? "entry premium (or wait for the live premium)" : ""].filter(Boolean).join(", ") + "."; draw(); try { host.scrollIntoView({block: "nearest"}); } catch (e) {} return; }
       SET.lots[sym] = ls;
       LOG.push({id, kind: "option", sym, opt: {type, strike, expiry: exp}, side, lots, lotSize: ls, qty: lots * ls, entry: ep, stop, target: tg, cur: NaN, date: todayS(), tag, note, status: "open"}); MSG = "Paper option trade saved: " + sym + " " + strike + " " + type + ".";
     }
