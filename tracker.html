@@ -5935,7 +5935,7 @@ const bmApi = (function () {
   }
   const toggle = s => { s = String(s || "").toUpperCase(); if (!s) return; const i = LIST.indexOf(s); if (i >= 0) { LIST.splice(i, 1); if (OPEN === s) OPEN = null; } else LIST.push(s); save(); paint(); load(); try { stars(); } catch (e) {} };
   /* stars: added next to every stock row or tile that carries a symbol */
-  const SRC = [["[data-zrow]", "zrow"], ["[data-n5s]", "n5s"], ["[data-cus]", "cus"], ["[data-cbsym]", "cbsym"], ["[data-sts]", "sts"], ["tr.row[data-sym]", "sym"], ["[data-mxs]", "mxs"], ["tr.row[data-tk]", "tk"], ["tr[data-bmc]", "bmc"]];
+  const SRC = [["[data-zrow]", "zrow"], ["[data-n5s]", "n5s"], ["[data-cus]", "cus"], ["[data-cbsym]", "cbsym"], ["[data-sts]", "sts"], ["tr.row[data-sym]", "sym"], ["[data-mxs]", "mxs"], ["tr.row[data-tk]", "tk"], ["tr[data-bmc]", "bmc"], ["tr[data-mbs]", "mbs"]];
   function stars() {
     SRC.forEach(a => document.querySelectorAll(a[0]).forEach(el => {
       if (el.querySelector(".bmstar")) return; let s = String(el.dataset[a[1]] || ""); if (a[1] === "tk") s = s.split(":").pop().trim(); s = s.toUpperCase(); if (!s) return;
@@ -7641,11 +7641,27 @@ const ccPaint = () => ccApi.open();
 /* ===== BREAKOUT TAB: Nifty 500 momentum scan (close above yesterday's high, volume surge, wide opening candle, leading sector) ===== */
 const mbApi = (function () {
   const $e = s => document.querySelector(s), E = esc;
-  let F = {vm: 2, c15: 3, c20: 2, minVol: 500000, minPx: 50, lead: 5, ic: "on", q: "", sort: "vr", dir: -1, shown: 100};
+  let F = {vm: 2, c15: 3, c20: 2, minVol: 500000, minPx: 50, lead: 5, ic: "on", rr: 2, uni: "n500", custom: "", q: "", sort: "vr", dir: -1, shown: 100};
   try { const sv = JSON.parse(localStorage.getItem("mbF") || "null"); if (sv) F = Object.assign(F, sv, {shown: 100}); } catch (e) {}
   const save = () => { try { localStorage.setItem("mbF", JSON.stringify(F)); } catch (e) {} };
   const LIST = () => n5Api.list();
-  let D = {}, I = {}, ST = {busy: false, done: 0, total: 0, err: "", t: 0, fail: 0}, IS = {busy: false, done: 0, total: 0, err: ""}, built = false, PT = null, LAST = null;
+  /* ---- stock universe: Nifty 500 (base, always loaded so sector strength is measured on the whole market), Nifty 50, F&O stocks, starred stocks or your own list ---- */
+  const N50 = "HDFCBANK ICICIBANK RELIANCE BHARTIARTL LT SBIN INFY AXISBANK KOTAKBANK BAJFINANCE M&M ITC ETERNAL TCS SUNPHARMA TITAN HINDUNILVR TATASTEEL MARUTI NTPC ADANIPORTS BEL HINDALCO SHRIRAMFIN BSE HCLTECH ULTRACEMCO JSWSTEEL POWERGRID BAJAJ-AUTO GRASIM INDIGO ASIANPAINT COALINDIA BAJAJFINSV ADANIENT EICHERMOT NESTLEIND TECHM ONGC APOLLOHOSP TRENT SBILIFE CIPLA DRREDDY MAXHEALTH JIOFIN TATACONSUM TMPV HDFCLIFE".split(" ");   /* Nifty 50 as listed on 12 Nov 2026; NSE reviews it twice a year, edit this line after a change */
+  const UNIS = [["n500", "Nifty 500"], ["n50", "Nifty 50"], ["fno", "F&O stocks"], ["stars", "My starred stocks"], ["custom", "My own list"]];
+  const uniName = () => (UNIS.find(u => u[0] === F.uni) || UNIS[0])[1];
+  const sectorOf = sy => (typeof STOCK_SECTOR !== "undefined" && STOCK_SECTOR[sy]) || (typeof TC_SECTOR_EXTRA !== "undefined" && TC_SECTOR_EXTRA[sy]) || "Other";
+  function universe() {
+    const base = LIST(), by = {}; base.forEach(x => { by[x.s] = x; });
+    let syms = null;
+    if (F.uni === "n50") syms = N50; else if (F.uni === "fno") syms = typeof ZN_FNO !== "undefined" ? ZN_FNO : [];
+    else if (F.uni === "stars") { try { syms = bmApi.list(); } catch (e) { syms = []; } }
+    else if (F.uni === "custom") syms = String(F.custom || "").toUpperCase().split(/[\s,;]+/).filter(Boolean);
+    if (!syms) return base;
+    const seen = {}, out = []; syms.forEach(s => { s = String(s).toUpperCase().replace(/^[A-Z]+:/, ""); if (!s || seen[s]) return; seen[s] = 1; out.push(by[s] || {s, n: s, i: sectorOf(s), x: 1}); });
+    return out;
+  }
+  const wanted = () => { const seen = {}, out = []; LIST().concat(universe()).forEach(x => { if (!seen[x.s]) { seen[x.s] = 1; out.push(x); } }); return out; };
+  let D = {}, I = {}, ST = {busy: false, done: 0, total: 0, err: "", t: 0, fail: 0}, IS = {busy: false, done: 0, total: 0, err: ""}, built = false, PT = null, LAST = null, OPEN = null, TF = "15", PN = null, CH = null, MISS = {}; const MBC = {};
   const f2 = v => (isFinite(v) ? (+v).toLocaleString("en-IN", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "-");
   const f0 = v => (isFinite(v) ? Math.round(v).toLocaleString("en-IN") : "-");
   const sg = (v, d = 2) => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(d) : "-");
@@ -7659,16 +7675,18 @@ const mbApi = (function () {
   async function loadDaily(force) {
     if (ST.busy) return;
     if (!hasWorker()) { ST.err = "No Worker address is set"; view(); return; }
-    if (!force && ST.t && Date.now() - ST.t < 5 * 60e3) return;
+    const now = Date.now(); if (force) MISS = {};
+    const syms = wanted().map(x => x.s).filter(s => force || (!D[s] && !MISS[s]) || (D[s] && now - D[s].t > 5 * 60e3));
+    if (!syms.length) return;
     ST.busy = true; ST.err = ""; ST.fail = 0;
-    const syms = LIST().map(x => x.s), chunks = []; for (let i = 0; i < syms.length; i += 12) chunks.push(syms.slice(i, i + 12));
+    const chunks = []; for (let i = 0; i < syms.length; i += 12) chunks.push(syms.slice(i, i + 12));
     ST.total = syms.length; ST.done = 0; let ix = 0;
     const worker = async () => {
       while (ix < chunks.length) {
         const ch = chunks[ix++];
         try {
           const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json();
-          ch.forEach(sy => { const rows = j && j.bars && j.bars[sy]; if (rows && rows.length >= 22) D[sy] = {t: Date.now(), r: rows.slice(-70).map(x => ({d: dDate(x[0]), h: +x[2], l: +x[3], c: +x[4], v: +x[5] || 0}))}; else ST.fail++; });
+          ch.forEach(sy => { const rows = j && j.bars && j.bars[sy]; if (rows && rows.length >= 22) D[sy] = {t: Date.now(), r: rows.slice(-70).map(x => ({d: dDate(x[0]), h: +x[2], l: +x[3], c: +x[4], v: +x[5] || 0}))}; else { ST.fail++; MISS[sy] = 1; } });
         } catch (e) { ST.fail += ch.length; }
         ST.done += ch.length; schedule();
       }
@@ -7684,8 +7702,8 @@ const mbApi = (function () {
     Object.keys(D).forEach(sy => {
       const r = D[sy].r, n = r.length, a = r[n - 1], p = r[n - 2]; let sv = 0; for (let k = n - 20; k < n; k++) sv += r[k].v;
       let s50 = 0, c50 = 0; for (let k = Math.max(0, n - 50); k < n; k++) { s50 += r[k].c; c50++; }
-      const sma = sv / 20;
-      M[sy] = {c: a.c, ph: p.h, v: a.v, sma, vr: sma > 0 ? a.v / sma : NaN, chg: (a.c / p.c - 1) * 100, brk: (a.c / p.h - 1) * 100, r20: n > 20 ? (a.c / r[n - 21].c - 1) * 100 : NaN, up50: n >= 50 ? a.c > s50 / c50 : null, date: a.d};
+      const sma = sv / 20; let tr = 0, tn = 0; for (let k = Math.max(1, n - 14); k < n; k++) { tr += Math.max(r[k].h - r[k].l, Math.abs(r[k].h - r[k - 1].c), Math.abs(r[k].l - r[k - 1].c)); tn++; }
+      M[sy] = {c: a.c, ph: p.h, v: a.v, sma, vr: sma > 0 ? a.v / sma : NaN, chg: (a.c / p.c - 1) * 100, brk: (a.c / p.h - 1) * 100, r20: n > 20 ? (a.c / r[n - 21].c - 1) * 100 : NaN, up50: n >= 50 ? a.c > s50 / c50 : null, date: a.d, atr: tn ? tr / tn : NaN};
     });
     return M;
   }
@@ -7701,7 +7719,7 @@ const mbApi = (function () {
   function evalAll() {
     const M = calc(), SEC = sectors(M), rk = {}; SEC.forEach(o => { rk[o.i] = o.rank; });
     const rows = [];
-    LIST().forEach(x => {
+    universe().forEach(x => {
       const m = M[x.s]; if (!m) return; const o = Object.assign({s: x.s, n: x.n, i: x.i, srank: rk[x.i] || 999}, m), q = I[x.s];
       o.p1 = o.c > o.ph; o.p2 = o.vr > F.vm; o.p3 = o.v > F.minVol && o.c > F.minPx; o.p4 = !F.lead || o.srank <= F.lead;
       o.r15 = q ? q.r15 : NaN; o.r20 = q ? q.r20 : NaN; o.idate = q ? q.date : ""; o.p5 = q ? (o.r20 > F.c20 || o.r15 > F.c15) : null;
@@ -7717,8 +7735,9 @@ const mbApi = (function () {
     const day = bars.reduce((m, b) => (b.d > m ? b.d : m), ""), dd = bars.filter(b => b.d === day && b.m >= 555);
     if (!dd.length) return {date: day, r15: NaN, r20: NaN};
     const base = Math.min.apply(null, dd.map(b => b.m));
-    const rng = k => { const got = []; for (let i = 0; i < k; i++) { const b = dd.find(z => z.m === base + 5 * i); if (!b) return NaN; got.push(b); } const H = Math.max.apply(null, got.map(b => b.h)), L = Math.min.apply(null, got.map(b => b.l)); return L > 0 ? (H / L - 1) * 100 : NaN; };
-    return {date: day, r15: rng(3), r20: rng(4)};
+    const rng = k => { const got = []; for (let i = 0; i < k; i++) { const b = dd.find(z => z.m === base + 5 * i); if (!b) return null; got.push(b); } const H = Math.max.apply(null, got.map(b => b.h)), L = Math.min.apply(null, got.map(b => b.l)); return L > 0 ? {p: (H / L - 1) * 100, H, L} : null; };
+    const a = rng(3), b = rng(4);
+    return {date: day, r15: a ? a.p : NaN, r20: b ? b.p : NaN, h20: b ? b.H : NaN, l20: b ? b.L : NaN};
   }
   async function stage2() {
     if (IS.busy || !hasWorker()) return;
@@ -7731,14 +7750,25 @@ const mbApi = (function () {
         const ch = chunks[ix++];
         try {
           const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=5", {cache: "no-store"}), j = await r.json(), t = Date.now();
-          ch.forEach(sy => { const rows = j && j.bars && j.bars[sy], o = rows && rows.length ? opening(rows) : null; I[sy] = {t, r15: o ? o.r15 : NaN, r20: o ? o.r20 : NaN, date: o ? o.date : ""}; });
-        } catch (e) { IS.err = String((e && e.message) || e); ch.forEach(sy => { I[sy] = {t: Date.now(), r15: NaN, r20: NaN, date: ""}; }); }
+          ch.forEach(sy => { const rows = j && j.bars && j.bars[sy], o = rows && rows.length ? opening(rows) : null; I[sy] = {t, r15: o ? o.r15 : NaN, r20: o ? o.r20 : NaN, h20: o ? o.h20 : NaN, l20: o ? o.l20 : NaN, date: o ? o.date : ""}; });
+        } catch (e) { IS.err = String((e && e.message) || e); ch.forEach(sy => { I[sy] = {t: Date.now(), r15: NaN, r20: NaN, h20: NaN, l20: NaN, date: ""}; }); }
         IS.done += ch.length; schedule();
       }
     };
     await Promise.all([worker(), worker(), worker()]);
     IS.busy = false; view();
   }
+
+  /* ---- trade plan: entry above the opening-range high (or now if already above), stop at the opening-range low or 1.5 daily ATR below entry (whichever is tighter), target at R times the risk ---- */
+  function plan(o) {
+    if (!o || !isFinite(o.atr) || !(o.c > 0)) return null; const q = I[o.s], has = !!q && isFinite(q.h20) && isFinite(q.l20);
+    const entry = has ? Math.max(o.c, q.h20 * 1.001) : o.c, now = !has || o.c >= q.h20 * 1.001; let stop = entry - 1.5 * o.atr, sb = "1.5 ATR";
+    if (has && q.l20 > stop && q.l20 < entry) { stop = q.l20; sb = "opening low"; }
+    if (!(stop < entry * 0.997)) { stop = entry * 0.99; sb = "1% floor"; }
+    const risk = entry - stop, rr = F.rr > 0 ? F.rr : 2, target = entry + rr * risk;
+    return {entry, stop, target, now, sb, rr, riskPct: risk / entry * 100, rewPct: rr * risk / entry * 100};
+  }
+  const rowOf = sym => { const L = LAST ? LAST.list.find(o => o.s === sym) : null; return L || evalAll().rows.find(o => o.s === sym) || null; };
 
   /* ---- screen ---- */
   const th = (k, t, num) => '<th data-mbk="' + k + '"' + (num ? ' class="num"' : "") + ' style="cursor:pointer;white-space:nowrap">' + t + (F.sort === k ? (F.dir > 0 ? " &#9650;" : " &#9660;") : "") + "</th>";
@@ -7753,55 +7783,95 @@ const mbApi = (function () {
   function view() {
     const host = $e("#mbres"); if (!host) return;
     const X = results(), R = X.R, f = X.f; LAST = X;
+    if (PN && host.contains(PN)) PN.remove();
     const stat = $e("#mbstat");
     const dates = {}; R.rows.forEach(o => { dates[o.date] = (dates[o.date] || 0) + 1; }); const dl = Object.keys(dates).sort().pop() || "";
     const mism = R.rows.filter(o => o.idate && o.date && o.idate !== o.date).length, nan = R.rows.filter(o => o.p1 && o.p2 && o.p3 && o.p4 && o.idate && !isFinite(o.r20)).length;
-    if (stat) stat.innerHTML = Object.keys(D).length + " of " + LIST().length + " stocks have daily candles" + (dl ? " &middot; latest daily candle " + E(dl) : "") + (ST.busy ? " &middot; loading daily candles " + Math.min(ST.done, ST.total) + "/" + ST.total : "") + (IS.busy ? " &middot; checking opening candles " + Math.min(IS.done, IS.total) + "/" + IS.total : "") + (ST.t ? " &middot; as of " + new Date(ST.t).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false}) : "") + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + "</span>" : "") + (IS.err ? ' &middot; <span style="color:var(--bad)">intraday: ' + E(IS.err) + "</span>" : "");
-    const fun = [["Nifty 500 with data", f[0]], ["Close above yesterday's high", f[1]], ["Volume above " + F.vm + "x its 20-day average", f[2]], ["Volume over " + f0(F.minVol) + " and price over " + F.minPx, f[3]], [F.lead ? "In a leading sector" : "Sector filter off", f[4]], ["Wide opening candle", f[5]]];
+    if (stat) stat.innerHTML = uniName() + ": " + R.rows.length + " of " + universe().length + " stocks have daily candles" + (dl ? " &middot; latest daily candle " + E(dl) : "") + (ST.busy ? " &middot; loading daily candles " + Math.min(ST.done, ST.total) + "/" + ST.total : "") + (IS.busy ? " &middot; checking opening candles " + Math.min(IS.done, IS.total) + "/" + IS.total : "") + (ST.t ? " &middot; as of " + new Date(ST.t).toLocaleTimeString("en-IN", {hour: "2-digit", minute: "2-digit", hour12: false}) : "") + (ST.err ? ' &middot; <span style="color:var(--bad)">' + E(ST.err) + "</span>" : "") + (IS.err ? ' &middot; <span style="color:var(--bad)">intraday: ' + E(IS.err) + "</span>" : "");
+    const fun = [[uniName() + " with data", f[0]], ["Close above yesterday's high", f[1]], ["Volume above " + F.vm + "x its 20-day average", f[2]], ["Volume over " + f0(F.minVol) + " and price over " + F.minPx, f[3]], [F.lead ? "In a leading sector" : "Sector filter off", f[4]], ["Wide opening candle", f[5]]];
     let h = '<div class="note" style="margin:0 0 8px">' + fun.map((x, i) => (i ? " &rarr; " : "") + E(x[0]) + " <b>" + x[1] + "</b>").join("") + "</div>";
     const lead = R.SEC.slice(0, F.lead || 0); if (lead.length) h += '<div class="note" style="margin:0 0 8px"><b>Leading sectors now</b> (20-day gain, % of stocks above 50-day average): ' + lead.map(o => E(o.i) + " <small>" + sg(o.ret, 1) + "%, " + Math.round(o.br) + "%</small>").join(" &middot; ") + "</div>";
     if (mism) h += '<div class="note" style="margin:0 0 8px;color:var(--bad)">' + mism + " stocks have an intraday session date different from the daily candle date, so their opening-candle test may be for another day.</div>";
     if (F.ic === "on" && nan) h += '<div class="note" style="margin:0 0 8px">' + nan + " stocks passed the daily tests but have no complete opening 20-minute candle yet (before about 9:35 AM, or the Worker has no intraday data), so they are not listed.</div>";
-    h += '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th>' + th("s", "Stock") + th("i", "Sector rank", 1) + th("c", "Price", 1) + th("chg", "Change %", 1) + th("vr", "Volume x avg", 1) + th("v", "Volume", 1) + th("brk", "Above prev high %", 1) + th("r15", "15m opening range %", 1) + th("r20", "20m opening range %", 1) + "</tr></thead><tbody>";
-    h += X.list.length ? X.list.slice(0, F.shown).map((o, i) => '<tr><td>' + (i + 1) + '</td><td style="min-width:200px"><b>' + E(o.s) + "</b>" + znTvA(o.s, "D") + '<div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(o.n) + " &middot; " + E(o.i) + "</div></td>" +
+    h += '<div class="wrap"><table class="pptbl"><thead><tr><th>#</th>' + th("s", "Stock") + th("i", "Sector rank", 1) + th("c", "Price", 1) + th("chg", "Change %", 1) + th("vr", "Volume x avg", 1) + th("v", "Volume", 1) + th("brk", "Above prev high %", 1) + th("r15", "15m opening range %", 1) + th("r20", "20m opening range %", 1) + "<th class=\"num\">Entry</th><th class=\"num\">Stop-loss</th><th class=\"num\">Target</th></tr></thead><tbody>";
+    h += X.list.length ? X.list.slice(0, F.shown).map((o, i) => { const pl = o.p5 === null ? null : plan(o), op = OPEN === o.s; return '<tr data-mbs="' + E(o.s) + '" style="cursor:pointer' + (op ? ";background:color-mix(in srgb,var(--a) 10%,var(--card))" : "") + '"><td>' + (i + 1) + '</td><td style="min-width:200px"><b>' + E(o.s) + "</b>" + znTvA(o.s, "D") + ' <button type="button" class="cbtn" data-mbc="' + E(o.s) + '" style="padding:1px 9px;font-size:.75rem">&#128200; Chart</button><div class="note" style="margin:2px 0 0;font-size:.76rem">' + E(o.n) + " &middot; " + E(o.i) + "</div></td>" +
       '<td class="num">' + (o.srank < 999 ? "#" + o.srank : "-") + '</td><td class="num">' + f2(o.c) + '</td><td class="num" style="' + cls(o.chg) + '"><b>' + sg(o.chg) + '%</b></td><td class="num"><b>' + o.vr.toFixed(1) + 'x</b></td><td class="num">' + f0(o.v) + '</td><td class="num">' + sg(o.brk) + '%</td>' +
-      '<td class="num"' + (o.r15 > F.c15 ? ' style="color:var(--good);font-weight:700"' : "") + ">" + (o.p5 === null ? "..." : isFinite(o.r15) ? o.r15.toFixed(2) + "%" : "-") + '</td><td class="num"' + (o.r20 > F.c20 ? ' style="color:var(--good);font-weight:700"' : "") + ">" + (o.p5 === null ? "..." : isFinite(o.r20) ? o.r20.toFixed(2) + "%" : "-") + "</td></tr>").join("")
-      : '<tr><td colspan="10" class="note">' + (Object.keys(D).length ? "No stock passes all the filters right now." : ST.busy ? "Loading candles..." : "Nothing loaded yet. Press Reload.") + "</td></tr>";
+      '<td class="num"' + (o.r15 > F.c15 ? ' style="color:var(--good);font-weight:700"' : "") + ">" + (o.p5 === null ? "..." : isFinite(o.r15) ? o.r15.toFixed(2) + "%" : "-") + '</td><td class="num"' + (o.r20 > F.c20 ? ' style="color:var(--good);font-weight:700"' : "") + ">" + (o.p5 === null ? "..." : isFinite(o.r20) ? o.r20.toFixed(2) + "%" : "-") + "</td>" + (pl ? '<td class="num" style="color:#2563eb"><b>' + f2(pl.entry) + '</b><br><small>' + (pl.now ? "now" : "buy above") + '</small></td><td class="num" style="color:var(--bad)"><b>' + f2(pl.stop) + '</b><br><small>-' + pl.riskPct.toFixed(1) + "% &middot; " + E(pl.sb) + '</small></td><td class="num" style="color:var(--good)"><b>' + f2(pl.target) + '</b><br><small>+' + pl.rewPct.toFixed(1) + "% &middot; 1:" + pl.rr + "</small></td>" : '<td class="num">' + (o.p5 === null ? "..." : "-") + '</td><td class="num">' + (o.p5 === null ? "..." : "-") + '</td><td class="num">' + (o.p5 === null ? "..." : "-") + "</td>") + "</tr>" + (op ? '<tr class="dockrow" data-mbdock="1"><td colspan="13"></td></tr>' : ""); }).join("")
+      : '<tr><td colspan="13" class="note">' + (R.rows.length ? "No stock passes all the filters right now." : ST.busy ? "Loading candles..." : "Nothing loaded yet. Press Reload.") + "</td></tr>";
     host.innerHTML = h + "</tbody></table></div>" + (X.list.length > F.shown ? '<p><button type="button" class="cbtn" id="mbmore">Show more (' + (X.list.length - F.shown) + " left)</button></p>" : "") +
-      '<p class="note">Same rules as your Chartink scan on Nifty 500: daily close above the previous day\'s high; volume above ' + F.vm + 'x its 20-day average (your 3x rule is already covered by 2x, so it is not repeated); the first 15-minute candle of the day wider than ' + F.c15 + '% (high over low) or the first 20-minute candle wider than ' + F.c20 + '%; volume over ' + f0(F.minVol) + ' and price over ' + F.minPx + '. "[=1]" in Chartink means the first candle of the day. Chartink\'s "Trend Strength Screen - Leading Sector" is its own saved scan and cannot be read here, so leading sectors are approximated by ranking industries on their 20-day gain and on how many of their stocks are above the 50-day average. Today\'s daily candle (and its volume) is still forming during market hours. Screening aid, not advice.</p>';
+      '<p class="note">Same rules as your Chartink scan on Nifty 500: daily close above the previous day\'s high; volume above ' + F.vm + 'x its 20-day average (your 3x rule is already covered by 2x, so it is not repeated); the first 15-minute candle of the day wider than ' + F.c15 + '% (high over low) or the first 20-minute candle wider than ' + F.c20 + '%; volume over ' + f0(F.minVol) + ' and price over ' + F.minPx + '. "[=1]" in Chartink means the first candle of the day. Chartink\'s "Trend Strength Screen - Leading Sector" is its own saved scan and cannot be read here, so leading sectors are approximated by ranking industries on their 20-day gain and on how many of their stocks are above the 50-day average. Sector strength is always measured on the whole Nifty 500, so stocks outside it (in your own list) have no sector rank and fail the leading-sector test unless it is switched off. Today\'s daily candle (and its volume) is still forming during market hours. Entry, stop and target are mechanical suggestions (entry above the 20-minute opening high or at market if already above it, stop at the opening low or 1.5 daily ATR below entry, whichever is tighter, target at the chosen multiple of the risk). They have not been tested for profitability. Screening aid, not advice.</p>';
+    const dk = host.querySelector("tr[data-mbdock] td"); if (dk && PN) dk.appendChild(PN); else if (OPEN) { OPEN = null; panel(); }
+  }
+  /* ---- chart that opens under the stock ---- */
+  const TFS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["D", "Daily"]];
+  async function bars(sym, tf) {
+    const key = sym + "|" + tf; let o = MBC[key];
+    if (!o || Date.now() - o.t > 45e3) { try { const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(sym) + "&tf=" + (tf === "D" ? "DF" : tf), {cache: "no-store"}), j = await r.json(), rows = j && j.bars && j.bars[sym]; if (rows && rows.length > 5) MBC[key] = o = {t: Date.now(), bars: rows.map(x => ({time: tf === "D" ? String(x[0]).slice(0, 10) : x[0], open: +x[1], high: +x[2], low: +x[3], close: +x[4], vol: +x[5] || 0}))}; } catch (e) {} }
+    return o && o.bars;
+  }
+  function removeChart() { if (CH) { try { CH.remove(); } catch (e) {} CH = null; } }
+  async function drawChart() {
+    if (!OPEN || !PN) return; const sym = OPEN, tf = TF, box = PN.querySelector("#mbbox"); if (!box) return;
+    const b = await bars(sym, tf), note = PN.querySelector("#mbnote");
+    if (OPEN !== sym || TF !== tf || !PN.querySelector("#mbbox")) return;
+    removeChart(); const LW = window.LightweightCharts;
+    if (!b || !LW) { if (note) note.textContent = "No chart data for " + sym + " from your Worker" + (LW ? "" : " (chart library missing)") + ". Use the TradingView link."; return; }
+    const c = colors(), intra = tf !== "D";
+    const chart = LW.createChart(box, {autoSize: true, layout: {background: {type: "solid", color: c.bg}, textColor: c.txt, fontFamily: "Outfit, system-ui, sans-serif"}, grid: {vertLines: {color: c.grid}, horzLines: {color: c.grid}}, rightPriceScale: {borderColor: c.grid}, timeScale: {borderColor: c.grid, rightOffset: 4, timeVisible: intra, secondsVisible: false}, crosshair: {mode: 1}, localization: {locale: "en-IN"}});
+    const candle = chart.addCandlestickSeries({upColor: c.up, downColor: c.dn, wickUpColor: c.up, wickDownColor: c.dn, borderVisible: false, priceLineVisible: true, lastValueVisible: true});
+    candle.setData(b.map(x => ({time: x.time, open: x.open, high: x.high, low: x.low, close: x.close})));
+    let vs = null; try { vs = chart.addHistogramSeries({priceFormat: {type: "volume"}, priceScaleId: "", lastValueVisible: false, priceLineVisible: false}); vs.priceScale().applyOptions({scaleMargins: {top: 0.82, bottom: 0}}); vs.setData(b.map(x => ({time: x.time, value: x.vol, color: x.close >= x.open ? withAlpha(c.up, "66") : withAlpha(c.dn, "66")}))); } catch (e) {}
+    try { indAttach(chart, candle, b, {vs, base: {top: 0.1, bottom: 0.1}}); } catch (e) {}
+    try { const p = plan(rowOf(sym)); if (p) [["Entry", p.entry, "#2563eb"], ["Stop", p.stop, "#dc2626"], ["Target", p.target, "#16a34a"]].forEach(a => candle.createPriceLine({price: a[1], color: a[2], lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: a[0]})); } catch (e) {}
+    CH = chart; const n = b.length;
+    try { if (intra) chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (tf === "5" ? 90 : 70)), to: n + 4}); else { const lt = b[n - 1].time, d = new Date(lt + "T00:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 6); chart.timeScale().setVisibleRange({from: d.toISOString().slice(0, 10), to: lt}); } } catch (e) { chart.timeScale().fitContent(); }
+    if (note) note.textContent = (intra ? "Candles from your Cloudflare Worker (Yahoo), can lag a few minutes. " : "Daily candles from your Cloudflare Worker. ") + "Blue, red and green dashed lines are the suggested entry, stop and target.";
+  }
+  function panel() {
+    if (!PN) { PN = document.createElement("div"); PN.id = "mbpanel"; }
+    removeChart(); if (!OPEN) { PN.innerHTML = ""; return; }
+    const o = rowOf(OPEN), p = plan(o), r = LIST().find(x => x.s === OPEN) || {s: OPEN, n: ""};
+    PN.innerHTML = '<div class="card"><div class="charttools" style="border:0;padding:0;margin-bottom:6px"><b>' + E(r.s) + '</b> <span class="note" style="margin:0">' + E(r.n) + (o ? " &middot; " + f2(o.c) + " (" + sg(o.chg) + "%)" : "") + "</span></div>" +
+      (p ? '<div class="note" style="margin:0 0 8px"><b style="color:#2563eb">Entry ' + f2(p.entry) + "</b> (" + (p.now ? "at market" : "buy above") + ') &middot; <b style="color:#dc2626">Stop ' + f2(p.stop) + "</b> (" + E(p.sb) + ", risk " + p.riskPct.toFixed(2) + '%) &middot; <b style="color:#16a34a">Target ' + f2(p.target) + "</b> (1:" + p.rr + ", +" + p.rewPct.toFixed(2) + "%)</div>" : "") +
+      '<div class="charttools">' + TFS.map(t => '<button type="button" class="cbtn" data-mbtf="' + t[0] + '" aria-pressed="' + (t[0] === TF) + '">' + t[1] + "</button>").join("") + '<span class="csep"></span>' + indBtns() + '<span class="csep"></span><a class="tvl" href="' + znTv(OPEN, TF === "D" ? "D" : TF) + '" target="_blank" rel="noopener">Open on TradingView &#8599;</a> <button type="button" class="cbtn" data-mbx="1">Close</button></div><div id="mbbox" style="height:400px;margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden"></div><div id="mbnote" class="note" style="margin:6px 0 0">Loading chart...</div></div>';
   }
   function csv() {
     if (!LAST) return ""; const q = s => '"' + String(s).replace(/"/g, '""') + '"';
-    return ["Symbol,Sector rank,Industry,Price,Change %,Volume x avg,Volume,Above prev high %,15m range %,20m range %"].concat(LAST.list.map(o => [q(o.s), o.srank < 999 ? o.srank : "", q(o.i), o.c.toFixed(2), o.chg.toFixed(2), o.vr.toFixed(2), Math.round(o.v), o.brk.toFixed(2), isFinite(o.r15) ? o.r15.toFixed(2) : "", isFinite(o.r20) ? o.r20.toFixed(2) : ""].join(","))).join("\n");
+    return ["Symbol,Sector rank,Industry,Price,Change %,Volume x avg,Volume,Above prev high %,15m range %,20m range %,Entry,Stop,Target"].concat(LAST.list.map(o => { const p = plan(o); return [q(o.s), o.srank < 999 ? o.srank : "", q(o.i), o.c.toFixed(2), o.chg.toFixed(2), o.vr.toFixed(2), Math.round(o.v), o.brk.toFixed(2), isFinite(o.r15) ? o.r15.toFixed(2) : "", isFinite(o.r20) ? o.r20.toFixed(2) : "", p ? p.entry.toFixed(2) : "", p ? p.stop.toFixed(2) : "", p ? p.target.toFixed(2) : ""].join(","); })).join("\n");
   }
   function build() {
     const host = $e("#mbbody"); if (!host || built) return; built = true;
     const num = (id, lab, v, st) => '<label>' + lab + ' <input id="' + id + '" type="number" step="' + (st || "any") + '" style="width:84px" value="' + E(v) + '"></label>';
-    host.innerHTML = '<div class="znhead"><div><h2>BREAKOUT</h2><span>Nifty 500 momentum scan: breakout, volume surge, wide opening candle, leading sector</span></div><div class="znpills"><span>Daily + 5m candles</span><span>TradingView link</span><span>CSV copy</span></div></div>' +
-      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Search <input id="mbq" type="search" placeholder="symbol, name or industry" style="width:170px" value="' + E(F.q) + '"></label>' +
-      num("mbvm", "Volume x avg over", F.vm, "0.1") + num("mbc15", "15m range % over", F.c15, "0.1") + num("mbc20", "20m range % over", F.c20, "0.1") + num("mbmv", "Min volume", F.minVol, "10000") + num("mbmp", "Min price", F.minPx, "1") +
+    host.innerHTML = '<div class="znhead"><div><h2>BREAKOUT</h2><span>Nifty 500 momentum scan: breakout, volume surge, wide opening candle, leading sector</span></div><div class="znpills"><span>Star to bookmark</span><span>Chart under the stock</span><span>Entry, stop, target</span></div></div>' +
+      '<div class="card"><div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Stocks <select id="mbun">' + UNIS.map(u => '<option value="' + u[0] + '">' + u[1] + '</option>').join("") + '</select></label><label id="mbcul" style="display:' + (F.uni === "custom" ? "inline-flex" : "none") + '">Symbols <input id="mbcu" type="text" placeholder="e.g. SBIN, TCS, ABB" style="width:230px" value="' + E(F.custom) + '"></label><label>Search <input id="mbq" type="search" placeholder="symbol, name or industry" style="width:170px" value="' + E(F.q) + '"></label>' +
+      num("mbvm", "Volume x avg over", F.vm, "0.1") + num("mbc15", "15m range % over", F.c15, "0.1") + num("mbc20", "20m range % over", F.c20, "0.1") + num("mbmv", "Min volume", F.minVol, "10000") + num("mbmp", "Min price", F.minPx, "1") + num("mbrr", "Target (R multiple)", F.rr, "0.5") +
       '<label>Leading sectors <select id="mbld"><option value="0">Off</option><option value="3">Top 3</option><option value="5">Top 5</option><option value="8">Top 8</option><option value="12">Top 12</option></select></label>' +
       '<label>Opening candle <select id="mbic"><option value="on">Required</option><option value="off">Show all daily passes</option></select></label>' +
       '<button type="button" class="cbtn" id="mbrl">&#8635; Reload</button><button type="button" class="cbtn" id="mbcsv">Copy CSV</button></div><div class="note" id="mbstat" style="margin:8px 0 0"></div></div><div id="mbres"></div>';
-    $e("#mbld").value = String(F.lead); $e("#mbic").value = F.ic;
+    $e("#mbld").value = String(F.lead); $e("#mbun").value = F.uni; $e("#mbic").value = F.ic;
     host.addEventListener("input", ev => {
       const t = ev.target; if (!t || !t.id) return; const n = parseFloat(t.value);
-      if (t.id === "mbq") F.q = t.value; else if (t.id === "mbvm" && isFinite(n)) F.vm = n; else if (t.id === "mbc15" && isFinite(n)) F.c15 = n; else if (t.id === "mbc20" && isFinite(n)) F.c20 = n; else if (t.id === "mbmv" && isFinite(n)) F.minVol = n; else if (t.id === "mbmp" && isFinite(n)) F.minPx = n; else if (t.id === "mbld") F.lead = +t.value || 0; else if (t.id === "mbic") F.ic = t.value; else return;
-      F.shown = 100; save(); view(); if (t.id !== "mbq") stage2();
+      if (t.id === "mbq") F.q = t.value; else if (t.id === "mbvm" && isFinite(n)) F.vm = n; else if (t.id === "mbc15" && isFinite(n)) F.c15 = n; else if (t.id === "mbc20" && isFinite(n)) F.c20 = n; else if (t.id === "mbmv" && isFinite(n)) F.minVol = n; else if (t.id === "mbmp" && isFinite(n)) F.minPx = n; else if (t.id === "mbrr" && isFinite(n) && n > 0) F.rr = n; else if (t.id === "mbun") { F.uni = t.value; OPEN = null; panel(); const l = $e("#mbcul"); if (l) l.style.display = F.uni === "custom" ? "inline-flex" : "none"; loadDaily(false); } else if (t.id === "mbcu") { F.custom = t.value; loadDaily(false); } else if (t.id === "mbld") F.lead = +t.value || 0; else if (t.id === "mbic") F.ic = t.value; else return;
+      F.shown = 100; save(); view(); if (OPEN && t.id !== "mbq") { panel(); drawChart(); } if (t.id !== "mbq" && t.id !== "mbcu") stage2();
     });
     host.addEventListener("click", ev => {
       const t = ev.target; if (!t || !t.closest) return;
+      let b = t.closest("[data-mbtf]"); if (b) { TF = b.dataset.mbtf; panel(); drawChart(); return; }
+      if (t.closest("[data-mbx]")) { OPEN = null; panel(); view(); return; }
       if (t.closest("#mbrl")) { I = {}; loadDaily(true); return; }
       if (t.closest("#mbmore")) { F.shown += 100; view(); return; }
       if (t.closest("#mbcsv")) { const s = csv(), b = t.closest("#mbcsv"); try { navigator.clipboard.writeText(s).then(() => { b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy CSV"; }, 1500); }, () => { b.textContent = "Copy failed"; }); } catch (e) { b.textContent = "Copy not available"; } return; }
+      if (t.closest("a") || t.closest("[data-ind]") || t.closest("#mbpanel") || t.closest(".bmstar") || t.closest("th")) { /* fall through to sort handling below */ }
+      else { b = t.closest("[data-mbs]"); if (b) { const s = b.dataset.mbs; OPEN = OPEN === s ? null : s; panel(); view(); if (OPEN) { drawChart(); setTimeout(() => { if (PN && PN.scrollIntoView) PN.scrollIntoView({behavior: "smooth", block: "nearest"}); }, 60); } return; } }
       const k = t.closest("[data-mbk]"); if (k) { const s = k.dataset.mbk; F.dir = F.sort === s ? -F.dir : (s === "s" || s === "i" ? 1 : -1); F.sort = s; save(); view(); }
     });
   }
   function open() { build(); view(); loadDaily(false); if (Object.keys(D).length) stage2(); }
   setInterval(() => { try { if (current === "mb" && !document.hidden && !ST.busy && !IS.busy && liveHours()) { if (!ST.t || Date.now() - ST.t > 5 * 60e3) loadDaily(true); else stage2(); } } catch (e) {} }, 60 * 1000);
-  return {open, evalAll, opening, sectors, calc, _set: (d, i, f) => { if (d) D = d; if (i) I = i; if (f) F = Object.assign(F, f); }};
+  return {open, evalAll, opening, sectors, calc, plan, _set: (d, i, f) => { if (d) D = d; if (i) I = i; if (f) F = Object.assign(F, f); }};
 })();
 const mbPaint = () => mbApi.open();
+
 
 /* ===== APP ===== */
 let current = "ov", lastRows = [];
