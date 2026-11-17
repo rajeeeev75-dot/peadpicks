@@ -7899,6 +7899,132 @@ const mbApi = (function () {
     if (!LAST) return ""; const q = s => '"' + String(s).replace(/"/g, '""') + '"';
     return ["Symbol,Sector rank,Industry,Price,Change %,Volume x avg,Volume,Above prev high %,15m range %,20m range %,Entry,Stop,Target"].concat(LAST.list.map(o => { const p = plan(o); return [q(o.s), o.srank < 999 ? o.srank : "", q(o.i), o.c.toFixed(2), o.chg.toFixed(2), o.vr.toFixed(2), Math.round(o.v), o.brk.toFixed(2), isFinite(o.r15) ? o.r15.toFixed(2) : "", isFinite(o.r20) ? o.r20.toFixed(2) : "", p ? p.entry.toFixed(2) : "", p ? p.stop.toFixed(2) : "", p ? p.target.toFixed(2) : ""].join(","); })).join("\n");
   }
+  /* ===== back-test of the same rules on 5 years of daily candles (the opening-candle test cannot be replayed: Yahoo keeps only about 60 days of 5-minute candles) ===== */
+  const BT = {busy: false, done: 0, total: 0, err: "", res: null, D: null, run: 0};
+  const btF = () => { F.bt = Object.assign({x: "atr", h: 1, cost: 0.3, y: 5}, F.bt || {}); return F.bt; };
+  async function btLoad() {
+    const syms = LIST().map(x => x.s), chunks = []; for (let i = 0; i < syms.length; i += 12) chunks.push(syms.slice(i, i + 12));
+    const out = {}; BT.total = syms.length; BT.done = 0; let ix = 0, bad = 0;
+    const worker = async () => {
+      while (ix < chunks.length) {
+        const ch = chunks[ix++];
+        try {
+          const r = await fetch(MARKET_API_URL + "?bars=" + encodeURIComponent(ch.join(",")) + "&tf=DF", {cache: "no-store"}), j = await r.json();
+          ch.forEach(sy => { const rows = j && j.bars && j.bars[sy]; if (!rows || rows.length < 120) { bad++; return; } const A = {d: [], o: [], h: [], l: [], c: [], v: []}; rows.forEach(x => { const o = +x[1], h = +x[2], l = +x[3], c = +x[4]; if (!(o > 0 && h > 0 && l > 0 && c > 0)) return; A.d.push(dDate(x[0])); A.o.push(o); A.h.push(h); A.l.push(l); A.c.push(c); A.v.push(+x[5] || 0); }); if (A.d.length >= 120) out[sy] = A; else bad++; });
+        } catch (e) { bad += ch.length; }
+        BT.done += ch.length; btView();
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]); BT.bad = bad; return out;
+  }
+  function btPrep(DD) {
+    /* per stock: 20-day volume average (incl. the day), ATR14, and per day the 20-day gain and "above 50-day average" for the sector ranking */
+    const ind = {}; LIST().forEach(x => { ind[x.s] = x.i; }); const days = {};
+    Object.keys(DD).forEach(sy => {
+      const A = DD[sy], n = A.c.length; A.sy = sy; A.i = ind[sy]; A.va = new Float64Array(n); A.atr = new Float64Array(n); A.ret = new Float64Array(n).fill(NaN); A.up = new Int8Array(n).fill(-1);
+      let sv = 0, s50 = 0;
+      for (let k = 0; k < n; k++) {
+        sv += A.v[k]; if (k >= 20) sv -= A.v[k - 20]; A.va[k] = k >= 19 ? sv / 20 : NaN;
+        s50 += A.c[k]; if (k >= 50) s50 -= A.c[k - 50]; if (k >= 49) A.up[k] = A.c[k] > s50 / 50 ? 1 : 0;
+        if (k >= 20) A.ret[k] = (A.c[k] / A.c[k - 20] - 1) * 100;
+        if (k >= 14) { let tr = 0; for (let q = k - 13; q <= k; q++) tr += Math.max(A.h[q] - A.l[q], Math.abs(A.h[q] - A.c[q - 1]), Math.abs(A.l[q] - A.c[q - 1])); A.atr[k] = tr / 14; } else A.atr[k] = NaN;
+        if (isFinite(A.ret[k]) && A.i) { const g = days[A.d[k]] = days[A.d[k]] || {}, o = g[A.i] = g[A.i] || [0, 0, 0, 0]; o[0] += A.ret[k]; o[1]++; if (A.up[k] >= 0) { o[3]++; if (A.up[k]) o[2]++; } }
+      }
+    });
+    const rank = {};
+    Object.keys(days).forEach(d => {
+      const g = days[d], arr = Object.keys(g).filter(k => g[k][1] >= 4).map(k => ({i: k, ret: g[k][0] / g[k][1], br: g[k][3] ? 100 * g[k][2] / g[k][3] : 0}));
+      const rk = key => { arr.slice().sort((a, b) => b[key] - a[key]).forEach((o, ix) => { o["r_" + key] = ix; }); }; rk("ret"); rk("br"); arr.forEach(o => { o.sc = o.r_ret + o.r_br; });
+      arr.sort((a, b) => a.sc - b.sc || b.ret - a.ret); const m = {}; arr.forEach((o, ix) => { m[o.i] = ix + 1; }); rank[d] = m;
+    });
+    return rank;
+  }
+  /* one trade: buy at the open of day e, hold up to H days; stop first when the same day touches both; gaps fill at the open */
+  function btTrade(A, e, H, bt, rr, atr) {
+    const n = A.c.length, last = e + H - 1; if (last > n - 1 || !(atr > 0)) return null; const ep = A.o[e]; let stop, tgt;
+    if (bt.x === "fix") { stop = ep * 0.989; tgt = ep * 1.014; }
+    else if (bt.x === "cls") { stop = 0; tgt = 1e12; }
+    else { stop = ep - 1.5 * atr; if (!(stop < ep * 0.997)) stop = ep * 0.99; tgt = ep + rr * (ep - stop); }
+    let ex = A.c[last];
+    for (let k = e; k <= last; k++) {
+      if (k > e && A.o[k] <= stop) { ex = A.o[k]; break; } if (A.l[k] <= stop) { ex = stop; break; }
+      if (k > e && A.o[k] >= tgt) { ex = A.o[k]; break; } if (A.h[k] >= tgt) { ex = tgt; break; }
+    }
+    return ex / ep - 1 - bt.cost / 100;
+  }
+  function btStat(list) {
+    const n = list.length; if (!n) return null; let w = 0, gp = 0, gl = 0, s = 0; const byDay = {};
+    list.forEach(t => { s += t.r; if (t.r > 0) { w++; gp += t.r; } else gl -= t.r; (byDay[t.d] = byDay[t.d] || []).push(t.r); });
+    const dm = Object.keys(byDay).map(d => byDay[d].reduce((a, b) => a + b, 0) / byDay[d].length), m = dm.reduce((a, b) => a + b, 0) / dm.length;
+    const sd = Math.sqrt(dm.reduce((a, b) => a + (b - m) * (b - m), 0) / Math.max(1, dm.length - 1)), tstat = dm.length > 2 && sd > 0 ? m / (sd / Math.sqrt(dm.length)) : NaN;
+    return {n, w, avg: s / n, pf: gl > 0 ? gp / gl : NaN, t: tstat, days: dm.length};
+  }
+  async function btRun() {
+    if (BT.busy) return; if (!hasWorker()) { BT.err = "No Worker address is set"; btView(); return; }
+    BT.busy = true; BT.err = ""; BT.res = null; btView();
+    try {
+      if (!BT.D) BT.D = await btLoad(); const DD = BT.D, syms = Object.keys(DD);
+      if (syms.length < 50) { BT.err = "Only " + syms.length + " stocks returned 5-year candles from the Worker, too few for a test."; BT.busy = false; btView(); return; }
+      BT.msg = "Working out sector strength for every past day..."; btView(); await new Promise(r => setTimeout(r, 20));
+      const rank = btPrep(DD), bt = btF(), rr = F.rr > 0 ? F.rr : 2, cut = new Date(Date.now() - bt.y * 365.25 * 864e5).toISOString().slice(0, 10);
+      const R = {prev: {all: [], nosec: [], base: []}, same: {all: [], nosec: [], base: []}}; let i = 0; BT.msg = "Replaying the rules..."; BT.total = syms.length; BT.done = 0;
+      await new Promise(res => {
+        const step = () => {
+          const t0 = Date.now();
+          while (i < syms.length && Date.now() - t0 < 35) {
+            const A = DD[syms[i++]], n = A.c.length;
+            for (let s = 51; s < n - 1; s++) {
+              if (A.d[s] < cut) continue; const liq = A.v[s] > F.minVol && A.c[s] > F.minPx; if (!liq) continue;
+              const p12 = A.c[s] > A.h[s - 1] && A.va[s] > 0 && A.v[s] / A.va[s] > F.vm, lead = !F.lead || ((rank[A.d[s]] || {})[A.i] || 999) <= F.lead;
+              const yr = A.d[s].slice(0, 4);
+              /* honest: yesterday's finished candle decides, buy today's open */
+              const a = btTrade(A, s + 1, bt.h, bt, rr, A.atr[s]);
+              if (a !== null) { const t = {r: a, d: A.d[s + 1], y: A.d[s + 1].slice(0, 4)}; R.prev.base.push(t); if (p12) { R.prev.nosec.push(t); if (lead) R.prev.all.push(t); } }
+              /* look-ahead: the same day's finished candle decides, buy the same day's open (what a daily scan run after the close does if it is back-tested at the morning open) */
+              const b = btTrade(A, s, bt.h, bt, rr, A.atr[s - 1]);
+              if (b !== null) { const t = {r: b, d: A.d[s], y: yr}; R.same.base.push(t); if (p12) { R.same.nosec.push(t); if (lead) R.same.all.push(t); } }
+            }
+          }
+          BT.done = i; btView(); if (i < syms.length) setTimeout(step, 0); else res();
+        };
+        setTimeout(step, 0);
+      });
+      BT.res = {R, bt: Object.assign({}, bt), F: {vm: F.vm, lead: F.lead, minVol: F.minVol, minPx: F.minPx, rr}, syms: syms.length, from: cut, bad: BT.bad};
+    } catch (e) { BT.err = "Back-test failed: " + String((e && e.message) || e); }
+    BT.busy = false; btView();
+  }
+  function btView() {
+    const host = $e("#mbbt"); if (!host) return; const bt = btF(), q = host.querySelector("#mbbtres"); if (!q) return;
+    let h = "";
+    if (BT.busy) h += '<p class="note" style="margin:0">' + E(BT.msg || "Loading 5 years of daily candles") + " " + Math.min(BT.done, BT.total) + " of " + BT.total + "...</p>";
+    if (BT.err) h += '<p class="note" style="margin:0;color:var(--bad)">' + E(BT.err) + "</p>";
+    const X = BT.res;
+    if (X) {
+      const line = (name, list, base) => { const s = btStat(list); if (!s) return {c: [name, "0", "-", "-", "-", "-"], base}; return {base, c: [name, s.n.toLocaleString("en-IN") + accFew(s.n), "<b>" + accPc(s.w, s.n) + "</b>", accRet(s.avg), isFinite(s.pf) ? s.pf.toFixed(2) : "-", base ? "-" : isFinite(s.t) ? s.t.toFixed(1) + (Math.abs(s.t) >= 2 ? "" : " <small>(not proven)</small>") : "-"]}; };
+      const heads = ["Group", "Trades", "Win rate", "Average per trade (after costs)", "Profit factor", "Edge strength (t)"];
+      const tbl = (title, S, note) => {
+        const yrs = Array.from(new Set(S.all.map(t => t.y))).sort();
+        const rows = [line("<b>Your rules</b>", S.all), line("Same, without the leading-sector rule", S.nosec), line("Every liquid stock, same days (baseline)", S.base, true)].concat(yrs.map(y => line("Your rules in " + y, S.all.filter(t => t.y === y))));
+        return accTable(title, heads, rows, note);
+      };
+      const ex = X.bt.x === "fix" ? "stop 1.1% below, target 1.4% above (your Chartink exit)" : X.bt.x === "cls" ? "no stop or target, sell at the close" : "stop 1.5 daily ATR below the entry, target " + X.F.rr + "x the risk";
+      h += '<p class="note" style="margin:0 0 4px">' + X.syms + " Nifty 500 stocks, daily candles from " + E(X.from) + ". Hold " + X.bt.h + " day" + (X.bt.h > 1 ? "s" : "") + "; exit: " + ex + "; cost " + X.bt.cost + "% per round trip. Rules: close above the previous high, volume above " + X.F.vm + "x its 20-day average, volume over " + f0(X.F.minVol) + ", price over " + X.F.minPx + (X.F.lead ? ", industry in the top " + X.F.lead + " that day" : "") + ".</p>";
+      h += tbl("A. No look-ahead: yesterday's finished candle gives the signal, buy today's open", X.R.prev, "This is the version you could actually trade: the signal is known after the close and you buy next morning. Trust it only if \"Your rules\" beats the baseline row with a t above 2 and holds in most years.");
+      h += tbl("B. With look-ahead: the same day's finished candle, buy the same day's open", X.R.same, "This is what a back-test gets if the daily conditions (close above yesterday's high, volume surge) are checked on a candle that had not finished when you would have bought. It looks far better than it can be traded. The gap between A and B is the look-ahead.");
+    }
+    q.innerHTML = h || '<p class="note" style="margin:0">Not run yet.</p>';
+  }
+  function btHTML() {
+    const bt = btF();
+    return '<details class="accd" data-accd="mbbt" style="margin-top:18px"' + (ACC_OPEN.mbbt ? " open" : "") + '><summary style="cursor:pointer;font-weight:700;font-size:1.1rem;padding:6px 0">Back-test: how these rules did on 5 years of daily candles (tap to open)</summary><div class="card" style="margin-top:6px">' +
+      '<div class="charttools" style="border:0;padding:0;gap:10px 14px"><label>Exit <select id="mbbtx"><option value="atr">Stop 1.5 ATR, target at R multiple</option><option value="fix">Fixed -1.1% / +1.4%</option><option value="cls">Sell at the close</option></select></label>' +
+      '<label>Hold up to <select id="mbbth"><option value="1">1 day</option><option value="3">3 days</option><option value="5">5 days</option><option value="10">10 days</option></select></label>' +
+      '<label>Cost per round trip % <input id="mbbtc" type="number" step="0.05" min="0" style="width:70px" value="' + E(bt.cost) + '"></label>' +
+      '<label>Years <select id="mbbty"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option></select></label>' +
+      '<button type="button" class="cbtn" id="mbbtgo">Run back-test</button></div>' +
+      '<p class="note" style="margin:8px 0 0">Uses the filters set above (volume multiple, minimum volume and price, leading sectors, target R). It loads 5 years of daily candles for the Nifty 500 through your Worker (about 40 requests, one to two minutes the first time), then replays every past day. The wide opening-candle test is not included because Yahoo keeps only about 60 days of 5-minute candles. The stock list is today\'s Nifty 500, so stocks that fell out of the index are missing (survivorship), which flatters results a little. Intraday order is unknown, so a day that touches both stop and target counts as a stop.</p>' +
+      '<div id="mbbtres" style="margin-top:6px"></div></div></details>';
+  }
   function build() {
     const host = $e("#mbbody"); if (!host || built) return; built = true;
     const num = (id, lab, v, st) => '<label>' + lab + ' <input id="' + id + '" type="number" step="' + (st || "any") + '" style="width:84px" value="' + E(v) + '"></label>';
@@ -7907,10 +8033,11 @@ const mbApi = (function () {
       num("mbvm", "Volume x avg over", F.vm, "0.1") + num("mbc15", "15m range % over", F.c15, "0.1") + num("mbc20", "20m range % over", F.c20, "0.1") + num("mbmv", "Min volume", F.minVol, "10000") + num("mbmp", "Min price", F.minPx, "1") + num("mbrr", "Target (R multiple)", F.rr, "0.5") +
       '<label>Leading sectors <select id="mbld"><option value="0">Off</option><option value="3">Top 3</option><option value="5">Top 5</option><option value="8">Top 8</option><option value="12">Top 12</option></select></label>' +
       '<label>Opening candle <select id="mbic"><option value="on">Required</option><option value="off">Show all daily passes</option></select></label>' +
-      '<button type="button" class="cbtn" id="mbrl">&#8635; Reload</button><button type="button" class="cbtn" id="mbcsv">Copy CSV</button></div><div class="note" id="mbstat" style="margin:8px 0 0"></div></div><div id="mbres"></div>';
-    $e("#mbld").value = String(F.lead); $e("#mbun").value = F.uni; $e("#mbic").value = F.ic;
+      '<button type="button" class="cbtn" id="mbrl">&#8635; Reload</button><button type="button" class="cbtn" id="mbcsv">Copy CSV</button></div><div class="note" id="mbstat" style="margin:8px 0 0"></div></div><div id="mbres"></div><div id="mbbt">' + btHTML() + '</div>';
+    $e("#mbld").value = String(F.lead); $e("#mbun").value = F.uni; $e("#mbic").value = F.ic; { const b = btF(); $e("#mbbtx").value = b.x; $e("#mbbth").value = String(b.h); $e("#mbbty").value = String(b.y); btView(); const dd = $e("#mbbt details"); if (dd) dd.addEventListener("toggle", () => { ACC_OPEN.mbbt = dd.open; }); }
     host.addEventListener("input", ev => {
       const t = ev.target; if (!t || !t.id) return; const n = parseFloat(t.value);
+      if (t.id === "mbbtx" || t.id === "mbbth" || t.id === "mbbtc" || t.id === "mbbty") { const b = btF(); if (t.id === "mbbtx") b.x = t.value; else if (t.id === "mbbth") b.h = +t.value || 1; else if (t.id === "mbbty") b.y = +t.value || 5; else if (isFinite(n) && n >= 0) b.cost = n; save(); return; }
       if (t.id === "mbq") F.q = t.value; else if (t.id === "mbvm" && isFinite(n)) F.vm = n; else if (t.id === "mbc15" && isFinite(n)) F.c15 = n; else if (t.id === "mbc20" && isFinite(n)) F.c20 = n; else if (t.id === "mbmv" && isFinite(n)) F.minVol = n; else if (t.id === "mbmp" && isFinite(n)) F.minPx = n; else if (t.id === "mbrr" && isFinite(n) && n > 0) F.rr = n; else if (t.id === "mbun") { F.uni = t.value; OPEN = null; panel(); const l = $e("#mbcul"); if (l) l.style.display = F.uni === "custom" ? "inline-flex" : "none"; loadDaily(false); } else if (t.id === "mbcu") { F.custom = t.value; loadDaily(false); } else if (t.id === "mbld") F.lead = +t.value || 0; else if (t.id === "mbic") F.ic = t.value; else return;
       F.shown = 100; save(); view(); if (OPEN && t.id !== "mbq") { panel(); drawChart(); } if (t.id !== "mbq" && t.id !== "mbcu") stage2();
     });
@@ -7919,6 +8046,7 @@ const mbApi = (function () {
       let b = t.closest("[data-mbtf]"); if (b) { TF = b.dataset.mbtf; panel(); drawChart(); return; }
       if (t.closest("[data-mbx]")) { OPEN = null; panel(); view(); return; }
       if (t.closest("#mbrl")) { I = {}; loadDaily(true); return; }
+      if (t.closest("#mbbtgo")) { btRun(); return; }
       if (t.closest("#mbmore")) { F.shown += 100; view(); return; }
       if (t.closest("#mbcsv")) { const s = csv(), b = t.closest("#mbcsv"); try { navigator.clipboard.writeText(s).then(() => { b.textContent = "Copied"; setTimeout(() => { b.textContent = "Copy CSV"; }, 1500); }, () => { b.textContent = "Copy failed"; }); } catch (e) { b.textContent = "Copy not available"; } return; }
       if (t.closest("a") || t.closest("[data-ind]") || t.closest("#mbpanel") || t.closest(".bmstar") || t.closest("th")) { /* fall through to sort handling below */ }
