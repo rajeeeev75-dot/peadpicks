@@ -7152,6 +7152,10 @@ const ptApi = (function () {
   const KEY = "ptLog", SKEY = "ptSet";
   let LOG = [], SET = {cost: 0.25, ocost: 0, lots: {}};
   try { LOG = JSON.parse(localStorage.getItem(KEY) || "[]") || []; } catch (e) {}
+  /* an empty stop/target was saved as null, and isFinite(null) is true, so such trades were closed by mistake with no exit price: clean them and reopen the wrongly closed ones */
+  LOG.forEach(t => { if (!t) return; ["stop", "target", "exit", "cur"].forEach(k => { if (t[k] === null || t[k] === "") delete t[k]; });
+    if (t.status === "closed" && !isFinite(t.exit) && /^(stop|target)/.test(String(t.reason || ""))) { t.status = "open"; delete t.exitDate; delete t.reason; } });
+  LOG = LOG.filter(t => t && !(t.status === "closed" && !isFinite(t.exit)));
   try { SET = Object.assign(SET, JSON.parse(localStorage.getItem(SKEY) || "{}") || {}); } catch (e) {}
   let Q = {}, QT = 0, BARS = {}, BT = {}, BUSY = {}, MSG = "", JOPEN = false, KIND = "stock", host = null, built = false, TM = null, CID = null, CTF = "D", CH = null, CTOK = 0; const CB = {};
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(LOG)); localStorage.setItem(SKEY, JSON.stringify(SET)); } catch (e) {} };
@@ -7159,9 +7163,10 @@ const ptApi = (function () {
   const $p = s => (host ? host.querySelector(s) : null);
   const nv = id => { const x = $p(id), v = x ? parseFloat(String(x.value).replace(/,/g, "")) : NaN; return isFinite(v) ? v : NaN; };
   const sv = id => { const x = $p(id); return x ? String(x.value).trim() : ""; };
-  const f2 = v => (isFinite(v) ? (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en-IN") : v.toFixed(2)) : "-");
-  const money = v => (isFinite(v) ? (v > 0 ? "+" : v < 0 ? "-" : "") + "Rs " + Math.abs(Math.round(v)).toLocaleString("en-IN") : "-");
-  const pc = v => (isFinite(v) ? (v > 0 ? "+" : "") + v.toFixed(1) + "%" : "-");
+  const fin = v => v !== null && v !== undefined && v !== "" && isFinite(v);
+  const f2 = v => (fin(v) ? (v = +v, Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("en-IN") : v.toFixed(2)) : "-");
+  const money = v => (fin(v) ? (v > 0 ? "+" : v < 0 ? "-" : "") + "Rs " + Math.abs(Math.round(v)).toLocaleString("en-IN") : "-");
+  const pc = v => (fin(v) ? (v > 0 ? "+" : "") + (+v).toFixed(1) + "%" : "-");
   const col = v => (!isFinite(v) ? "" : v > 0 ? "color:var(--good)" : v < 0 ? "color:var(--bad)" : "");
   const mfetch = (u, ms) => { const ctl = typeof AbortController !== "undefined" ? new AbortController() : null, k = setTimeout(() => { if (ctl) ctl.abort(); }, ms || 8000); return fetch(u, {cache: "no-store", signal: ctl ? ctl.signal : undefined}).finally(() => clearTimeout(k)); };
   const stocksOpen = () => LOG.filter(t => t.status === "open" && t.kind === "stock");
@@ -7287,7 +7292,7 @@ const ptApi = (function () {
     }).join("");
   }
   function closedRows() {
-    const c = LOG.filter(t => t.status === "closed").sort((a, b) => (a.exitDate < b.exitDate ? 1 : -1)); if (!c.length) return '<div class="ptempty">No closed trades yet.</div>';
+    const c = LOG.filter(t => t.status === "closed" && fin(t.entry) && fin(t.exit)).sort((a, b) => (a.exitDate < b.exitDate ? 1 : -1)); if (!c.length) return '<div class="ptempty">No closed trades yet.</div>';
     return '<div class="ptcgrid">' + c.map(t => { const p = pnl(t, t.exit), k = p.net > 0 ? "#16a34a" : p.net < 0 ? "#dc2626" : "#94a3b8";
       const card = '<div class="ptcl" style="border-top-color:' + k + '"><div style="display:flex;justify-content:space-between;gap:6px"><b>' + esc(t.sym) + (t.kind === "option" ? " " + esc(t.opt.strike) + " " + esc(t.opt.type) : "") + '</b><span style="color:' + k + ';font-weight:800">' + money(p.net) + '</span></div><div class="note" style="margin:2px 0">' + sideTxt(t) + " · " + f2(t.entry) + " → " + f2(t.exit) + " (" + pc(p.pct) + ')</div><div class="note" style="margin:0">' + esc(t.exitDate || "") + " · " + esc(t.reason || "manual") + (t.tag ? " · " + esc(t.tag) : "") + '</div><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + chartBtn(t) + tvBtn(t) + '<button class="ptdel" data-id="' + esc(t.id) + '" title="delete">✕</button></div></div>'; return card + inlineBox(t, true); }).join("") + "</div>";
   }
@@ -7326,7 +7331,7 @@ const ptApi = (function () {
     }).join("") + "</div>";
   }
   function summary() {
-    const c = LOG.filter(t => t.status === "closed"); if (!c.length) return '<p class="note">Your trade journal appears after your first closed trade.</p>';
+    const c = LOG.filter(t => t.status === "closed" && fin(t.entry) && fin(t.exit)); if (!c.length) return '<p class="note">Your trade journal appears after your first closed trade.</p>';
     const ord = c.slice().sort((a, b) => ((a.exitDate || "") < (b.exitDate || "") ? 1 : -1));
     return '<details class="ptjdet"' + (JOPEN ? " open" : "") + '><summary style="cursor:pointer;font-weight:800;font-size:1.1rem">📒 Trade journal <span class="note" style="margin:0;font-weight:400">' + c.length + (c.length === 1 ? " closed trade" : " closed trades") + "</span></summary>" + journal(ord) + "</details>";
   }
@@ -7335,6 +7340,7 @@ const ptApi = (function () {
     const o = $p("#ptopen"), c = $p("#ptclosed"), s = $p("#ptsum"), m = $p("#ptmsg"), bad = [];
     const run = (label, fn) => { try { fn(); } catch (e) { bad.push(label + ": " + String((e && e.message) || e)); try { console.error("paper trading", label, e); } catch (e2) {} } };   /* one broken part must not stop the rest (starred strip, add button) */
     run("starred stocks", starStrip);
+    run("index strikes", atmStrip);
     run("open positions", () => { if (o) o.innerHTML = openRows(); });
     run("closed trades", () => { if (c) c.innerHTML = closedRows(); });
     run("summary", () => { if (s && !(document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("ptrev"))) s.innerHTML = summary(); });
@@ -7342,9 +7348,26 @@ const ptApi = (function () {
     run("chart", inlineDraw);
     if (m) m.textContent = MSG + (bad.length ? "  [display problem in " + bad.join("; ") + "]" : "");
   }
+  /* index price and at-the-money strike chips: one tap fills the underlying, the strike and the default expiry */
+  const ATMI = [["NIFTY", "NIFTY 50", 50], ["BANKNIFTY", "NIFTY BANK", 100]];
+  function atmStrip() {
+    const el = $p("#ptatm"); if (!el) return; el.style.display = KIND === "option" ? "flex" : "none"; if (KIND !== "option") return;
+    const MM = typeof MARKET !== "undefined" ? MARKET : null, ix = (MM && MM.indices) || [];
+    el.innerHTML = '<span class="note" style="margin:0">Tap to fill:</span>' + ATMI.map(a => {
+      const q = ix.find(x => String(x.name).toUpperCase() === a[1]), sp = q ? +q.last : NaN;
+      if (!isFinite(sp) || !(sp > 0)) return '<button type="button" class="cbtn" disabled style="opacity:.6">' + a[0] + ": price not loaded</button>";
+      const k = Math.round(sp / a[2]) * a[2], exp = ksExpiry(a[0] === "NIFTY" ? "BUF" : "ITM"), pc = isFinite(+q.pct) ? " (" + (q.pct > 0 ? "+" : "") + (+q.pct).toFixed(2) + "%)" : "";
+      return '<button type="button" class="cbtn ptatmchip" data-u="' + a[0] + '" data-k="' + k + '" data-e="' + exp + '" title="Fills ' + a[0] + ', strike ' + k + ' and expiry ' + exp + '"><b>' + a[0] + "</b> " + Math.round(sp).toLocaleString("en-IN") + pc + " &middot; ATM <b>" + k + "</b></button>";
+    }).join("");
+  }
+  function pickAtm(b) {
+    const u = $p("#ptusym"), k = $p("#ptstrike"), e = $p("#ptexp"); if (!u || !k || !e) return;
+    u.value = b.getAttribute("data-u"); k.value = b.getAttribute("data-k"); e.value = b.getAttribute("data-e");
+    u.dispatchEvent(new Event("input", {bubbles: true})); k.dispatchEvent(new Event("input", {bubbles: true})); e.dispatchEvent(new Event("change", {bubbles: true})); preview(); formLive(true);
+  }
   function setKind(k) {
     KIND = k; const a = $p("#ptfs"), b = $p("#ptfo"); if (a) a.style.display = k === "stock" ? "" : "none"; if (b) b.style.display = k === "option" ? "" : "none";
-    host.querySelectorAll(".ptk").forEach(x => x.classList.toggle("on", x.getAttribute("data-k") === k)); const ol = $p("#ptolive"); if (ol) ol.style.display = k === "option" ? "" : "none"; preview(); if (k === "option") formLive(true);
+    host.querySelectorAll(".ptk").forEach(x => x.classList.toggle("on", x.getAttribute("data-k") === k)); const ol = $p("#ptolive"); if (ol) ol.style.display = k === "option" ? "" : "none"; preview(); if (k === "option") formLive(true); atmStrip();
   }
   /* shows value, risk, reward and risk:reward for the trade being typed */
   function preview() {
@@ -7428,7 +7451,7 @@ const ptApi = (function () {
     el.innerHTML = CSS + '<div class="ptwrap"><details id="ptdet" open><summary style="cursor:pointer;font-weight:800;font-size:1.15rem">Paper trading <span class="note" style="margin:0;font-weight:400">stocks and options, no real money</span></summary>' +
       '<div id="ptstar" style="margin:8px 0 10px"></div><div class="ptform"><div class="ptrow"><div class="ptseg"><button type="button" class="ptk on" data-k="stock">Stock</button><button type="button" class="ptk" data-k="option">Option</button></div><span id="ptmsg" class="note" style="margin:0"></span></div>' +
       '<div id="ptfs" class="ptg">' + fld("Symbol", '<input id="ptsym" placeholder="e.g. BSE" autocomplete="off">') + fld("Direction", seg("ptside", ["long", "Buy"], ["short", "Short"], ["buy", "sell"])) + fld("Quantity", inp("ptqty", "Shares")) + fld("Entry price", inp("ptentry", "blank = live")) + fld("Stop", inp("ptstop", "optional")) + fld("Target", inp("pttgt", "optional")) + "</div>" +
-      '<div id="ptfo" class="ptg" style="display:none">' + fld("Underlying", '<input id="ptusym" placeholder="NIFTY" value="NIFTY">') + fld("Type", seg("ptot", ["CE", "Call (CE)"], ["PE", "Put (PE)"], ["buy", "sell"])) + fld("Strike", inp("ptstrike", "e.g. 24500")) + fld("Expiry", '<input id="ptexp" type="date">') + fld("Direction", seg("ptoside", ["buy", "Buy"], ["sell", "Sell"], ["buy", "sell"])) + fld("Lots", inp("ptlots", "1")) + fld("Lot size", inp("ptlotsz", "units per lot")) + fld("Entry premium", inp("ptprem", "Rs")) + fld("Stop premium", inp("ptostop", "optional")) + fld("Target premium", inp("ptotgt", "optional")) + "</div>" +
+      '<div id="ptatm" class="ptrow" style="display:none;margin:4px 0 8px;gap:8px;flex-wrap:wrap"></div>' + '<div id="ptfo" class="ptg" style="display:none">' + fld("Underlying", '<input id="ptusym" placeholder="NIFTY" value="NIFTY">') + fld("Type", seg("ptot", ["CE", "Call (CE)"], ["PE", "Put (PE)"], ["buy", "sell"])) + fld("Strike", inp("ptstrike", "e.g. 24500")) + fld("Expiry", '<input id="ptexp" type="date">') + fld("Direction", seg("ptoside", ["buy", "Buy"], ["sell", "Sell"], ["buy", "sell"])) + fld("Lots", inp("ptlots", "1")) + fld("Lot size", inp("ptlotsz", "units per lot")) + fld("Entry premium", inp("ptprem", "Rs")) + fld("Stop premium", inp("ptostop", "optional")) + fld("Target premium", inp("ptotgt", "optional")) + "</div>" +
       '<div id="ptolive" class="note" style="display:none;margin:6px 0 4px"></div>' +
       '<div id="ptprev" class="ptprev"></div><div class="ptg" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:0">' + fld("Tag", '<input id="pttag" placeholder="e.g. Concall Good">') + fld("Note", '<input id="ptnote" placeholder="why this trade">') + '<div style="display:flex;align-items:flex-end"><button id="ptadd" class="ptadd" type="button">Add paper trade</button></div></div></div>' +
       '<div class="pth">Open positions</div><div id="ptopen"></div><div class="pth">Closed trades</div><div id="ptclosed"></div><div id="ptsum" style="margin-top:14px"></div>' +
@@ -7436,6 +7459,7 @@ const ptApi = (function () {
     el.addEventListener("click", ev => {
       const t = ev.target && ev.target.closest ? ev.target.closest("button") : null; if (!t || !t.classList) return;
       if (t.classList.contains("ptstarchip")) { pickStar(t.getAttribute("data-sym")); return; }
+      if (t.classList.contains("ptatmchip")) { pickAtm(t); return; }
       if (t.id === "ptadd") addTrade(); else if (t.classList.contains("ptk")) setKind(t.getAttribute("data-k"));
       else if (t.classList.contains("ptsg")) { const h = $p("#" + t.getAttribute("data-for")); if (h) h.value = t.getAttribute("data-v"); t.parentNode.querySelectorAll(".ptsg").forEach(x => x.classList.toggle("on", x === t)); preview(); }
       else if (t.classList.contains("ptcls")) closeTrade(t.getAttribute("data-id")); else if (t.classList.contains("ptupd")) updatePrem(t.getAttribute("data-id"));
@@ -8234,6 +8258,16 @@ function render(stocks) {
   if (curTk) { const m = rows.find(x => x.s.ticker === curTk); if (m) current = m.id; }
   paintAllNews(); paintAllPead();
   document.querySelectorAll("#tabs button, #side button").forEach(b => b.addEventListener("click", () => show(b.dataset.t)));
+  /* the 123 tab can be hidden (hidden by default) and brought back with the "+ 123" button at the end of the tab bar */
+  try {
+    const hid = () => { try { return localStorage.getItem("hide123") !== "0"; } catch (e) { return true; } }, setH = v => { try { localStorage.setItem("hide123", v ? "1" : "0"); } catch (e) {} };
+    const bring = document.createElement("button"); bring.type = "button"; bring.id = "tg123"; bring.textContent = "+ 123"; bring.title = "Show the 123 tab again"; bring.style.cssText = "opacity:.7;font-size:.8em"; tabs.appendChild(bring);
+    const bar = document.createElement("div"); bar.style.cssText = "margin:0 0 8px;text-align:right"; bar.innerHTML = '<button type="button" class="cbtn" id="hd123">Hide this tab</button>'; const rmS = document.getElementById("rm"); if (rmS) rmS.insertBefore(bar, rmS.firstChild);
+    const apply = () => { const h = hid(); document.querySelectorAll('#tabs button[data-t="rm"], #side button[data-t="rm"]').forEach(b => { b.style.display = h ? "none" : ""; }); bring.style.display = h ? "" : "none"; if (h && current === "rm") show("ov"); };
+    bring.addEventListener("click", () => { setH(false); apply(); show("rm"); });
+    bar.querySelector("#hd123").addEventListener("click", () => { setH(true); apply(); show("ov"); window.scrollTo({top: 0}); });
+    apply();
+  } catch (e) {}
   try { const mq = window.matchMedia("(min-width:1000px)"), sd = document.getElementById("sided"); if (sd) { if (mq.matches) sd.open = true; else if (!sd.dataset.init) { sd.open = false; sd.dataset.init = "1"; } if (!window.__sideMq) { window.__sideMq = 1; mq.addEventListener("change", e => { const d = document.getElementById("sided"); if (d) d.open = e.matches; }); } } } catch (e) {}
   views.querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => { show(tr.dataset.go); window.scrollTo({top: 0, behavior: "smooth"}); }));
   views.querySelectorAll(".pos input").forEach(inp => inp.addEventListener("input", () => {
