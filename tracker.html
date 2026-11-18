@@ -2242,7 +2242,11 @@ const rowFor = tk => (symTk(tk) ? niftyRow() : lastRows.find(x => x.s.ticker ===
 const histKey = tk => { if (!symTk(tk)) return String(tk).toUpperCase(); const r = niftyRow(); return r ? String(r.s.ticker).toUpperCase() : "NIFTY"; };
 const isNiftyTk = tk => /^(INDEXNSE:NIFTY_50|NSE:NIFTY|NSE:NIFTY50|NIFTY|NIFTY_50)$/i.test(String(tk || ""));
 /* Smileys you type in the Symbols tab of your sheet (one row per date: one Up/Down, then up to 3 symbols). They override the built-in history for that date. */
-let SHEET_SYM = {}, symSheetState = "";
+/* symbols kept inside the page: SYM_BUILT is written into this file; SYM_ARCH is kept in this browser every time the sheet loads, so a symbol stays even after it is removed from the sheet. The sheet still wins for a date it lists. */
+const SYM_BUILT = {};
+let SYM_ARCH = {}; try { const v = JSON.parse(localStorage.getItem("symArch") || "{}"); if (v && typeof v === "object" && !Array.isArray(v)) SYM_ARCH = v; } catch (e) {}
+const symMerge = fresh => Object.assign({}, SYM_BUILT, SYM_ARCH, fresh || {});
+let SHEET_SYM = symMerge(), symSheetState = "";
 const SYM_EMO = {BS: "\u{1F916}", R: "\u{1F621}", V: "\u{1F47F}", Y: "\u{1F600}", B: "\u{1F60D}", HB: "\u{1F402}", HR: "\u{1F43B}", IC: "\u{1F368}", S: "\u2B50", F: "\u26BD", OL: "O=L", OH: "O=H"}, ARW = {AR: ["▲", "▼"], WA: ["△", "▽"], BA: ["⬆", "⬇", "#2563eb"], YA: ["↑", "↓", "#ca8a04"]};
 /* extra symbols typed in the Symbols tab: Z, Eye, GF1-4, RF1-4, Yellow P, White P, IB, ST, PS, PR, Hanging man */
 const symExtra = t => {
@@ -2278,8 +2282,8 @@ async function loadSymSheet() {
   if (!SYMBOLS_CSV_URL) return;
   try {
     const r = await fetch(SYMBOLS_CSV_URL, {cache: "no-store"}); if (!r.ok) throw new Error("HTTP " + r.status);
-    SHEET_SYM = parseSymSheet(await r.text()); symSheetState = "ok";
-  } catch (e) { symSheetState = "error"; }
+    const got = parseSymSheet(await r.text()); if (Object.keys(got).length) { Object.assign(SYM_ARCH, got); try { localStorage.setItem("symArch", JSON.stringify(SYM_ARCH)); } catch (e) {} } SHEET_SYM = symMerge(got); symSheetState = "ok";
+  } catch (e) { symSheetState = "error"; SHEET_SYM = symMerge(); }
   try { Object.keys(CH).forEach(tk => applySymbols(tk)); } catch (e) {}
   try { ksPaint(); } catch (e) {}
 }
@@ -2306,7 +2310,7 @@ function symMarkers(bars) {
   return out;
 }
 function symRowHTML() {
-  return '<div class="symrow"><span class="note">Show:</span>' + SYM_LIST.map(x => '<button type="button" class="cbtn sy" data-symk="' + x[0] + '" aria-pressed="' + !!SYM_SEL[x[0]] + '">' + x[1] + "</button>").join("") + '<button type="button" class="cbtn" data-symall="1">All</button><button type="button" class="cbtn" data-symall="0">None</button></div>';
+  return '<div class="symrow"><span class="note">Show:</span>' + SYM_LIST.map(x => '<button type="button" class="cbtn sy" data-symk="' + x[0] + '" aria-pressed="' + !!SYM_SEL[x[0]] + '">' + x[1] + "</button>").join("") + '<button type="button" class="cbtn" data-symall="1">All</button><button type="button" class="cbtn" data-symall="0">None</button><button type="button" class="cbtn" data-symcopy="1" title="Copies every symbol saved in this page (built in, sheet and remembered ones) so it can be pasted into the file for good">Copy saved symbols</button></div>';
 }
 function applySymbols(tk) {
   const s = CH[tk]; if (!s || !symTk(tk)) return;
@@ -2362,6 +2366,7 @@ function emptyMessage(tk) {
 function setupToolbar(slot, tk) {
   const saveSel = () => { try { localStorage.setItem("symSel", JSON.stringify(SYM_SEL)); } catch (e) {} applySymbols(tk); };
   slot.querySelectorAll("[data-symk]").forEach(b => b.addEventListener("click", () => { SYM_SEL[b.dataset.symk] = !SYM_SEL[b.dataset.symk]; saveSel(); }));
+  slot.querySelectorAll("[data-symcopy]").forEach(b => b.addEventListener("click", () => { const txt = "const SYM_BUILT = " + JSON.stringify(symMerge(SHEET_SYM)) + ";"; const done = m => { b.textContent = m; setTimeout(() => { b.textContent = "Copy saved symbols"; }, 1800); }; try { navigator.clipboard.writeText(txt).then(() => done("Copied"), () => done("Copy failed")); } catch (e) { done("Copy failed"); } }));
   slot.querySelectorAll("[data-symall]").forEach(b => b.addEventListener("click", () => { SYM_LIST.forEach(x => SYM_SEL[x[0]] = b.dataset.symall === "1" && !/^[SF]$/.test(x[0])); saveSel(); }));
   slot.querySelectorAll(".cbtn[data-sym]").forEach(b => b.addEventListener("click", () => { SYM_ON = !SYM_ON; try { localStorage.setItem("symOn", SYM_ON ? "1" : "0"); } catch (e) {} applySymbols(tk); }));
   slot.querySelectorAll(".cbtn[data-r]").forEach(b => b.addEventListener("click", () => {
