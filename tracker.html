@@ -7380,6 +7380,12 @@ const ptApi = (function () {
   }
   /* index price and at-the-money strike chips: one tap fills the underlying, the strike and the default expiry */
   const ATMI = [["NIFTY", "NIFTY 50", 50], ["BANKNIFTY", "NIFTY BANK", 100]];
+  const tvOpt = (sym, exp, type, k) => { const e = String(exp || ""); if (!/^\d{4}-\d\d-\d\d$/.test(e) || !(k > 0) || !sym) return ""; return "https://www.tradingview.com/chart/?symbol=" + encodeURIComponent("NSE:" + String(sym).toUpperCase().replace(/[&-]/g, "_") + e.slice(2, 4) + e.slice(5, 7) + e.slice(8, 10) + (type === "PE" ? "P" : "C") + Math.round(k)); };
+  function tvUpdate() {
+    const el = $p("#pttv"); if (!el) return; if (KIND !== "option") { el.style.display = "none"; return; }
+    const sym = sv("#ptusym").toUpperCase(), type = sv("#ptot") === "PE" ? "PE" : "CE", k = nv("#ptstrike"), u = tvOpt(sym, sv("#ptexp"), type, k);
+    if (!u) { el.style.display = "none"; return; } el.style.display = ""; el.innerHTML = '<a class="tvl" href="' + u + '" target="_blank" rel="noopener">Open ' + esc(sym) + " " + Math.round(k) + " " + type + ' in TradingView &#8599;</a>';
+  }
   function atmStrip() {
     const el = $p("#ptatm"); if (!el) return; el.style.display = KIND === "option" ? "flex" : "none"; if (KIND !== "option") return;
     const MM = typeof MARKET !== "undefined" ? MARKET : null, ix = (MM && MM.indices) || [];
@@ -7387,7 +7393,7 @@ const ptApi = (function () {
       const q = ix.find(x => String(x.name).toUpperCase() === a[1]), sp = q ? +q.last : NaN;
       if (!isFinite(sp) || !(sp > 0)) return '<button type="button" class="cbtn" disabled style="opacity:.6">' + a[0] + ": price not loaded</button>";
       const k = Math.round(sp / a[2]) * a[2], exp = ksExpiry(a[0] === "NIFTY" ? "BUF" : "ITM"), pc = isFinite(+q.pct) ? " (" + (q.pct > 0 ? "+" : "") + (+q.pct).toFixed(2) + "%)" : "";
-      return '<button type="button" class="cbtn ptatmchip" data-u="' + a[0] + '" data-k="' + k + '" data-e="' + exp + '" title="Fills ' + a[0] + ', strike ' + k + ' and expiry ' + exp + '"><b>' + a[0] + "</b> " + Math.round(sp).toLocaleString("en-IN") + pc + " &middot; ATM <b>" + k + "</b></button>";
+      return '<button type="button" class="cbtn ptatmchip" data-u="' + a[0] + '" data-k="' + k + '" data-e="' + exp + '" title="Fills ' + a[0] + ', strike ' + k + ' and expiry ' + exp + '"><b>' + a[0] + "</b> " + Math.round(sp).toLocaleString("en-IN") + pc + " &middot; ATM <b>" + k + "</b></button>" + '<a class="tvl" style="font-size:.85rem" target="_blank" rel="noopener" href="' + tvOpt(a[0], exp, "CE", k) + '" title="' + a[0] + " " + k + ' CE on TradingView">CE&#8599;</a><a class="tvl" style="font-size:.85rem" target="_blank" rel="noopener" href="' + tvOpt(a[0], exp, "PE", k) + '" title="' + a[0] + " " + k + ' PE on TradingView">PE&#8599;</a>';
     }).join("");
   }
   function pickAtm(b) {
@@ -7401,6 +7407,7 @@ const ptApi = (function () {
   }
   /* shows value, risk, reward and risk:reward for the trade being typed */
   function preview() {
+    try { tvUpdate(); } catch (e) {}
     const el = $p("#ptprev"); if (!el) return; { const fm = $p(".ptform"); if (fm) fm.classList.toggle("sell", KIND === "stock" ? sv("#ptside") === "short" : sv("#ptoside") === "sell"); } let ep, qty, stop, tg, long;
     if (KIND === "stock") { ep = nv("#ptentry"); const sym = sv("#ptsym").toUpperCase().replace(/^(NSE|BSE):/, ""); if (!isFinite(ep) && sym) ep = last(sym); qty = nv("#ptqty"); stop = nv("#ptstop"); tg = nv("#pttgt"); long = sv("#ptside") !== "short"; }
     else { ep = nv("#ptprem"); qty = nv("#ptlots") * nv("#ptlotsz"); stop = nv("#ptostop"); tg = nv("#ptotgt"); long = sv("#ptoside") !== "sell"; }
@@ -7482,7 +7489,7 @@ const ptApi = (function () {
       '<div id="ptstar" style="margin:8px 0 10px"></div><div class="ptform"><div class="ptrow"><div class="ptseg"><button type="button" class="ptk on" data-k="stock">Stock</button><button type="button" class="ptk" data-k="option">Option</button></div><span id="ptmsg" class="note" style="margin:0"></span></div>' +
       '<div id="ptfs" class="ptg">' + fld("Symbol", '<input id="ptsym" placeholder="e.g. BSE" autocomplete="off">') + fld("Direction", seg("ptside", ["long", "Buy"], ["short", "Short"], ["buy", "sell"])) + fld("Quantity", inp("ptqty", "Shares")) + fld("Entry price", inp("ptentry", "blank = live")) + fld("Stop", inp("ptstop", "optional")) + fld("Target", inp("pttgt", "optional")) + "</div>" +
       '<div id="ptatm" class="ptrow" style="display:none;margin:4px 0 8px;gap:8px;flex-wrap:wrap"></div>' + '<div id="ptfo" class="ptg" style="display:none">' + fld("Underlying", '<input id="ptusym" placeholder="NIFTY" value="NIFTY">') + fld("Type", seg("ptot", ["CE", "Call (CE)"], ["PE", "Put (PE)"], ["buy", "sell"])) + fld("Strike", inp("ptstrike", "e.g. 24500")) + fld("Expiry", '<input id="ptexp" type="date">') + fld("Direction", seg("ptoside", ["buy", "Buy"], ["sell", "Sell"], ["buy", "sell"])) + fld("Lots", inp("ptlots", "1")) + fld("Lot size", inp("ptlotsz", "units per lot")) + fld("Entry premium", inp("ptprem", "Rs")) + fld("Stop premium", inp("ptostop", "optional")) + fld("Target premium", inp("ptotgt", "optional")) + "</div>" +
-      '<div id="ptolive" class="note" style="display:none;margin:6px 0 4px"></div>' +
+      '<div id="ptolive" class="note" style="display:none;margin:6px 0 4px"></div><div id="pttv" class="note" style="display:none;margin:0 0 6px"></div>' +
       '<div id="ptprev" class="ptprev"></div><div class="ptg" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:0">' + fld("Tag", '<input id="pttag" placeholder="e.g. Concall Good">') + fld("Note", '<input id="ptnote" placeholder="why this trade">') + '<div style="display:flex;align-items:flex-end"><button id="ptadd" class="ptadd" type="button">Add paper trade</button></div></div></div>' +
       '<div class="pth">Open positions</div><div id="ptopen"></div><div class="pth">Closed trades</div><div id="ptclosed"></div><div id="ptsum" style="margin-top:14px"></div>' +
       '</details></div>';
