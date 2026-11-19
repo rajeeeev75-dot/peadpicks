@@ -1328,6 +1328,89 @@ GD.str.push({g: "Monthly sell", k: "mo1", n: "Option selling: monthly expiry (20
 "#Rule 3 (a): direction change the next day", "If the immediate next day there is a Bro Smiley / Yellow Smiley / Violet Smiley, the direction needs to change. Exit the sell CE trade and sell a PE (bullish trade), and continue the trade until monthly expiry.",
 "#Rule 3 (b): direction change after a few days", "After a few days, if there is a Yellow Smiley / Violet Smiley Support, the direction needs to change. Exit the sell CE trade and sell a PE (bullish trade), and continue the trade until monthly expiry.",
 "#Note", "The same strategy rules hold true for Monthly Support as well."]});
+GSG["Strategy-4 (DS0 + Smiley Bro)"] = "Strategy-4"; GSG["Nana strategy"] = "Nana";
+GD.str.push({g: "Strategy-4 (DS0 + Smiley Bro)", k: "s4", n: "Strategy-4: DS0 + Smiley Bro", l: [
+"#Day-1", "When DS0 is generated along with a Brother Smiley Resistance. Do not consider it if it is an expiry day.",
+"#Day-2", "GREEN candle: buy CE.",
+"#Bullish entry", "Buy CE, OTM one strike away (example: market at 23890, take 24000 CE). Current week expiry.",
+"#Day-3", "RED candle that breaks the Day-2 green candle low: sell (close) the CE and buy PE.",
+"#Bearish entry", "Close the CE and buy PE, OTM one strike away (example: market at 23890, take 23800 PE). Next week expiry.",
+"#Exit target", "Exit once 100% is achieved."]});
+GD.str.push({g: "Nana strategy", k: "na1", n: "Nana candle strategy (buy, sell and reverse)", l: [
+"#1. Signal candle (Nana candle)", "Identify a Nana candle on the Daily timeframe. A Nana candle is always generated for a Buy entry (a Sell entry is only triggered on reversal, as in rule 4). This is your reference candle.",
+"#2. Buy entry rule", "Enter BUY when a green candle breaks the high of the Nana candle. Entry = break of the Nana high. Stop loss = low of the Nana candle.",
+"#3. Sell entry rule (reverse logic)", "Enter SELL when a red candle breaks the low of the Nana candle. Stop loss = high of the Nana candle.",
+"#4. Reverse trade rule (important)", "If you are in BUY and the low of the Nana breaks: exit BUY and immediately enter SELL.",
+"Before the day closes, if the current candle moves back above the low of the Nana candle, exit the SELL and re-enter BUY. Otherwise wait for the next day: re-enter only if the next day candle opens above the low of the Nana candle.",
+"This makes it a continuous reversal strategy.",
+"#5. Stop loss trailing rule", "When a new Nana candle forms, update the stop loss to the low of the new Nana (for BUY) or the high of the new Nana (for SELL).",
+"#6. Exit rules", "For BUY: exit when a candle forms with Open = High.", "For SELL: exit when a candle forms with Open = Low."]});
+GGRP.push(["strat4", "4️⃣", "Strategy-4", ["s4"]], ["nana", "\u{1F56F}️", "Nana strategy", ["na1"]], ["cup", "☕", "Cup and handle", ["cp1", "cp2", "cp3", "cp4"]]);
+Object.assign(GSE, {s4: "4️⃣", na1: "\u{1F56F}️", cp1: "☕", cp2: "\u{1F3AF}", cp3: "✅", cp4: "⛔"});
+Object.assign(GSN, {s4: "DS0 + Bro", na1: "Nana rules", cp1: "The pattern", cp2: "Entry, stop, target", cp3: "Checklist", cp4: "Skip when"});
+GD.str.push({g: "Cup and handle", k: "cp1", n: "Cup and handle: the pattern", l: [
+"#What it is", "A bullish continuation base. A stock rises, pulls back in a rounded U shape (the cup), climbs back close to its old high (the right rim), then makes a small, quiet pullback (the handle) before it breaks out.",
+"#Parts of the pattern",
+"Prior uptrend: the stock rose at least 25% before the base started.",
+"Left rim: the high where the pullback begins.",
+"Cup: a rounded U, 12% to 40% deep measured from the left rim (up to 55% on very long weekly or monthly bases). A sharp V does not count.",
+"Right rim: price climbs back to within 90% to 108% of the left rim.",
+"Handle: a short pullback of up to 15% (best 3% to 12%) that stays in the upper half of the cup, ideally on lower volume.",
+"Length: usually 7 weeks or longer for the cup. Longer bases score higher in the Cup & Handle tab.",
+"#Timeframes", "Daily, weekly or monthly candles, the same as the Cup & Handle tab. A weekly or monthly cup is a bigger, slower trade.",
+"#Why it works", "Holders who bought near the left rim sell at breakeven when price returns to the right rim. The handle shakes out the last weak holders. When the selling is used up, price breaks out on strong volume.",
+"#Source", "Standard cup and handle rules (William O'Neil), matched to the Cup & Handle tab. If the video you shared uses different numbers, tell me and I will change them."]});
+GD.str.push({g: "Cup and handle", k: "cp2", n: "Cup and handle: entry, stop, target", l: [
+"#Entry (the pivot)", "Buy when price closes above the high of the right rim with volume at least 1.5 times its recent average. A breakout on weak volume is lower quality. Do not chase far above the pivot (about 5% is the usual limit).",
+"#Stop loss", "Just below the low of the handle. The Cup & Handle tab uses the handle low as the stop. If the handle is deep, the risk is large: reduce the quantity or skip the trade.",
+"#Target", "Pivot plus the depth of the cup (rim minus the bottom of the cup). This is the measured move the tab shows.",
+"#Quantity", "Decide the rupee loss you accept first. Quantity = that loss divided by (entry minus stop).",
+"#Exit early", "Exit if price closes back below the pivot soon after the breakout, because that is a failed breakout.",
+"#Check the history", "Open the back-test table at the bottom of the Cup & Handle tab to see how these trades did on past candles before you trust a setup."]});
+GD.str.push({g: "Cup and handle", k: "cp3", n: "Cup and handle: quality checklist", l: [
+"#Before you buy, tick these",
+"Prior uptrend of 25% or more before the cup.",
+"Price is above its 200-day average (the tab adds points for this).",
+"The cup is rounded: price spent time near the bottom, not a quick V.",
+"Right rim is within 90% to 108% of the left rim.",
+"Handle is 3% to 12% deep, stays in the upper half of the cup, and its volume is below the 50-day average (the tab treats under 0.8 times as a good dry-up).",
+"Breakout candle has volume of 1.5 times the 20-day average or more.",
+"The broad market and the stock's sector are not falling.",
+"#Score", "The Cup & Handle tab scores the rim match, depth, roundness, handle depth, volume dry-up, 200-day trend, breakout volume and cup length out of 100. Higher is cleaner, but it is not a promise."]});
+GD.str.push({g: "Cup and handle", k: "cp4", n: "Cup and handle: when to skip it", l: [
+"#Skip the trade when",
+"The cup is a V: price fell and rose back fast with no rounding.",
+"The handle is deeper than about 15%, or its low drops into the lower half of the cup.",
+"The right rim is well below the left rim (under 90%), or far above it (over 108%).",
+"The breakout comes on weak volume.",
+"Price is already more than about 5% above the pivot.",
+"The market is in a falling phase or the stock's sector is weak.",
+"There was no prior uptrend, so the pattern is just a bounce in a downtrend."]});
+GFXF.cp1 = () => { const X = GX; return X.sv(560, 230, X.bx(6, 6, 548, 218, X.nl) + X.tx(20, 24, "CUP AND HANDLE: THE PARTS", {a: "start", b: 1, c: "var(--a)", s: 11}) +
+  X.ln(34, 150, 62, 74, X.G) + '<polygon points="62,74 54,84 66,86" fill="' + X.G + '"/>' + X.tx(14, 168, "Prior uptrend", {a: "start", s: 10.5, c: X.G, b: 1}) + X.tx(14, 181, "(25% or more)", {a: "start", s: 10, c: X.G}) +
+  '<path d="M62,74 C74,150 150,178 245,178 C340,178 424,150 438,76" fill="none" stroke="' + X.I + '" stroke-width="3" stroke-linecap="round"/>' +
+  '<path d="M438,76 L456,96 L474,102 L492,92 L506,80" fill="none" stroke="' + X.I + '" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
+  X.cd(524, 42, 84, 50, 78, true) + X.ln(62, 74, 540, 74, X.R, "5 4") +
+  X.tx(62, 62, "Left rim", {s: 10.5, c: X.I, b: 1}) + X.tx(438, 62, "Right rim", {s: 10.5, c: X.I, b: 1}) + X.tx(492, 120, "Handle", {s: 10.5, c: X.I, b: 1}) + X.tx(492, 133, "(up to 15%)", {s: 10, c: X.I}) +
+  X.tx(245, 200, "Cup: rounded U, 12% to 40% deep", {s: 10.5, c: X.I, b: 1}) + X.tx(300, 90, "Pivot = high of the right rim", {s: 10.5, c: X.R, b: 1}) + X.tx(524, 34, "Breakout", {s: 10.5, c: X.G, b: 1})); };
+GFXF.cp2 = () => { const X = GX; let vol = ""; [[34, 14], [52, 16], [70, 13], [88, 12], [106, 10], [124, 8], [142, 8], [160, 7], [178, 8], [196, 9], [214, 11], [232, 13], [250, 15]].forEach(b => { vol += '<rect x="' + (b[0] - 5) + '" y="' + (250 - b[1]) + '" width="10" height="' + b[1] + '" fill="color-mix(in srgb,var(--mute) 55%,var(--card))"/>'; });
+  [[276, 6], [292, 5], [308, 5], [324, 6], [340, 7]].forEach(b => { vol += '<rect x="' + (b[0] - 5) + '" y="' + (250 - b[1]) + '" width="10" height="' + b[1] + '" fill="color-mix(in srgb,var(--mute) 40%,var(--card))"/>'; });
+  vol += '<rect x="363" y="' + (250 - 34) + '" width="10" height="34" fill="' + X.G + '"/>';
+  return X.sv(560, 262, X.bx(6, 6, 548, 250, X.nl) + X.tx(20, 24, "CUP AND HANDLE: ENTRY, STOP, TARGET", {a: "start", b: 1, c: "var(--a)", s: 11}) +
+  '<path d="M24,84 C34,138 92,146 142,146 C192,146 250,124 262,84" fill="none" stroke="' + X.I + '" stroke-width="3" opacity=".55" stroke-linecap="round"/>' +
+  '<path d="M262,84 L284,100 L304,108 L324,98 L340,86" fill="none" stroke="' + X.I + '" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
+  X.cd(368, 56, 94, 62, 88, true) + X.ln(262, 84, 548, 84, X.I, "5 4") + X.tx(268, 76, "Pivot", {a: "start", s: 10.5, c: X.I, b: 1}) +
+  X.ln(262, 118, 548, 118, X.R) + X.tx(548, 132, "Stop: just below the handle low", {a: "end", s: 10.5, c: X.R, b: 1}) +
+  X.ln(262, 38, 548, 38, X.G, "5 4") + X.tx(548, 32, "Target: pivot + cup depth", {a: "end", s: 10.5, c: X.G, b: 1}) +
+  X.bx(392, 91, 150, 22, X.gl, X.G) + X.tx(467, 106, "BUY: close above pivot", {b: 1, c: X.G, s: 10.5}) +
+  X.ln(22, 84, 22, 146, X.mute || "var(--mute)") + X.tx(30, 118, "depth", {a: "start", s: 10, c: "var(--mute)"}) +
+  X.tx(150, 168, "Cup", {s: 10.5, c: X.I, b: 1}) + X.tx(310, 168, "Handle", {s: 10.5, c: X.I, b: 1}) + X.tx(368, 168, "Breakout", {s: 10.5, c: X.G, b: 1}) +
+  X.tx(20, 188, "Volume", {a: "start", s: 10.5, c: X.I, b: 1}) + X.tx(310, 198, "dries up in the handle", {s: 10, c: "var(--mute)"}) + X.tx(548, 222, "1.5x or more on the breakout", {a: "end", s: 10, c: X.G, b: 1}) + vol + X.ln(20, 250, 548, 250, "var(--mute)")); };
+GFXF.cp4 = () => { const X = GX, bad = (x, y) => '<text x="' + x + '" y="' + y + '" font-size="20" text-anchor="middle" fill="' + X.R + '" font-weight="700">✕</text>';
+  return X.sv(560, 190, X.bx(6, 6, 548, 178, X.rl) + X.tx(20, 24, "SKIP THESE", {a: "start", b: 1, c: X.R, s: 11}) +
+  X.bx(16, 36, 166, 138, "var(--card)", "var(--line)") + '<path d="M30,66 L99,140 L168,66" fill="none" stroke="' + X.I + '" stroke-width="3" stroke-linejoin="round"/>' + X.tx(99, 160, "V shape, no rounding", {s: 10.5, c: X.I, b: 1}) + bad(160, 56) +
+  X.bx(197, 36, 166, 138, "var(--card)", "var(--line)") + '<path d="M210,66 C216,108 238,120 270,120 C298,120 314,104 322,68 L336,138" fill="none" stroke="' + X.I + '" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' + X.tx(280, 160, "Handle too deep", {s: 10.5, c: X.I, b: 1}) + bad(344, 56) +
+  X.bx(378, 36, 166, 138, "var(--card)", "var(--line)") + '<path d="M392,96 L430,96 L452,76 L470,66" fill="none" stroke="' + X.I + '" stroke-width="3" stroke-linejoin="round"/>' + X.ln(392, 142, 530, 142, "var(--mute)") + '<rect x="410" y="132" width="9" height="10" fill="var(--mute)"/><rect x="430" y="134" width="9" height="8" fill="var(--mute)"/><rect x="466" y="134" width="9" height="8" fill="' + X.R + '"/>' + X.ln(392, 124, 520, 124, "var(--mute)", "3 3") + X.tx(461, 160, "Breakout on weak volume", {s: 10.5, c: X.I, b: 1}) + bad(524, 56)); };
 GFXF.mo1 = () => { const X = GX; return X.sv(560, 150, X.bx(6, 6, 548, 138, X.nl) + X.tx(20, 22, "MONTHLY SELL: RULE 1 EXAMPLE", {a: "start", b: 1, c: "var(--a)", s: 11}) + X.ln(120, 52, 300, 52, X.R) + X.tx(110, 56, "24000", {a: "end", s: 11, c: X.I, b: 1}) + X.tx(310, 56, "high of the Violet / Yellow Smiley candle", {a: "start", s: 10.5, c: X.R}) + X.cd(36, 44, 100, 54, 92, false) + '<text x="36" y="42" font-size="16" text-anchor="middle">\u{1F600}</text>' + X.ln(120, 100, 300, 100, X.G) + X.tx(110, 104, "23800", {a: "end", s: 11, c: X.I, b: 1}) + X.bx(310, 86, 230, 26, X.gl, X.G) + X.tx(425, 103, "SELL 23800 CE (200 ITM, monthly)", {b: 1, c: X.G, s: 11}) + X.tx(20, 134, "Exit: full premium at expiry, or 80% recovered in 1 to 2 weeks", {a: "start", s: 10.5, c: X.I})); };
 function guideBody() {
   let h = '<div class="gbar"><div class="gtabs"><button type="button" class="cbtn" data-gtab="sym" aria-pressed="' + (GD_TAB === "sym") + '">Symbols</button><button type="button" class="cbtn" data-gtab="str" aria-pressed="' + (GD_TAB === "str") + '">Strategies</button></div><div class="gchips">';
@@ -2284,7 +2367,7 @@ function parseSymSheet(text) {
   const out = {};
   parseCSV(text).slice(1).forEach(r => {
     const d = symIso(r[0]); if (!d) return;
-    const dir = /^\s*up/i.test(r[1]) ? 1 : /^\s*down/i.test(r[1]) ? 2 : 0, list = [];   // one Up/Down for the date, then up to 3 symbols
+    const dir = /^\s*(up|sup)/i.test(r[1]) ? 1 : /^\s*(down|res)/i.test(r[1]) ? 2 : 0, list = [];   // Up or Support = 1, Down or Resistance = 2   // one Up/Down for the date, then up to 3 symbols
     if (dir) for (let i = 2; i < r.length; i++) { const bm = String(r[i] || "").trim().match(/^(?:bp\s*)?([0-8])$/i); if (bm) { if (!list.some(e => e.k === "BP")) list.push({k: "BP", n: +bm[1], d: dir}); continue; } const ex = symExtra(r[i]); if (ex) { if (!list.some(e => e.k === ex.k && e.n === ex.n)) list.push(Object.assign({d: dir}, ex)); continue; } const k = symKeyOf(r[i]); if (k && !list.some(e => e.k === k)) list.push({k, d: dir}); }
     if (list.length) out[d] = list;
   });
