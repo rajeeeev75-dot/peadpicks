@@ -1783,6 +1783,24 @@ function ksAutoStatus() {
 const ksHid = r => !!(KS.hide && KS.hide[r.rule === "ITM" ? "m" : "w"]);
 function ksShowBar() { const hd = KS.hide || {}; if (!hd.m && !hd.w) return ""; return '<div class="ksctl" style="margin-top:8px"><span class="note" style="margin:0">Hidden:</span>' + (hd.m ? '<button type="button" class="cbtn" data-kshide="m">Show monthly sell</button>' : "") + (hd.w ? '<button type="button" class="cbtn" data-kshide="w">Show weekly sell</button>' : "") + "</div>"; }
 document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-kshide]") : null; if (!b || !b.closest("#ksbox")) return; const k = b.dataset.kshide; KS.hide = Object.assign({}, KS.hide || {}); KS.hide[k] = !KS.hide[k]; if (KS.hide.m && KS.hide.w) KS.hide[k === "m" ? "w" : "m"] = false; ksSave(); ksPaint(true); });
+function ksBmInner() {
+  const rows = ksRows().filter(r => { const P = KS.pos[r.id] || {}; return isFinite(r.strike) && r.side && +P.entry > 0; });
+  if (!rows.length) return "";
+  const emp = v => v == null || v === "", num = v => (emp(v) ? NaN : +v), cls = v => (v >= 0 ? "good" : "bad"), money = v => (isFinite(v) ? '<b style="color:var(--' + cls(v) + ')">' + (v >= 0 ? "+" : "-") + "Rs " + Math.abs(Math.round(v)).toLocaleString("en-IN") + "</b>" : "-");
+  let tot = 0, nt = 0, newest = 0;
+  const body = rows.map(r => {
+    const P = KS.pos[r.id] || {}, qty = emp(P.qty) ? KS.lot : +P.qty, en = +P.entry, ex = num(P.exit), closed = isFinite(ex), expR = ksSoldExp(r), Kh = ksHedgeStrike(r), hpv = num(P.hp), hd = isFinite(Kh);
+    let cur = NaN, tag = "", t0 = 0;
+    if (closed) cur = ex; else { const lv = KS.auto ? ksLive(expR, r.strike, r.side) : NaN; if (isFinite(lv)) { cur = lv; tag = "live"; } else if (!emp(P.cur)) { cur = +P.cur; tag = "typed"; } else if (KS.auto) { const l = ksLast(expR, r.strike, r.side); if (l) { cur = l.p; tag = "last " + ksLastWhen(l.t); t0 = l.t; } } }
+    let hnow = NaN; if (hd && isFinite(hpv)) { const hx = num(P.hx); if (isFinite(hx)) hnow = hx; else { const lh = KS.auto ? ksLive(ksHedgeExp(r, expR), Kh, r.side) : NaN; if (isFinite(lh)) hnow = lh; else if (!emp(P.hc)) hnow = +P.hc; else if (KS.auto) { const l = ksLast(ksHedgeExp(r, expR), Kh, r.side); if (l) hnow = l.p; } } }
+    const pl = isFinite(cur) ? (en - cur) * qty + (hd && isFinite(hpv) && isFinite(hnow) ? (hnow - hpv) * qty : 0) : NaN, tg = en * 0.2;
+    if (isFinite(pl)) { tot += pl; nt++; }
+    return "<tr><td><b>" + (r.rule === "ITM" ? "Monthly" : "Weekly") + " sell " + Math.round(r.strike) + " " + r.side + '</b> <span class="note" style="margin:0">' + esc(expR) + (hd ? ", hedge " + Math.round(Kh) + " " + r.side : "") + (closed ? ", closed" : "") + '</span></td><td class="num">' + fmt(en, 2) + '</td><td class="num">' + fmt(qty, 0) + '</td><td class="num">' + (isFinite(cur) ? fmt(cur, 2) : "-") + (tag ? ' <span class="note" style="margin:0">' + esc(tag) + "</span>" : "") + '</td><td class="num">' + fmt(tg, 2) + '</td><td class="num">' + money(pl) + (isFinite(cur) && !closed && cur <= tg ? " &#9989; exit price reached" : "") + "</td></tr>";
+  }).join("");
+  return '<div class="wrap"><table><tr><th>Option trade</th><th>Entry</th><th>Qty</th><th>Now</th><th>Exit at 80%</th><th>P&amp;L (with hedge)</th></tr>' + body + (nt > 1 ? '<tr><td colspan="5"><b>Total</b></td><td class="num">' + money(tot) + "</td></tr>" : "") + '</table></div><p class="note">Entered in the Options tab. Prices refresh every 30 seconds while this page is open. "last" means NSE did not answer and the last price it gave (with the time) is shown.</p>';
+}
+function ksBmHTML() { const i = ksBmInner(); return '<div id="ksbm">' + (i ? '<h2 class="hb hbn">&#127919; Option trades</h2>' + i : "") + "</div>"; }
+setInterval(() => { try { const b = document.getElementById("ksbm"); if (!b || document.hidden) return; if (KS.auto && typeof liveHours === "function" && liveHours()) ksLiveGo(false); const i = ksBmInner(); b.innerHTML = i ? '<h2 class="hb hbn">&#127919; Option trades</h2>' + i : ""; } catch (e) {} }, 30 * 1000);
 function ksHTML() {
   const n50 = opN50(), bars = ksBars(), spot = n50 && isFinite(+n50.last) ? +n50.last : (bars && bars.length ? bars[bars.length - 1].close : NaN), rows = ksRows();
   const inp = (id, key, v) => '<input type="number" step="any" data-ksp="' + id + ":" + key + '" value="' + (v == null || v === "" ? "" : v) + '">';
@@ -2025,6 +2043,7 @@ function overviewHTML(rows) {
   let h = "<h2>Watchlist</h2><div class=\"wrap\"><table><tr><th>Stock</th><th>Price</th><th>Today</th><th>From 52w high</th><th>Level below</th><th>Level above</th><th>R:R</th><th>PEAD</th><th>Status</th></tr>" + body + "</table></div>";
   h += '<p class="note">Tap a row to open that stock. R:R is the distance to the next saved level above divided by the distance to the next one below. Status is a prompt to look closer: Review now means a support broke, a stop was hit or the move today was large; Watch means price is near a level, stretched, or above a broker target.</p>';
   try { h += bmApi.html(); } catch (e) {}
+  try { h += ksBmHTML(); } catch (e) {}
   h += '<div id="cues">' + safeCues() + "</div>";
   h += '<div id="mkt">' + safeMarket() + "</div>";
   h += safeMacro();
