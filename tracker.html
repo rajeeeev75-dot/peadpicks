@@ -1483,7 +1483,7 @@ function ksAlertCheck() {
     if (!isFinite(r.strike) || !r.side) return; const P = KS.pos[r.id] || {}; if (P.exit != null && P.exit !== "") return;
     const en = +P.entry; if (!(en > 0)) return; const exp = ksSoldExp(r), cur = ksLive(exp, r.strike, r.side); if (!isFinite(cur)) return;
     const tg = en * 0.2, lvl = cur <= tg ? "hit" : cur <= tg * 1.1 ? "near" : ""; if (!lvl) return;
-    const key = r.id + "|" + Math.round(r.strike) + r.side + "|" + exp + "|" + day + "|" + lvl; if (ksAlSent[key]) return;
+    const key = r.id + "|" + Math.round(r.strike) + r.side + "|" + exp + "|" + en + "|" + day + "|" + lvl; if (ksAlSent[key]) return;
     if (lvl === "near" && ksAlSent[key.replace("|near", "|hit")]) return;
     ksAlSent[key] = 1; try { const ks = Object.keys(ksAlSent); if (ks.length > 60) ks.slice(0, ks.length - 60).forEach(x => delete ksAlSent[x]); localStorage.setItem("ksAlSent", JSON.stringify(ksAlSent)); } catch (e) {}
     const nm = (r.rule === "ITM" ? "Monthly" : "Weekly") + " sell " + Math.round(r.strike) + " " + r.side, msg = (lvl === "hit" ? "EXIT PRICE REACHED: " : "Close to exit price: ") + nm + " is at " + fmt(cur, 2) + " (exit at 80% = " + fmt(tg, 2) + ")";
