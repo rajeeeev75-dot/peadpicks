@@ -2484,7 +2484,7 @@ function skeleton(tk) {
 const LB = {};
 const lbSym = tk => { try { return isNiftyTk(tk) || symTk(tk) ? "NIFTY" : symOf(tk); } catch (e) { return ""; } };
 const chartBarsOf = tk => { const l = LB[String(tk).toUpperCase()]; if (l && l.bars && l.bars.length > 30) return l.bars; return (HIST && HIST[histKey(tk)]) || null; };
-const chartStamp = tk => { const l = LB[String(tk).toUpperCase()]; return histVer + ":" + (l && l.bars ? l.t : 0); };
+const chartStamp = tk => { const l = LB[String(tk).toUpperCase()]; return histVer + ":" + (l && l.bars ? l.t : 0) + (symTk(tk) && typeof MARKET !== "undefined" && MARKET ? ":" + MARKET.asOf : ""); };
 async function lbLoad(tk, force) {
   const key = String(tk).toUpperCase(), sym = lbSym(tk); if (!sym || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return;
   const o = LB[key]; if (o && o.busy) return; if (!force && o && o.bars && Date.now() - o.t < 4 * 60e3) return;
@@ -2560,9 +2560,22 @@ function buildChart(tk, box) {
   MAS.forEach(m => { maOn[m.n] = m.n !== 200; ma[m.n] = chart.addLineSeries({color: m.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: maOn[m.n]}); });
   let ind = null; try { ind = indAttach(chart, candle, null, {vs: vol, base: {top: 0.06, bottom: 0.24}}); } catch (e) {}
   CH[tk] = {chart, candle, vol, ma, maOn, lines: [], ver: -1, range: "6M", bars: null, ind};
+  if (symTk(tk)) {   // symbol text follows the chart font size, so grow it with the candle width (zoom in = bigger symbols)
+    let cur = 12, tm = 0;
+    const fit = () => { try { const r = chart.timeScale().getVisibleLogicalRange(), w = chart.timeScale().width(); if (!r || !(w > 0)) return; const bs = w / Math.max(1, r.to - r.from), fs = Math.round(Math.max(13, Math.min(18, 9 + bs * 0.15))); if (fs !== cur) { cur = fs; chart.applyOptions({layout: {fontSize: fs}}); } } catch (e) {} };
+    try { chart.timeScale().subscribeVisibleLogicalRangeChange(() => { clearTimeout(tm); tm = setTimeout(fit, 80); }); } catch (e) {}
+    setTimeout(fit, 300);
+  }
 }
 function setChartData(tk) {
-  const s = CH[tk], bars = chartBarsOf(tk), c = colors();
+  const s = CH[tk], c = colors(); let bars = chartBarsOf(tk);
+  if (symTk(tk) && bars && bars.length) { try {   // the price feed can miss the latest day: add it from the live NSE quote so that day's symbols still show
+    const n = opN50(), MM = typeof MARKET !== "undefined" ? MARKET : null, ao = String((MM && MM.asOf) || ""), mo = {jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12};
+    let D = ""; const m1 = ao.match(/(\d{1,2})-([A-Za-z]{3})[a-z]*-(\d{4})/), m2 = ao.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m1 && mo[m1[2].toLowerCase()]) D = m1[3] + "-" + String(mo[m1[2].toLowerCase()]).padStart(2, "0") + "-" + m1[1].padStart(2, "0"); else if (m2) D = m2[0];
+    const last = bars[bars.length - 1], px = n && +n.last;
+    if (D && px > 0 && last.time < D && symList(D).length) { const pv = +n.prev > 0 ? +n.prev : last.close; bars = bars.concat([{time: D, open: +n.open > 0 ? +n.open : pv, high: Math.max(+n.high || px, px), low: Math.min(+n.low > 0 ? +n.low : px, px), close: px, vol: 0, synth: true}]); }
+  } catch (e) {} }
   s.bars = bars; s.src = chartStamp(tk);
   s.candle.setData(bars.map(b => ({time: b.time, open: b.open, high: b.high, low: b.low, close: b.close})));
   s.vol.setData(bars.map(b => ({time: b.time, value: b.vol, color: withAlpha(b.close >= b.open ? c.up : c.dn, "66")})));
@@ -3815,16 +3828,25 @@ async function wvLoad() {
   } catch (e) { /* the page cannot read the list (site blocks it): the plain link below still works */ }
   clearTimeout(killer); wvBusy = false; try { nwPaint(); } catch (e) {}
 }
+const YT_ID = "wO0tpiqLikk", YT_URL = "https://youtu.be/wO0tpiqLikk";
+let ytOn = false;
+function ytCard() {
+  const box = ytOn
+    ? '<iframe src="https://www.youtube-nocookie.com/embed/' + YT_ID + '?autoplay=1&rel=0&fs=0&modestbranding=1&playsinline=1" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>'
+    : '<button type="button" data-ytplay="1" aria-label="Play video" style="position:absolute;inset:0;width:100%;height:100%;border:0;padding:0;cursor:pointer;background:#000 url(https://i.ytimg.com/vi/' + YT_ID + '/hqdefault.jpg) center/cover no-repeat"><span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:64px;height:44px;border-radius:12px;background:rgba(220,38,38,.92);display:flex;align-items:center;justify-content:center"><span style="border-left:18px solid #fff;border-top:11px solid transparent;border-bottom:11px solid transparent;margin-left:4px"></span></span></button>';
+  return '<article class="ncard neu"><div class="nct"><span class="nsrc" style="background:#dc2626">YouTube</span><span class="ntime">Plays here</span></div><div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000">' + box + '</div><div class="nft"><span class="nimp">&#9654; Video</span><a class="nrd" href="' + YT_URL + '" target="_blank" rel="noopener noreferrer">Open on YouTube &#8599;</a></div></article>';
+}
+document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-ytplay]") : null; if (!b) return; ytOn = true; try { nwPaint(); } catch (e) {} });
 function wvHTML() {
   let h = "<h2>WealthView weekly outlook</h2>";
   if (WV && WV.length) {
-    h += '<div class="ngrid">' + WV.slice(0, 3).map(x => {
+    h += '<div class="ngrid">' + WV.slice(0, 2).map(x => {
       const href = esc(x.l);
       return '<article class="ncard neu"><div class="nct"><span class="nsrc" style="background:#0891b2">WealthView</span><span class="ntime">' + esc(new Date(x.d).toLocaleDateString("en-GB", {day: "numeric", month: "short", year: "numeric"})) + "</span></div>" +
         '<h3 class="nttl"><a href="' + href + '" target="_blank" rel="noopener noreferrer">' + esc(x.t) + "</a></h3>" +
         '<div class="nft"><span class="nimp">&#9679; Weekly outlook</span><a class="nrd" href="' + href + '" target="_blank" rel="noopener noreferrer">Read &rarr;</a></div></article>';
-    }).join("") + "</div>";
-  } else h += '<div class="card"><p class="note" style="margin:0">Weekly Nifty key levels and time-cycle outlook from WealthView Analytics.</p></div>';
+    }).join("") + ytCard() + "</div>";
+  } else h += '<div class="ngrid">' + ytCard() + '</div><div class="card"><p class="note" style="margin:0">Weekly Nifty key levels and time-cycle outlook from WealthView Analytics.</p></div>';
   return h + '<p class="note" style="margin:6px 2px 14px"><a href="' + WV_URL + '" target="_blank" rel="noopener noreferrer">All WealthView articles &#8599;</a></p>';
 }
 function nwPaint() {
