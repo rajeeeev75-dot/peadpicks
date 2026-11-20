@@ -8354,7 +8354,6 @@ function show(id) {
   if (id === "cu") { try { cuPaint(); } catch (e) {} }
   if (id === "mb") { try { mbPaint(); } catch (e) {} }
   if (id === "sw") { try { swPaint(); } catch (e) {} }
-  if (id === "op") { try { opPaint(); } catch (e) {} }
   ensureChart(sec);
   if (sec) { const cs = getComputedStyle(sec); document.documentElement.style.setProperty("--a", cs.getPropertyValue("--a")); document.documentElement.style.setProperty("--b", cs.getPropertyValue("--b")); }
 }
@@ -8420,7 +8419,7 @@ function render(stocks) {
   const isIx = r => { try { return !!isIdxStock(r.s, r.c) || /^NIFTY\s*50$/i.test(String(r.s.short || "").trim()); } catch (e) { return false; } };
   const btnOf = (r, i) => { const p = PALETTE[i % PALETTE.length]; return '<button role="tab" data-t="' + r.id + '" aria-selected="false" style="--a:' + p[0] + ";--b:" + p[1] + '">' + esc(r.s.short) + "</button>"; };
   const stockBtns = rows.map((r, i) => (isIx(r) ? "" : btnOf(r, i))).join(""), idxBtns = rows.map((r, i) => (isIx(r) ? btnOf(r, i) : "")).join("");
-  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="mb" aria-selected="false" style="--a:#0f766e;--b:#22c55e">Breakout</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="cc" aria-selected="false" style="--a:#0e7490;--b:#2563eb">Trade</button><button role="tab" data-t="op" aria-selected="false" style="--a:#7c3aed;--b:#db2777">Options</button>';
+  tabs.innerHTML = '<button role="tab" data-t="ov" aria-selected="false">Overview</button>' + '<button role="tab" data-t="nw" aria-selected="false" style="--a:#d97706;--b:#dc2626">News &amp; events</button><button role="tab" data-t="ix" aria-selected="false" style="--a:#0891b2;--b:#2563eb">Intraday</button><button role="tab" data-t="pp" aria-selected="false" style="--a:#059669;--b:#0d9488">PEAD</button><button role="tab" data-t="zn" aria-selected="false" style="--a:#059669;--b:#0d9488">ZONE</button><button role="tab" data-t="tc" aria-selected="false" style="--a:#4f46e5;--b:#06b6d4">Time Cycle</button><button role="tab" data-t="cu" aria-selected="false" style="--a:#b45309;--b:#0891b2">Cup &amp; Handle</button><button role="tab" data-t="mb" aria-selected="false" style="--a:#0f766e;--b:#22c55e">Breakout</button><button role="tab" data-t="cb" aria-selected="false" style="--a:#be123c;--b:#f59e0b">Combo</button><button role="tab" data-t="cc" aria-selected="false" style="--a:#0e7490;--b:#2563eb">Trade</button>';
   const side = document.getElementById("side");
   if (side) { const wasOpen = side.querySelector("details") ? side.querySelector("details").open : window.innerWidth >= 1000; side.innerHTML = '<div class="sl sidetop" style="background:var(--card);border-radius:14px;box-shadow:var(--shadow);padding:8px 12px;margin-bottom:10px">' + idxBtns + '<button role="tab" data-t="n5" aria-selected="false" style="--a:#0f766e;--b:#2563eb">NIFTY 500</button><button role="tab" data-t="mx" aria-selected="false" style="--a:#b45309;--b:#eab308">MCX</button></div><details id="sided"' + (wasOpen ? " open" : "") + '><summary>Watchlist (' + rows.filter(r => !isIx(r)).length + ')</summary><div class="sl">' + stockBtns + "</div></details>"; }
   const curNode = document.getElementById(current), curTk = curNode && curNode.dataset ? curNode.dataset.tk : null;
@@ -8473,10 +8472,6 @@ function render(stocks) {
     const cu = document.createElement("section"); cu.className = "stock"; cu.id = "cu"; cu.style.cssText = "--a:#b45309;--b:#0891b2";
     cu.innerHTML = '<div id="cubody"></div>'; views.appendChild(cu);
   }
-  if (!document.getElementById("op")) {
-    const op = document.createElement("section"); op.className = "stock"; op.id = "op"; op.style.cssText = "--a:#7c3aed;--b:#db2777";
-    op.dataset.ctk = SYMKEY; op.innerHTML = '<div class="znhead"><div><h2>OPTIONS</h2><span>Nifty chart with the sheet symbols, symbol guide and strategies</span></div><div class="znpills"><span>Smiley symbols</span><span>Strategies</span></div></div><div id="opstrip"></div><div id="opoi"></div><div class="chartslot"></div><div id="opbody"></div>'; views.appendChild(op);
-  }
   if (!document.getElementById("mb")) {
     const mb = document.createElement("section"); mb.className = "stock"; mb.id = "mb"; mb.style.cssText = "--a:#0f766e;--b:#22c55e";
     mb.innerHTML = '<div id="mbbody"></div>'; views.appendChild(mb);
@@ -8514,7 +8509,7 @@ function render(stocks) {
     r.A = alerts(r.s, r.c, o); $("#po-" + r.id).innerHTML = posOut(r.s, r.c); $("#al-" + r.id).innerHTML = chips(r.A); refreshLines(t); $("#ov").innerHTML = overviewHTML(lastRows);
     $("#ov").querySelectorAll("tr[data-go]").forEach(tr => tr.addEventListener("click", () => show(tr.dataset.go)));
   }));
-  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "cc" || current === "st" || current === "n5" || current === "cu" || current === "mb" || current === "op" ? current : "ov");
+  show(rows.some(r => r.id === current) || current === "ov" || current === "pp" || current === "ix" || current === "nw" || current === "zn" || current === "tc" || current === "rm" || current === "cb" || current === "cc" || current === "st" || current === "n5" || current === "cu" || current === "mb" ? current : "ov");
 }
 const $ = s => document.querySelector(s);
 function setMode(cls, txt) { const m = $("#mode"); m.className = "mode " + cls; m.textContent = txt; }
