@@ -3834,7 +3834,7 @@ function ytCard() {
   const box = ytOn
     ? '<iframe src="https://www.youtube-nocookie.com/embed/' + YT_ID + '?autoplay=1&rel=0&fs=0&modestbranding=1&playsinline=1" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>'
     : '<button type="button" data-ytplay="1" aria-label="Play video" style="position:absolute;inset:0;width:100%;height:100%;border:0;padding:0;cursor:pointer;background:#000 url(https://i.ytimg.com/vi/' + YT_ID + '/hqdefault.jpg) center/cover no-repeat"><span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:64px;height:44px;border-radius:12px;background:rgba(220,38,38,.92);display:flex;align-items:center;justify-content:center"><span style="border-left:18px solid #fff;border-top:11px solid transparent;border-bottom:11px solid transparent;margin-left:4px"></span></span></button>';
-  return '<article class="ncard neu"><div class="nct"><span class="nsrc" style="background:#dc2626">YouTube</span><span class="ntime">Plays here</span></div><div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000">' + box + '</div><div class="nft"><span class="nimp">&#9654; Video</span><a class="nrd" href="' + YT_URL + '" target="_blank" rel="noopener noreferrer">Open on YouTube &#8599;</a></div></article>';
+  return '<article class="ncard neu" id="ytcard"><div class="nct"><span class="nsrc" style="background:#dc2626">YouTube</span><span class="ntime">Plays here</span></div><div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000">' + box + '</div><div class="nft"><span class="nimp">&#9654; Video</span><a class="nrd" href="' + YT_URL + '" target="_blank" rel="noopener noreferrer">Open on YouTube &#8599;</a></div></article>';
 }
 document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-ytplay]") : null; if (!b) return; ytOn = true; try { nwPaint(); } catch (e) {} });
 function wvHTML() {
@@ -3851,11 +3851,16 @@ function wvHTML() {
 }
 function nwPaint() {
   const o = document.getElementById("nwbody"); if (!o) return;
-  let h = ""; try { h += wvHTML(); } catch (e) {}
+  if (!o.querySelector("#wvarea")) o.innerHTML = '<div id="wvarea"></div><div id="nwrest"></div>';
+  const area = o.querySelector("#wvarea"), rest = o.querySelector("#nwrest");
+  let wv = ""; try { wv = wvHTML(); } catch (e) {}
+  // while the video is playing, never rebuild its player (that would restart the video): refresh only the other cards
+  if (ytOn && area.querySelector("#ytcard iframe")) { const t = document.createElement("div"); t.innerHTML = wv; const olds = [...area.querySelectorAll("article:not(#ytcard)")], news = [...t.querySelectorAll("article:not(#ytcard)")]; if (olds.length === news.length) olds.forEach((a, i) => { if (a.outerHTML !== news[i].outerHTML) a.replaceWith(news[i]); }); } else area.innerHTML = wv;
+  let h = "";
   try { wvLoad(); } catch (e) {} try { h += mnHTML(); } catch (e) { h += '<div class="card"><p class="note">Problem drawing news: ' + esc(e && e.message) + "</p></div>"; }
   try { h += astroHTML(); } catch (e) { h += '<div class="card"><p class="note">Problem drawing the astro calendar: ' + esc(e && e.message) + "</p></div>"; }
   try { h += eventsHTML(); } catch (e) {}
-  o.innerHTML = h;
+  rest.innerHTML = h;
 }
 document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-nwf]") : null; if (b) { MN_FILTER = b.getAttribute("data-nwf"); MN_SHOW = 12; nwPaint(); return; } const m = ev.target && ev.target.closest ? ev.target.closest("[data-nwmore]") : null; if (m) { MN_SHOW += 12; nwPaint(); } });
 setInterval(() => { if (current === "nw") mnLoad(true); }, 10 * 60 * 1000);
