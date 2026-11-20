@@ -1693,11 +1693,15 @@ function nzPanel() {
       const D = g.date, bar = barOf(D), lvl = bar ? (d === 2 ? bar.high : bar.low) : NaN, K = isFinite(lvl) ? (d === 2 ? ksFloor(lvl - KS.itm, S) : ksCeil(lvl + KS.itm, S)) : NaN, nd = nextTD(D), opp = 3 - d;
       const chips = g.list.filter(e => (e.k === "V" || e.k === "Y") && e.d === d).map(chip).join(" ");
       const a = mD.find(x => x.date === nd && x.list.some(e => ["B", "Y", "V"].indexOf(e.k) >= 0 && e.d === opp)), b3 = mD.find(x => x.date > nd && x.list.some(e => (e.k === "Y" || e.k === "V") && e.d === opp));
+      // the direction has already changed (a later opposite Yellow / Violet smiley): this old signal is no longer shown, only the new direction's card is
+      if (b3 || (a && a.list.some(e => (e.k === "Y" || e.k === "V") && e.d === opp))) return;
+      const gp = mD.find(x => x.date < D && x.list.some(e => (e.k === "V" || e.k === "Y") && e.d === opp));
       const st = nd > today ? "Starts " + ksDayName(nd) : nd === today ? '<span class="ksok">ENTRY DAY</span>' : "Running since " + ksDayName(nd); n++;
       html += card(d === 1 ? "pe" : "ce", "Monthly sell (" + KS.itm + " ITM)", st,
         hero(d, K, "<span>Signal: " + chips + " Smiley " + (d === 1 ? "support" : "resistance") + " on <b>" + ksDayName(D) + "</b> (first of the month)</span><span>" + (bar ? "Signal day " + (d === 1 ? "low " + fmt(bar.low, 2) : "high " + fmt(bar.high, 2)) : "No Nifty candle for that date yet") + "</span>") +
         para("Sell the monthly <b>" + (d === 1 ? "PE" : "CE") + "</b> on the next trading day, " + KS.itm + " points in the money. Look for as high a premium as possible. Monthly expiry: <b>" + ksDayName(mexp) + "</b>. Exit when expiry arrives and you keep the full premium, or when 80% of the premium is recovered within the first 1 or 2 weeks.") +
         hedge(d, K, KS.hptsM || 600, true) +
+        (gp ? para('<b class="ksbad">Direction change:</b> this replaces the monthly ' + (d === 1 ? "CE" : "PE") + " sell from the " + ksDayName(gp.date) + " signal. If that trade is still open, exit it.") : "") +
         (a ? para('<b class="ksbad">Rule 3 (a): an opposite smiley came the next day (' + ksDayName(a.date) + "). Direction changes: exit this trade and sell a " + (d === 1 ? "CE" : "PE") + " instead, and hold to monthly expiry.</b>") : "") +
         (b3 ? para('<b class="ksbad">Rule 3 (b): an opposite Yellow / Violet smiley came on ' + ksDayName(b3.date) + ". Direction changes: exit this trade and sell a " + (d === 1 ? "CE" : "PE") + " instead, and hold to monthly expiry.</b>") : "") +
         (ksDayName(D) && isFinite(K) ? '<div style="margin-top:10px"><button type="button" class="cbtn" data-nzm="' + D + ":" + (d === 1 ? "LOW" : "HIGH") + '">Use in the strike selector below</button></div>' : ""));
@@ -1738,6 +1742,7 @@ function nzPanel() {
           para("Exit the sold option when its premium has melted 80%. Exit the bought option at your target, if the smiley changes direction before monthly expiry, or at 3:29 pm on monthly expiry day. Use about 20% of capital for these. (Rule 9, smiley failure, uses a strike about 200 points away: " + fmt(Kf, 0) + ".)"));
         return;
       }
+      if (invalid) return;   // an opposite smiley came the next day (Rule 7): the direction has changed, so the old signal is not shown
       html += card(d === 1 ? "pe" : "ce", "Smiley option sell (Type 1, weekly)", invalid ? '<span class="ksbad">Invalid: an opposite smiley came the next day (Rule 7). Exit at that day\'s open.</span>' : status(D), hero(d, K, "<span>Signal: " + chips + " Smiley " + (d === 1 ? "support" : "resistance") + " on <b>" + ksDayName(D) + "</b></span><span>" + (bar ? "Signal day " + (d === 1 ? "low " + fmt(bar.low, 2) : "high " + fmt(bar.high, 2)) : "No Nifty candle for that date yet") + "</span>") +
         para("Sell the strike on the next trading day. Minimum premium: Rs 50 (Rs 40 on expiry day or the day before). If you cannot get it, skip this direction for the rest of the week unless the opposite signal comes (Rule 1). Valid for the weekly expiry only: <b>" + ksDayName(ex) + "</b> (Rule 8).") +
         para(note) + (d === 1 ? para("Carrying a sold PE overnight: buy a PE 300 points below the sold strike" + (isFinite(K) ? " (" + fmt(K - 300, 0) + " PE)" : "") + " by 3:29 pm and close it at 9:15 the next morning (Rule 6).") : "") +
