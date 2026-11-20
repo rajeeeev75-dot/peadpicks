@@ -3828,13 +3828,20 @@ async function wvLoad() {
   } catch (e) { /* the page cannot read the list (site blocks it): the plain link below still works */ }
   clearTimeout(killer); wvBusy = false; try { nwPaint(); } catch (e) {}
 }
-const YT_ID = "wO0tpiqLikk", YT_URL = "https://youtu.be/wO0tpiqLikk";
-let ytOn = false;
+const YT_CH = "@Marketin10-Minutes", YT_CH_URL = "https://www.youtube.com/@Marketin10-Minutes";
+let YT_ID = "wO0tpiqLikk", YT_TITLE = "", YT_AT = 0, ytBusy = false, ytOn = false;   // the fixed id is only the fallback until the Worker says what the newest upload is
+async function ytLoad() {
+  if (ytBusy || Date.now() - YT_AT < 10 * 60 * 1000 || typeof MARKET_API_URL === "undefined" || !MARKET_API_URL) return; ytBusy = true; YT_AT = Date.now();
+  try { const r = await fetch(MARKET_API_URL + "?ytlatest=" + encodeURIComponent(YT_CH), {cache: "no-store"}), j = await r.json();
+    if (j && /^[\w-]{11}$/.test(j.id || "") && (j.id !== YT_ID || j.title !== YT_TITLE)) { YT_ID = j.id; YT_TITLE = String(j.title || ""); if (!ytOn) { try { nwPaint(); } catch (e) {} } }
+  } catch (e) {}
+  ytBusy = false;
+}
 function ytCard() {
   const box = ytOn
     ? '<iframe src="https://www.youtube-nocookie.com/embed/' + YT_ID + '?autoplay=1&rel=0&fs=0&modestbranding=1&playsinline=1" title="YouTube video" allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="strict-origin-when-cross-origin" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>'
     : '<button type="button" data-ytplay="1" aria-label="Play video" style="position:absolute;inset:0;width:100%;height:100%;border:0;padding:0;cursor:pointer;background:#000 url(https://i.ytimg.com/vi/' + YT_ID + '/hqdefault.jpg) center/cover no-repeat"><span style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:64px;height:44px;border-radius:12px;background:rgba(220,38,38,.92);display:flex;align-items:center;justify-content:center"><span style="border-left:18px solid #fff;border-top:11px solid transparent;border-bottom:11px solid transparent;margin-left:4px"></span></span></button>';
-  return '<article class="ncard neu" id="ytcard"><div class="nct"><span class="nsrc" style="background:#dc2626">YouTube</span><span class="ntime">Plays here</span></div><div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000">' + box + '</div><div class="nft"><span class="nimp">&#9654; Video</span><a class="nrd" href="' + YT_URL + '" target="_blank" rel="noopener noreferrer">Open on YouTube &#8599;</a></div></article>';
+  return '<article class="ncard neu" id="ytcard"><div class="nct"><span class="nsrc" style="background:#dc2626">YouTube</span><span class="ntime">Latest video</span></div><div style="position:relative;width:100%;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000">' + box + '</div>' + (YT_TITLE ? '<h3 class="nttl" style="font-size:.95rem">' + esc(YT_TITLE) + "</h3>" : "") + '<div class="nft"><span class="nimp">&#9654; Market in 10-Minutes</span><a class="nrd" href="' + (YT_ID ? "https://youtu.be/" + YT_ID : YT_CH_URL) + '" target="_blank" rel="noopener noreferrer">Open on YouTube &#8599;</a></div></article>';
 }
 document.addEventListener("click", ev => { const b = ev.target && ev.target.closest ? ev.target.closest("[data-ytplay]") : null; if (!b) return; ytOn = true; try { nwPaint(); } catch (e) {} });
 function wvHTML() {
@@ -3853,7 +3860,7 @@ function nwPaint() {
   const o = document.getElementById("nwbody"); if (!o) return;
   if (!o.querySelector("#wvarea")) o.innerHTML = '<div id="wvarea"></div><div id="nwrest"></div>';
   const area = o.querySelector("#wvarea"), rest = o.querySelector("#nwrest");
-  let wv = ""; try { wv = wvHTML(); } catch (e) {}
+  let wv = ""; try { wv = wvHTML(); } catch (e) {} try { ytLoad(); } catch (e) {}
   // while the video is playing, never rebuild its player (that would restart the video): refresh only the other cards
   if (ytOn && area.querySelector("#ytcard iframe")) { const t = document.createElement("div"); t.innerHTML = wv; const olds = [...area.querySelectorAll("article:not(#ytcard)")], news = [...t.querySelectorAll("article:not(#ytcard)")]; if (olds.length === news.length) olds.forEach((a, i) => { if (a.outerHTML !== news[i].outerHTML) a.replaceWith(news[i]); }); } else area.innerHTML = wv;
   let h = "";
